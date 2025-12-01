@@ -17,7 +17,10 @@ classifiers = [
 ]
 dependencies = [
     "loguru",
+    "marimo>=0.18.1",
+    "matplotlib>=3.10.7",
     "mkdocs",
+    "numpy>=2.2.6",
     "pip",
     "python-dotenv",
     "ruff",
