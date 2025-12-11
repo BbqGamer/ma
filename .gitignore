@@ -191,3 +191,4 @@ cython_debug/
 .pypirc
 
 __marimo__/
+reports/figures/

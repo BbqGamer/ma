@@ -16,11 +16,14 @@ classifiers = [
     "License :: OSI Approved :: MIT License"
 ]
 dependencies = [
+    "flax>=0.10.7",
+    "jax>=0.6.2",
     "loguru",
     "marimo>=0.18.1",
     "matplotlib>=3.10.7",
     "mkdocs",
     "numpy>=2.2.6",
+    "openai>=2.9.0",
     "pip",
     "python-dotenv",
     "ruff",
