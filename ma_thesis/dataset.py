@@ -13,13 +13,14 @@ app = typer.Typer()
 XRANGE = (-5, 5)
 YRANGE = (-5, 5)
 
-CURRICULUM = {"easy": ackley, "medium": smooth(ackley, 0.2, 100), "hard": smooth(ackley, 0.5, 100)}
+CURRICULUM = {"easy": smooth(ackley, 0.5, 100), "medium": smooth(ackley, 0.2, 100), "hard": ackley}
 
 
 @app.command()
 def main(
     output_path: Path = PROCESSED_DATA_DIR / "ackley.csv",
     num_samples: int = 5000,
+    noise: float = 0.1,
 ):
     logger.info("Generating dataset...")
     x_samples = np.random.uniform(XRANGE[0], XRANGE[1], num_samples)
