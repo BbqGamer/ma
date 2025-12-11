@@ -113,13 +113,17 @@ def main(
         y_hard_val = y_hard_all[val_indices]
 
     levels = df.columns[2:]
+
+    # Initialize model once before the loop
+    model = MLP().to(device)
+
     for level in levels:
         print("Training level:", level)
         y = torch.from_numpy(df[level].to_numpy()).float().unsqueeze(1).to(device)
         y_train = y[train_indices]
         y_val = y[val_indices]
 
-        model = MLP().to(device)
+        # Reset optimizer for each level, but keep model weights
         optimizer = optim.AdamW(model.parameters(), lr=1e-3)
         criterion = nn.MSELoss()
 
@@ -211,7 +215,7 @@ def main(
         plt.title(f"Learning Curves - {level}")
         plt.legend()
         plt.grid(True)
-        plt.savefig(f"reports/figures/learning_curve_{level}.png")
+        plt.savefig(f"reports/figures/cl_learning_curve_{level}.png")
         plt.close()
 
         # Plotting Surface
@@ -235,7 +239,7 @@ def main(
         ax2.set_title("Neural Network Approximation")
 
         plt.tight_layout()
-        plt.savefig(f"reports/figures/ackley_learned_{level}.png")
+        plt.savefig(f"reports/figures/cl_ackley_learned_{level}.png")
 
 
 if __name__ == "__main__":
