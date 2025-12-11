@@ -19,7 +19,7 @@ CURRICULUM = {"easy": smooth(ackley, 0.5, 100), "medium": smooth(ackley, 0.2, 10
 @app.command()
 def main(
     output_path: Path = PROCESSED_DATA_DIR / "ackley.csv",
-    num_samples: int = 5000,
+    num_samples: int = 20000,
     noise: float = 0.1,
 ):
     logger.info("Generating dataset...")

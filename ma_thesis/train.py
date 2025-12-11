@@ -1,125 +1,242 @@
-from functools import partial
+import os
+from pathlib import Path
 
-from flax import linen as nn
-import jax
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-import optax
+import polars as pl
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import typer
 
-from ma_thesis.data import ackley
+from ma_thesis.config import PROCESSED_DATA_DIR
+
+# Create necessary directories
+os.makedirs("reports/figures", exist_ok=True)
+
+app = typer.Typer()
 
 
-def generate_data(n_samples=2000, key=None):
-    if key is None:
-        key = jax.random.PRNGKey(0)
+def ackley(x: torch.Tensor) -> torch.Tensor:
+    """PyTorch implementation of the Ackley function."""
+    a = 20
+    b = 0.2
+    c = 2 * np.pi
+    d = x.shape[1]
 
-    key, subkey = jax.random.split(key)
-    x_train = jax.random.uniform(subkey, (n_samples, 2), minval=-5.0, maxval=5.0)
-    y_train = ackley(x_train).reshape(-1, 1)
+    sum_sq = torch.sum(x**2, dim=1, keepdim=True)
+    sum_cos = torch.sum(torch.cos(c * x), dim=1, keepdim=True)
+
+    term1 = -a * torch.exp(-b * torch.sqrt(sum_sq / d))
+    term2 = -torch.exp(sum_cos / d)
+
+    return term1 + term2 + a + np.e
+
+
+def generate_data(n_samples=2000, seed=0, device="cpu"):
+    """Generates training data directly on the device."""
+    # Use a specific generator for reproducibility
+    g = torch.Generator(device=device)
+    g.manual_seed(seed)
+
+    # Generate on device to save transfer time
+    x_train = (10.0 * torch.rand(n_samples, 2, device=device, generator=g)) - 5.0
+    y_train = ackley(x_train)
 
     return x_train, y_train
 
 
+def init_weights_lecun(m):
+    """
+    Matches Flax's default 'lecun_normal' initialization.
+    Flax Dense uses truncated normal with stddev = 1/sqrt(fan_in).
+    """
+    if isinstance(m, nn.Linear):
+        # LeCun Normal: mean=0, std=sqrt(1/fan_in)
+        # PyTorch equivalent is roughly kaiming_normal_ with nonlinearity='linear'
+        nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="linear")
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+
+
 class MLP(nn.Module):
-    @nn.compact
-    def __call__(self, x):
-        x = nn.Dense(64)(x)
-        x = nn.tanh(x)
-        x = nn.Dense(64)(x)
-        x = nn.tanh(x)
-        x = nn.Dense(64)(x)
-        x = nn.tanh(x)
-        x = nn.Dense(1)(x)
-        return x
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(2, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
+            nn.Linear(64, 1),
+        )
+        # Apply the Flax-like initialization
+        self.apply(init_weights_lecun)
+
+    def forward(self, x):
+        return self.net(x)
 
 
-def mse_loss(params, model, x_batch, y_batch):
-    preds = model.apply(params, x_batch)
-    return jnp.mean((preds - y_batch) ** 2)
+@app.command()
+def main(
+    input_path: Path = PROCESSED_DATA_DIR / "ackley.csv",
+    patience: int = 10,
+    min_delta: float = 1e-4,
+):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    df = pl.read_csv(input_path)
+    X = torch.from_numpy(df[:, :2].to_numpy()).float().to(device)
 
+    # Prepare hard targets for evaluation
+    if "hard" in df.columns:
+        y_hard_all = torch.from_numpy(df["hard"].to_numpy()).float().unsqueeze(1).to(device)
+    else:
+        print("Warning: 'hard' column not found. Hard validation loss will be skipped.")
+        y_hard_all = None
 
-@partial(jax.jit, static_argnames=["model", "optimizer"])
-def train_step(params, opt_state, x_batch, y_batch, model, optimizer):
-    """
-    Performs a single training step.
-    Returns: new_params, new_opt_state, loss_value
-    """
-    loss_val, grads = jax.value_and_grad(mse_loss)(params, model, x_batch, y_batch)
-    updates, new_opt_state = optimizer.update(grads, opt_state, params)
-    new_params = optax.apply_updates(params, updates)
-    return new_params, new_opt_state, loss_val
+    # Split into train and validation (80/20) - consistent across levels
+    num_samples = X.shape[0]
+    n_val = int(0.2 * num_samples)
+    n_train = num_samples - n_val
 
+    # Shuffle indices once for splitting
+    perm = torch.randperm(num_samples, device=device)
+    train_indices = perm[:n_train]
+    val_indices = perm[n_train:]
 
-def main():
-    key = jax.random.PRNGKey(42)
-    x_train, y_train = generate_data(n_samples=5000, key=key)
+    X_train = X[train_indices]
+    X_val = X[val_indices]
 
-    model = MLP()
-    key, init_key = jax.random.split(key)
-    params = model.init(init_key, jnp.ones((1, 2)))
+    if y_hard_all is not None:
+        y_hard_val = y_hard_all[val_indices]
 
-    learning_rate = 1e-3
-    optimizer = optax.adamw(learning_rate)
-    opt_state = optimizer.init(params)
+    levels = df.columns[2:]
+    for level in levels:
+        print("Training level:", level)
+        y = torch.from_numpy(df[level].to_numpy()).float().unsqueeze(1).to(device)
+        y_train = y[train_indices]
+        y_val = y[val_indices]
 
-    epochs = 1000
-    batch_size = 64
-    num_samples = x_train.shape[0]
-    steps_per_epoch = num_samples // batch_size
+        model = MLP().to(device)
+        optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+        criterion = nn.MSELoss()
 
-    print(f"Starting training on {num_samples} samples...")
+        epochs = 1000
+        batch_size = 64
+        steps_per_epoch = n_train // batch_size
 
-    loss_history = []
+        print(f"Starting training on {n_train} samples (validation: {n_val})...")
 
-    for epoch in range(epochs):
-        key, shuffle_key = jax.random.split(key)
-        perms = jax.random.permutation(shuffle_key, num_samples)
-        x_perm = x_train[perms]
-        y_perm = y_train[perms]
+        train_loss_history = []
+        val_loss_history = []
+        hard_val_loss_history = []
 
-        epoch_loss = 0.0
+        best_val_loss = float("inf")
+        patience_counter = 0
+        best_model_state = None
 
-        for i in range(steps_per_epoch):
-            start = i * batch_size
-            end = start + batch_size
-            x_batch = x_perm[start:end]
-            y_batch = y_perm[start:end]
+        for epoch in range(epochs):
+            perm = torch.randperm(n_train, device=device)
+            x_perm = X_train[perm]
+            y_perm = y_train[perm]
 
-            params, opt_state, loss_val = train_step(
-                params, opt_state, x_batch, y_batch, model, optimizer
+            epoch_loss = 0.0
+            model.train()
+
+            for i in range(steps_per_epoch):
+                start = i * batch_size
+                end = start + batch_size
+
+                x_batch = x_perm[start:end]
+                y_batch = y_perm[start:end]
+
+                optimizer.zero_grad(set_to_none=True)  # Slightly faster than zero_grad()
+                outputs = model(x_batch)
+                loss = criterion(outputs, y_batch)
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+
+            avg_loss = epoch_loss / steps_per_epoch
+            train_loss_history.append(avg_loss)
+
+            # Validation
+            model.eval()
+            with torch.no_grad():
+                val_outputs = model(X_val)
+                val_loss = criterion(val_outputs, y_val).item()
+                val_loss_history.append(val_loss)
+
+                hard_msg = ""
+                if y_hard_all is not None:
+                    hard_val_loss = criterion(val_outputs, y_hard_val).item()
+                    hard_val_loss_history.append(hard_val_loss)
+                    hard_msg = f" | Hard Val Loss: {hard_val_loss:.5f}"
+
+            if val_loss < best_val_loss - min_delta:
+                best_val_loss = val_loss
+                patience_counter = 0
+                # Save best model state (copy to CPU to avoid keeping graph)
+                best_model_state = {k: v.cpu() for k, v in model.state_dict().items()}
+            else:
+                patience_counter += 1
+
+            print(
+                f"Epoch {epoch} | Train Loss: {avg_loss:.5f} | Val Loss: {val_loss:.5f} {hard_msg}"
             )
-            epoch_loss += loss_val
 
-        avg_loss = epoch_loss / steps_per_epoch
-        loss_history.append(avg_loss)
+            if patience_counter >= patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
 
-        if epoch % 25 == 0:
-            print(f"Epoch {epoch} | MSE Loss: {avg_loss:.5f}")
+        print("Training complete.")
 
-    print("Training complete.")
+        if best_model_state is not None:
+            print(f"Restoring best model with val loss: {best_val_loss:.5f}")
+            model.load_state_dict(best_model_state)
 
-    fig = plt.figure(figsize=(12, 5))
+        model.eval()
 
-    grid_x = jnp.linspace(-5, 5, 100)
-    grid_y = jnp.linspace(-5, 5, 100)
-    XX, YY = jnp.meshgrid(grid_x, grid_y)
-    grid_points = jnp.stack([XX.ravel(), YY.ravel()], axis=-1)
+        # Plotting Learning Curves
+        plt.figure(figsize=(10, 6))
+        plt.plot(train_loss_history[1:], label="Train Loss")
+        plt.plot(val_loss_history[1:], label="Val Loss")
+        if y_hard_all is not None and level != "hard":
+            plt.plot(hard_val_loss_history[1:], label="Hard Val Loss", linestyle="--")
+        plt.xlabel("Epoch")
+        plt.ylabel("MSE Loss")
+        plt.title(f"Learning Curves - {level}")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"reports/figures/learning_curve_{level}.png")
+        plt.close()
 
-    true_values = ackley(grid_points).reshape(100, 100)
-    pred_values = model.apply(params, grid_points).reshape(100, 100)
+        # Plotting Surface
+        fig = plt.figure(figsize=(12, 5))
 
-    ax1 = fig.add_subplot(1, 2, 1, projection="3d")
-    ax1.plot_surface(np.array(XX), np.array(YY), np.array(true_values), cmap="viridis", alpha=0.8)
-    ax1.set_title("True Ackley Function")
+        grid_x = torch.linspace(-5, 5, 100)
+        grid_y = torch.linspace(-5, 5, 100)
+        XX, YY = torch.meshgrid(grid_x, grid_y, indexing="xy")
+        grid_points = torch.stack([XX.ravel(), YY.ravel()], dim=-1).to(device)
 
-    ax2 = fig.add_subplot(1, 2, 2, projection="3d")
-    ax2.plot_surface(np.array(XX), np.array(YY), np.array(pred_values), cmap="plasma", alpha=0.8)
-    ax2.set_title("Neural Network Approximation")
+        with torch.no_grad():
+            pred_values = model(grid_points).cpu().numpy().reshape(100, 100)
+            true_values = ackley(grid_points).cpu().numpy().reshape(100, 100)
 
-    plt.tight_layout()
-    plt.savefig("reports/figures/ackley_learned.png")
+        ax1 = fig.add_subplot(1, 2, 1, projection="3d")
+        ax1.plot_surface(XX.numpy(), YY.numpy(), true_values, cmap="viridis", alpha=0.8)
+        ax1.set_title("True Ackley Function")
+
+        ax2 = fig.add_subplot(1, 2, 2, projection="3d")
+        ax2.plot_surface(XX.numpy(), YY.numpy(), pred_values, cmap="plasma", alpha=0.8)
+        ax2.set_title("Neural Network Approximation")
+
+        plt.tight_layout()
+        plt.savefig(f"reports/figures/ackley_learned_{level}.png")
 
 
 if __name__ == "__main__":
-    main()
+    app()
