@@ -1,4 +1,3 @@
-import jax.numpy as jnp
 import numpy as np
 
 
@@ -9,16 +8,16 @@ def ackley(x):
     https://www.sfu.ca/~ssurjano/ackley.html
     """
     # Standard Ackley parameters
-    a, b, c = 20, 0.2, 2 * jnp.pi
+    a, b, c = 20, 0.2, 2 * np.pi
     d = x.shape[-1]
 
-    sum_sq = jnp.sum(x**2, axis=-1)
-    sum_cos = jnp.sum(jnp.cos(c * x), axis=-1)
+    sum_sq = np.sum(x**2, axis=-1)
+    sum_cos = np.sum(np.cos(c * x), axis=-1)
 
-    term1 = -a * jnp.exp(-b * jnp.sqrt(sum_sq / d))
-    term2 = -jnp.exp(sum_cos / d)
+    term1 = -a * np.exp(-b * np.sqrt(sum_sq / d))
+    term2 = -np.exp(sum_cos / d)
 
-    return term1 + term2 + a + jnp.exp(1)
+    return term1 + term2 + a + np.exp(1)
 
 
 def bukin_function_6(x):
