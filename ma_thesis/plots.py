@@ -31,7 +31,7 @@ def main(
         ax.set_xlabel("x1")
         ax.set_ylabel("x2")
         ax.set_zlabel("f(x)")
-        ax.set_title(col)
+        ax.title(col)
 
     fig.savefig(output_path)
 

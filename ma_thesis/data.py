@@ -32,6 +32,37 @@ def bukin_function_6(x):
     return term1 + term2
 
 
+def levy(x):
+    """
+    Computes the Levy function.
+    x: Input array of shape (batch_size, 2)
+    https://www.sfu.ca/~ssurjano/levy.html
+    """
+    x = np.asarray(x)
+    x1 = x[:, 0]
+    x2 = x[:, 1]
+    w1 = 1 + (x1 - 1) / 4
+    w2 = 1 + (x2 - 1) / 4
+    term1 = np.sin(np.pi * w1) ** 2
+    term2 = (w1 - 1) ** 2 * (1 + 10 * np.sin(np.pi * w1 + 1) ** 2)
+    term3 = (w2 - 1) ** 2 * (1 + np.sin(2 * np.pi * w2) ** 2)
+    return term1 + term2 + term3
+
+
+def eggholder(x):
+    """
+    Computes the Eggholder function.
+    x: Input array of shape (batch_size, 2)
+    https://www.sfu.ca/~ssurjano/egg.html
+    """
+    x = np.asarray(x)
+    x1 = x[:, 0]
+    x2 = x[:, 1]
+    return -(x2 + 47) * np.sin(np.sqrt(np.abs(x2 + x1 / 2 + 47))) - x1 * np.sin(
+        np.sqrt(np.abs(x1 - (x2 + 47)))
+    )
+
+
 def smooth(func, window_size=0.1, samples=50):
     """
     Returns a smoothed version of `func` by Gaussian kernel averaging.
