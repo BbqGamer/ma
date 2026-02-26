@@ -73,8 +73,8 @@ def main(
         "ackley", help="Function to use: ackley, levy, eggholder, or 'all' for all functions"
     ),
     output_dir: Path = PROCESSED_DATA_DIR,
-    num_samples: int = 2000,
-    num_sigmas: int = 6,
+    num_samples: int = 4000,
+    num_sigmas: int = 3,
     sigma_scale: float = 5.0,
     seed: int = 42,
 ):

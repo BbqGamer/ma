@@ -21,6 +21,7 @@ dependencies = [
     "loguru",
     "marimo>=0.18.1",
     "matplotlib>=3.10.7",
+    "mlflow>=2.12",
     "mkdocs",
     "numpy>=2.2.6",
     "openai>=2.9.0",

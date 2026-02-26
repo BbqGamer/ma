@@ -1,49 +1,19 @@
-import os
 from pathlib import Path
 
+from loguru import logger
 import matplotlib.pyplot as plt
+import mlflow
 import numpy as np
 import polars as pl
+from scipy.interpolate import griddata
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import typer
 
-from ma_thesis.config import PROCESSED_DATA_DIR
-
-# Create necessary directories
-os.makedirs("reports/figures", exist_ok=True)
+from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
 
 app = typer.Typer()
-
-
-def ackley(x: torch.Tensor) -> torch.Tensor:
-    """PyTorch implementation of the Ackley function."""
-    a = 20
-    b = 0.2
-    c = 2 * np.pi
-    d = x.shape[1]
-
-    sum_sq = torch.sum(x**2, dim=1, keepdim=True)
-    sum_cos = torch.sum(torch.cos(c * x), dim=1, keepdim=True)
-
-    term1 = -a * torch.exp(-b * torch.sqrt(sum_sq / d))
-    term2 = -torch.exp(sum_cos / d)
-
-    return term1 + term2 + a + np.e
-
-
-def generate_data(n_samples=2000, seed=0, device="cpu"):
-    """Generates training data directly on the device."""
-    # Use a specific generator for reproducibility
-    g = torch.Generator(device=device)
-    g.manual_seed(seed)
-
-    # Generate on device to save transfer time
-    x_train = (10.0 * torch.rand(n_samples, 2, device=device, generator=g)) - 5.0
-    y_train = ackley(x_train)
-
-    return x_train, y_train
 
 
 def init_weights_lecun(m):
@@ -52,194 +22,366 @@ def init_weights_lecun(m):
     Flax Dense uses truncated normal with stddev = 1/sqrt(fan_in).
     """
     if isinstance(m, nn.Linear):
-        # LeCun Normal: mean=0, std=sqrt(1/fan_in)
-        # PyTorch equivalent is roughly kaiming_normal_ with nonlinearity='linear'
         nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="linear")
         if m.bias is not None:
             nn.init.zeros_(m.bias)
 
 
-class MLP(nn.Module):
-    def __init__(self):
+class ResBlock(nn.Module):
+    """Residual block with two linear layers and SiLU activation."""
+
+    def __init__(self, dim):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(2, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-            nn.Linear(64, 1),
+        self.block = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.SiLU(),
+            nn.Linear(dim, dim),
         )
-        # Apply the Flax-like initialization
+        self.act = nn.SiLU()
+
+    def forward(self, x):
+        return self.act(x + self.block(x))
+
+
+class MLP(nn.Module):
+    def __init__(self, hidden_dim=256, num_blocks=4):
+        super().__init__()
+        self.input_proj = nn.Sequential(
+            nn.Linear(2, hidden_dim),
+            nn.SiLU(),
+        )
+        self.blocks = nn.Sequential(*[ResBlock(hidden_dim) for _ in range(num_blocks)])
+        self.output_proj = nn.Linear(hidden_dim, 1)
         self.apply(init_weights_lecun)
 
     def forward(self, x):
-        return self.net(x)
+        x = self.input_proj(x)
+        x = self.blocks(x)
+        return self.output_proj(x)
+
+
+def plot_model_surface(model, device, x_range, y_range, grid_res, title, save_path, Zg_true=None):
+    """Render the model's current learned surface as a 3D plot."""
+    xg = np.linspace(x_range[0], x_range[1], grid_res)
+    yg = np.linspace(y_range[0], y_range[1], grid_res)
+    Xg, Yg = np.meshgrid(xg, yg)
+    grid_points = torch.from_numpy(np.column_stack([Xg.ravel(), Yg.ravel()])).float().to(device)
+
+    model.eval()
+    with torch.no_grad():
+        Zg_pred = model(grid_points).cpu().numpy().reshape(grid_res, grid_res)
+
+    ncols = 2 if Zg_true is not None else 1
+    fig = plt.figure(figsize=(7 * ncols, 5))
+
+    if Zg_true is not None:
+        ax1 = fig.add_subplot(1, 2, 1, projection="3d")
+        ax1.plot_surface(Xg, Yg, Zg_true, cmap="viridis", edgecolor="none", alpha=0.95)
+        ax1.set_title("True function")
+        ax1.set_xlabel("x1")
+        ax1.set_ylabel("x2")
+        ax1.set_zlabel("f(x)")
+        ax2 = fig.add_subplot(1, 2, 2, projection="3d")
+    else:
+        ax2 = fig.add_subplot(1, 1, 1, projection="3d")
+
+    ax2.plot_surface(Xg, Yg, Zg_pred, cmap="plasma", edgecolor="none", alpha=0.95)
+    ax2.set_title(title)
+    ax2.set_xlabel("x1")
+    ax2.set_ylabel("x2")
+    ax2.set_zlabel("f(x)")
+
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return save_path
 
 
 @app.command()
 def main(
-    input_path: Path = PROCESSED_DATA_DIR / "ackley.csv",
+    input_path: Path = PROCESSED_DATA_DIR / "ackley.parquet",
+    output_dir: Path = FIGURES_DIR,
     patience: int = 10,
     min_delta: float = 1e-4,
+    epochs: int = 1000,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    grid_res: int = 100,
+    snapshot_interval: int = 50,
+    experiment_name: str = "gaussian-continuation",
 ):
+    """
+    Train an MLP using Gaussian continuation curriculum learning.
+
+    Reads a parquet dataset generated by dataset.py with columns:
+    x1, x2, y_sigma_0 (most smoothed), ..., y_sigma_{K-1} (raw).
+    Trains sequentially through smoothing levels (curriculum).
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    df = pl.read_csv(input_path)
-    X = torch.from_numpy(df[:, :2].to_numpy()).float().to(device)
+    logger.info(f"Using device: {device}")
 
-    # Prepare hard targets for evaluation
-    if "hard" in df.columns:
-        y_hard_all = torch.from_numpy(df["hard"].to_numpy()).float().unsqueeze(1).to(device)
-    else:
-        print("Warning: 'hard' column not found. Hard validation loss will be skipped.")
-        y_hard_all = None
+    # Derive function name from filename
+    func_name = input_path.stem
+    logger.info(f"Training on {func_name} dataset from {input_path}")
 
-    # Split into train and validation (80/20) - consistent across levels
+    # Read parquet dataset
+    df = pl.read_parquet(input_path)
+    X = torch.from_numpy(df.select(["x1", "x2"]).to_numpy()).float().to(device)
+
+    # Identify sigma level columns (y_sigma_0, y_sigma_1, ...)
+    sigma_cols = sorted(
+        [col for col in df.columns if col.startswith("y_sigma_")],
+        key=lambda c: int(c.split("_")[-1]),
+    )
+    logger.info(f"Found {len(sigma_cols)} smoothing levels: {sigma_cols}")
+
+    # The last sigma column (sigma=0) is the hard/raw target
+    hard_col = sigma_cols[-1]
+    y_hard_all = torch.from_numpy(df[hard_col].to_numpy()).float().unsqueeze(1).to(device)
+    logger.info(f"Hard (raw) target column: {hard_col}")
+
+    # Split into train and validation (50/50) - consistent across levels
     num_samples = X.shape[0]
-    n_val = int(0.2 * num_samples)
+    n_val = int(0.5 * num_samples)
     n_train = num_samples - n_val
 
-    # Shuffle indices once for splitting
     perm = torch.randperm(num_samples, device=device)
     train_indices = perm[:n_train]
     val_indices = perm[n_train:]
 
     X_train = X[train_indices]
     X_val = X[val_indices]
+    y_hard_val = y_hard_all[val_indices]
 
-    if y_hard_all is not None:
-        y_hard_val = y_hard_all[val_indices]
+    # Create output directories
+    output_dir.mkdir(parents=True, exist_ok=True)
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    levels = df.columns[2:]
-
-    # Initialize model once before the loop
+    # Initialize model once before the curriculum loop
     model = MLP().to(device)
 
-    for level in levels:
-        print("Training level:", level)
-        y = torch.from_numpy(df[level].to_numpy()).float().unsqueeze(1).to(device)
-        y_train = y[train_indices]
-        y_val = y[val_indices]
+    # --- MLflow setup ---
+    mlflow.set_experiment(experiment_name)
 
-        # Reset optimizer for each level, but keep model weights
-        optimizer = optim.AdamW(model.parameters(), lr=1e-3)
-        criterion = nn.MSELoss()
+    with mlflow.start_run(run_name=f"{func_name}_curriculum") as parent_run:
+        # Log top-level parameters
+        mlflow.log_params(
+            {
+                "function": func_name,
+                "num_samples": num_samples,
+                "n_train": n_train,
+                "n_val": n_val,
+                "num_sigma_levels": len(sigma_cols),
+                "patience": patience,
+                "min_delta": min_delta,
+                "max_epochs": epochs,
+                "batch_size": batch_size,
+                "lr": lr,
+                "snapshot_interval": snapshot_interval,
+                "device": str(device),
+            }
+        )
+        # Log the input dataset as an artifact
+        mlflow.log_artifact(str(input_path), artifact_path="data")
 
-        epochs = 1000
-        batch_size = 64
-        steps_per_epoch = n_train // batch_size
+        global_step = 0  # Continuous step counter across all levels
 
-        print(f"Starting training on {n_train} samples (validation: {n_val})...")
+        # Pre-compute true surface grid for snapshot plots
+        X_np = df.select(["x1", "x2"]).to_numpy()
+        Y_hard_np = df[hard_col].to_numpy()
+        x_range = (X_np[:, 0].min(), X_np[:, 0].max())
+        y_range = (X_np[:, 1].min(), X_np[:, 1].max())
+        xg = np.linspace(x_range[0], x_range[1], grid_res)
+        yg = np.linspace(y_range[0], y_range[1], grid_res)
+        Xg, Yg = np.meshgrid(xg, yg)
+        Zg_true = griddata(X_np, Y_hard_np, (Xg, Yg), method="cubic", fill_value=np.nan)
 
-        train_loss_history = []
-        val_loss_history = []
-        hard_val_loss_history = []
+        for level_idx, level in enumerate(sigma_cols):
+            logger.info(f"Training level: {level}")
+            y = torch.from_numpy(df[level].to_numpy()).float().unsqueeze(1).to(device)
+            y_train = y[train_indices]
+            y_val = y[val_indices]
 
-        best_val_loss = float("inf")
-        patience_counter = 0
-        best_model_state = None
+            with mlflow.start_run(run_name=f"{func_name}_{level}", nested=True) as child_run:
+                mlflow.log_params(
+                    {
+                        "level": level,
+                        "level_idx": level_idx,
+                    }
+                )
 
-        for epoch in range(epochs):
-            perm = torch.randperm(n_train, device=device)
-            x_perm = X_train[perm]
-            y_perm = y_train[perm]
+                # Reset optimizer for each level, but keep model weights
+                optimizer = optim.AdamW(model.parameters(), lr=lr)
+                criterion = nn.MSELoss()
 
-            epoch_loss = 0.0
-            model.train()
+                steps_per_epoch = n_train // batch_size
+                logger.info(f"Starting training on {n_train} samples (validation: {n_val})...")
 
-            for i in range(steps_per_epoch):
-                start = i * batch_size
-                end = start + batch_size
+                train_loss_history = []
+                val_loss_history = []
+                hard_val_loss_history = []
 
-                x_batch = x_perm[start:end]
-                y_batch = y_perm[start:end]
-
-                optimizer.zero_grad(set_to_none=True)  # Slightly faster than zero_grad()
-                outputs = model(x_batch)
-                loss = criterion(outputs, y_batch)
-                loss.backward()
-                optimizer.step()
-
-                epoch_loss += loss.item()
-
-            avg_loss = epoch_loss / steps_per_epoch
-            train_loss_history.append(avg_loss)
-
-            # Validation
-            model.eval()
-            with torch.no_grad():
-                val_outputs = model(X_val)
-                val_loss = criterion(val_outputs, y_val).item()
-                val_loss_history.append(val_loss)
-
-                hard_msg = ""
-                if y_hard_all is not None:
-                    hard_val_loss = criterion(val_outputs, y_hard_val).item()
-                    hard_val_loss_history.append(hard_val_loss)
-                    hard_msg = f" | Hard Val Loss: {hard_val_loss:.5f}"
-
-            if val_loss < best_val_loss - min_delta:
-                best_val_loss = val_loss
+                best_val_loss = float("inf")
                 patience_counter = 0
-                # Save best model state (copy to CPU to avoid keeping graph)
-                best_model_state = {k: v.cpu() for k, v in model.state_dict().items()}
-            else:
-                patience_counter += 1
+                best_model_state = None
 
-            print(
-                f"Epoch {epoch} | Train Loss: {avg_loss:.5f} | Val Loss: {val_loss:.5f} {hard_msg}"
-            )
+                for epoch in range(epochs):
+                    epoch_perm = torch.randperm(n_train, device=device)
+                    x_perm = X_train[epoch_perm]
+                    y_perm = y_train[epoch_perm]
 
-            if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}")
-                break
+                    epoch_loss = 0.0
+                    model.train()
 
-        print("Training complete.")
+                    for i in range(steps_per_epoch):
+                        start = i * batch_size
+                        end = start + batch_size
 
-        if best_model_state is not None:
-            print(f"Restoring best model with val loss: {best_val_loss:.5f}")
-            model.load_state_dict(best_model_state)
+                        x_batch = x_perm[start:end]
+                        y_batch = y_perm[start:end]
 
+                        optimizer.zero_grad(set_to_none=True)
+                        outputs = model(x_batch)
+                        loss = criterion(outputs, y_batch)
+                        loss.backward()
+                        optimizer.step()
+
+                        epoch_loss += loss.item()
+
+                    avg_loss = epoch_loss / steps_per_epoch
+                    train_loss_history.append(avg_loss)
+
+                    # Validation
+                    model.eval()
+                    with torch.no_grad():
+                        val_outputs = model(X_val)
+                        val_loss = criterion(val_outputs, y_val).item()
+                        val_loss_history.append(val_loss)
+
+                        hard_val_loss = criterion(val_outputs, y_hard_val).item()
+                        hard_val_loss_history.append(hard_val_loss)
+                        hard_msg = f" | Hard Val Loss: {hard_val_loss:.5f}"
+
+                    # Log metrics to child run (per-level epoch) and parent run (global step)
+                    mlflow.log_metrics(
+                        {
+                            "train_loss": avg_loss,
+                            "val_loss": val_loss,
+                            "hard_val_loss": hard_val_loss,
+                        },
+                        step=epoch,
+                    )
+                    # Log to parent run with global step for continuous view
+                    mlflow.log_metrics(
+                        {
+                            "global/train_loss": avg_loss,
+                            "global/val_loss": val_loss,
+                            "global/hard_val_loss": hard_val_loss,
+                        },
+                        step=global_step,
+                        run_id=parent_run.info.run_id,
+                    )
+                    global_step += 1
+
+                    if val_loss < best_val_loss - min_delta:
+                        best_val_loss = val_loss
+                        patience_counter = 0
+                        best_model_state = {k: v.cpu() for k, v in model.state_dict().items()}
+                    else:
+                        patience_counter += 1
+
+                    logger.info(
+                        f"Epoch {epoch} | Train Loss: {avg_loss:.5f} | "
+                        f"Val Loss: {val_loss:.5f}{hard_msg}"
+                    )
+
+                    # Snapshot the learned surface at regular intervals
+                    if snapshot_interval > 0 and (epoch + 1) % snapshot_interval == 0:
+                        snap_path = output_dir / f"{func_name}_{level}_epoch{epoch}.png"
+                        plot_model_surface(
+                            model,
+                            device,
+                            x_range,
+                            y_range,
+                            grid_res,
+                            title=f"{func_name} — {level} — epoch {epoch}",
+                            save_path=snap_path,
+                            Zg_true=Zg_true,
+                        )
+                        mlflow.log_artifact(str(snap_path), artifact_path="snapshots")
+                        logger.info(f"Saved snapshot at epoch {epoch} → {snap_path.name}")
+
+                    if patience_counter >= patience:
+                        logger.info(f"Early stopping at epoch {epoch}")
+                        break
+
+                logger.success(f"Training complete for {level}.")
+
+                # Log summary metrics for this level
+                mlflow.log_metrics(
+                    {
+                        "best_val_loss": best_val_loss,
+                        "final_hard_val_loss": hard_val_loss_history[-1],
+                        "total_epochs": len(train_loss_history),
+                    }
+                )
+
+                if best_model_state is not None:
+                    logger.info(f"Restoring best model with val loss: {best_val_loss:.5f}")
+                    model.load_state_dict(best_model_state)
+
+                model.eval()
+
+                # --- Plot Learning Curves ---
+                fig_lc = plt.figure(figsize=(10, 6))
+                plt.plot(train_loss_history[1:], label="Train Loss")
+                plt.plot(val_loss_history[1:], label="Val Loss")
+                if level != hard_col:
+                    plt.plot(hard_val_loss_history[1:], label="Hard Val Loss", linestyle="--")
+                plt.xlabel("Epoch")
+                plt.ylabel("MSE Loss")
+                plt.title(f"{func_name} - Learning Curves - {level}")
+                plt.legend()
+                plt.grid(True)
+                lc_path = output_dir / f"{func_name}_learning_curve_{level}.png"
+                fig_lc.savefig(lc_path)
+                plt.close(fig_lc)
+                mlflow.log_artifact(str(lc_path), artifact_path="figures")
+
+                # --- Plot Surface (true vs predicted) at end of level ---
+                surf_path = output_dir / f"{func_name}_surface_{level}.png"
+                plot_model_surface(
+                    model,
+                    device,
+                    x_range,
+                    y_range,
+                    grid_res,
+                    title=f"MLP after {level} (stage {level_idx + 1}/{len(sigma_cols)})",
+                    save_path=surf_path,
+                    Zg_true=Zg_true,
+                )
+                mlflow.log_artifact(str(surf_path), artifact_path="figures")
+                # Also log to parent run for easy stage-by-stage comparison
+                mlflow.log_artifact(
+                    str(surf_path),
+                    artifact_path="stage_surfaces",
+                    run_id=parent_run.info.run_id,
+                )
+                logger.info(f"Saved end-of-stage surface → {surf_path.name}")
+
+        # Save and log final model
+        model_path = MODELS_DIR / f"{func_name}_mlp.pt"
+        torch.save(model.state_dict(), model_path)
+        mlflow.log_artifact(str(model_path), artifact_path="model")
+        logger.success(f"Final model saved to {model_path}")
+
+        # Log the final hard validation loss to the parent run
         model.eval()
-
-        # Plotting Learning Curves
-        plt.figure(figsize=(10, 6))
-        plt.plot(train_loss_history[1:], label="Train Loss")
-        plt.plot(val_loss_history[1:], label="Val Loss")
-        if y_hard_all is not None and level != "hard":
-            plt.plot(hard_val_loss_history[1:], label="Hard Val Loss", linestyle="--")
-        plt.xlabel("Epoch")
-        plt.ylabel("MSE Loss")
-        plt.title(f"Learning Curves - {level}")
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(f"reports/figures/cl_learning_curve_{level}.png")
-        plt.close()
-
-        # Plotting Surface
-        fig = plt.figure(figsize=(12, 5))
-
-        grid_x = torch.linspace(-5, 5, 100)
-        grid_y = torch.linspace(-5, 5, 100)
-        XX, YY = torch.meshgrid(grid_x, grid_y, indexing="xy")
-        grid_points = torch.stack([XX.ravel(), YY.ravel()], dim=-1).to(device)
-
         with torch.no_grad():
-            pred_values = model(grid_points).cpu().numpy().reshape(100, 100)
-            true_values = ackley(grid_points).cpu().numpy().reshape(100, 100)
-
-        ax1 = fig.add_subplot(1, 2, 1, projection="3d")
-        ax1.plot_surface(XX.numpy(), YY.numpy(), true_values, cmap="viridis", alpha=0.8)
-        ax1.set_title("True Ackley Function")
-
-        ax2 = fig.add_subplot(1, 2, 2, projection="3d")
-        ax2.plot_surface(XX.numpy(), YY.numpy(), pred_values, cmap="plasma", alpha=0.8)
-        ax2.set_title("Neural Network Approximation")
-
-        plt.tight_layout()
-        plt.savefig(f"reports/figures/cl_ackley_learned_{level}.png")
+            final_pred = model(X_val)
+            final_hard_loss = nn.MSELoss()(final_pred, y_hard_val).item()
+        mlflow.log_metric("final_hard_val_loss", final_hard_loss)
+        logger.success(f"MLflow run completed: {parent_run.info.run_id}")
 
 
 if __name__ == "__main__":
