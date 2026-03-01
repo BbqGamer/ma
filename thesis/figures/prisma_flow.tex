@@ -1,0 +1,45 @@
+\begin{tikzpicture}[
+    node distance=1.5cm,
+    every node/.style={font=\small},
+    block/.style={rectangle, draw, text width=6cm, align=center, minimum height=1.2cm},
+    decision/.style={diamond, draw, text width=2cm, align=center, aspect=2},
+    line/.style={draw, -latex'}
+]
+
+% Identification Phase
+\node[block, text width=3.5cm] (scopus) {Scopus \\ (n = \textbf{17})};
+\node[block, text width=3.5cm, right=0.4cm of scopus] (ieee) {IEEE Xplore \\ (n = \textbf{20})};
+\node[block, text width=3.5cm, right=0.4cm of ieee] (scholar) {Google Scholar \\ (n = \textbf{69})};
+\node[block, text width=3.5cm, right=0.4cm of scholar] (other) {Snowballing \\ (n = \textbf{18})};
+
+% Screening Phase
+\node[block, below=2cm of ieee, xshift=2cm] (duplicates) {Records after duplicates removed \\ (n = \textbf{123})};
+\node[block, below=1cm of duplicates] (screened) {Records screened \\ (n = \textbf{56})};
+\node[block, right=1cm of screened] (excluded) {Records excluded \\ (n = \textbf{67})};
+
+% Eligibility Phase
+\node[block, below=1cm of screened] (eligible) {Full-text articles assessed for eligibility \\ (n = \textbf{45})};
+\node[block, right=1cm of eligible] (excluded_full) {Full-text articles excluded, with reasons \\ (n = \textbf{22})};
+
+% Included Phase
+\node[block, below=1cm of eligible] (included_qual) {Studies included in qualitative synthesis \\ (n = \textbf{23})};
+
+% Connections
+\path [line] (scopus) -- (duplicates);
+\path [line] (ieee) -- (duplicates);
+\path [line] (scholar) -- (duplicates);
+\path [line] (other) -- (duplicates);
+\path [line] (duplicates) -- (screened);
+\path [line] (screened) -- (eligible);
+\path [line] (screened) -- (excluded);
+\path [line] (eligible) -- (included_qual);
+\path [line] (eligible) -- (excluded_full);
+% Removed connection to quantitative synthesis block
+
+% Grouping labels (optional, can be added as nodes on the left)
+\node[left=0.5cm of scopus, rotate=90, anchor=center] {\textbf{Identification}};
+\node[left=0.5cm of screened, rotate=90, anchor=center] {\textbf{Screening}};
+\node[left=0.5cm of eligible, rotate=90, anchor=center] {\textbf{Eligibility}};
+\node[left=0.5cm of included_qual, rotate=90, anchor=center] {\textbf{Included}};
+
+\end{tikzpicture}

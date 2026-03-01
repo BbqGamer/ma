@@ -1,0 +1,480 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Bachelor's & Master's Thesis Template        %%
+%% Copyleft by Dawid Weiss & Marta Szachniuk    %%
+%% Faculty of Computing and Telecommunication   %%
+%% Poznan University of Technology, 2020        %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+% Szkielet dla pracy licencjackiej pisanej w języku polskim.
+
+\documentclass[english,master,a4paper,oneside]{ppfcmthesis}
+
+
+\usepackage[utf8]{inputenc}
+\usepackage[OT4]{fontenc}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning,calc}
+
+%--------------------------------------
+% Strona tytułowa
+%--------------------------------------
+
+% Autorzy pracy, jeśli jest ich więcej niż jeden
+% wstaw między nimi separator \and
+\author{%
+   Adam Korba \album{151962}}
+\authortitle{}                                % Do not change.
+
+\title{Dynamic Multi-Loss Curriculum Learning with Meta-Optimization}
+
+% Your supervisor comes here.
+\ppsupervisor{dr hab.~inż.~Mikołaj Morzy} 
+
+% Year of final submission (not graduation!)
+\ppyear{2026}                                 
+
+
+\begin{document}
+
+% Front matter starts here
+\frontmatter\pagestyle{empty}%
+\maketitle\cleardoublepage%
+
+%--------------------------------------
+% Spis treści
+%--------------------------------------
+
+\pagenumbering{Roman}\pagestyle{ppfcmthesis}%
+\tableofcontents*
+\cleardoublepage % Zaczynamy od nieparzystej strony
+
+%--------------------------------------
+% Rozdziały
+%--------------------------------------
+
+%Najwygodniej jeśli każdy rozdział znajduje się w oddzielnym pliku
+\mainmatter%
+\chapter{Introduction}
+
+task. Inspired by Elman's concept of "starting small" \cite{elman1993learning},
+target later. theoretical continuation methods and modern meta-optimization
+
+Training deep neural networks is a complex process, especially because their
+loss landscapes are often non-convex and filled with many local minima.
+Traditional training methods usually treat data and objectives as static, which
+can overlook important aspects of the learning process. The idea of curriculum
+learning, introduced by Elman \cite{elman1993learning} and formalized by Bengio
+et al. \cite{bengio2009curriculum}, suggests that models can achieve better
+results when they are exposed to tasks in order of increasing difficulty. This
+concept is closely related to continuation methods from optimization theory,
+which use smoothing techniques to make the loss landscape easier to navigate at
+first, and then gradually restore its complexity \cite{allgower1990numerical}.
+Recent research, such as \cite{ilersich2025deep}, has shown that using Gaussian
+kernels to smooth the objective function can help optimizers avoid poor local
+minima and improve overall performance.
+
+One of the main challenges in these approaches is the use of fixed, manually
+chosen schedules for adjusting the level of smoothing. These schedules often do
+not respond to the actual progress of the model during training
+\cite{wang2021survey}. The aim of this thesis is to develop a method that
+automates this process using data-driven techniques. The curriculum is
+generated as a continual bi-level learning problem \cite{son2024meta}, where
+meta-learning is used to adjust the weights of different loss functions
+dynamically. Unlike standard multi-task learning, which tries to balance tasks
+equally \cite{chen2024gradient}, this approach focuses on guiding the model
+from easier, smoothed objectives to more difficult, sharp ones as training
+progresses.
+
+This research involves designing and testing a meta-learning algorithm that can
+automatically adjust the weights of smoothed loss functions. It is important to
+prevent the model from focusing only on the easiest objectives, which can
+happen if the meta-learning process is unconstrained. To address this, a
+monotonic gradient regularizer is introduced, ensuring that the model
+consistently moves from easy to hard tasks. The effectiveness of this approach
+is evaluated on regression problems with non-convex loss landscapes, using
+Gaussian smoothing kernels. This work aims to connect theoretical ideas from
+continuation methods with practical meta-optimization strategies
+\cite{gupta2025efficient, mao2022metaweighting}.
+
+\chapter{Literature Review}
+
+grounded in \textbf{Numerical Continuation Methods} (or Homotopy Methods) used
+in global optimization \cite{allgower1990numerical}. In non-convex
+optimization, finding a global minimum is often intractable due to the
+proliferation of poor local minima. Continuation methods address this by
+introducing a smoothing parameter $\sigma$. The optimization begins with a
+heavily smoothed, often convex approximation of the objective function where
+the global minimum is easily locatable. As training progresses, the smoothing
+is removed ($\sigma \to 0$), gradually introducing high-frequency complexities
+while keeping the optimizer in the basin of attraction of the optimal solution.
+equation. This smoothing effectively diffuses local minima, revealing global
+structures early in training. decreasing width during training. They
+demonstrated that this strategy effectively filters out high-frequency noise in
+the loss landscape. Similarly, decay rates (e.g., linear or exponential decay)
+\cite{wang2021survey}. These a weighted sum of component losses $\mathcal{L} =
+    \sum w_i L_i$. However, gradient magnitudes, ensuring all tasks train at
+similar rates. Similarly, Training deep neural networks on non-convex loss
+landscapes is a well-known challenge in artificial intelligence. Most standard
+approaches present data and objectives in a fixed way, which can miss important
+aspects of how models learn. This thesis builds on three main areas of
+research: continuation methods from optimization theory, multi-objective
+optimization as an architectural strategy, and meta-learning for automating the
+training process. Although these fields have developed separately, recent
+studies show that combining their ideas can help address the difficulties of
+training complex models.
+
+\section{Curriculum Learning and Numerical Continuation}
+
+The idea that models benefit from learning tasks in order of increasing
+difficulty was formalized by Bengio et al. \cite{bengio2009curriculum}, drawing
+on earlier work by Elman \cite{elman1993learning}. Elman showed that neural
+networks with limited capacity could learn complex structures if they started
+with simpler tasks. These early constraints are not just shortcuts, but
+important for guiding the learning process.
+
+\subsection{Objective-Based Curriculum}
+Recent research divides curriculum learning into two main types: instance-based
+and objective-based \cite{soviany2022curriculum}. Instance-based methods sort
+data by features like noise or complexity, while objective-based approaches
+change the definition of the task itself. The latter is closely linked to
+numerical continuation methods \cite{allgower1990numerical}, which are used in
+global optimization. In these methods, training starts with a smoothed, convex
+version of the objective function, making it easier to find a good solution. As
+training continues, the smoothing is gradually reduced, allowing the model to
+tackle more complex aspects of the problem.
+
+\subsection{Gaussian Continuation}
+One practical way to apply continuation methods in deep learning is through
+Gaussian continuation. Mobahi \cite{mobahi2015theoretical} showed that
+convolving the objective function with Gaussian kernels is an effective way to
+smooth the loss landscape, making it easier for optimizers to find global
+minima. Later work by Ilersich et al. \cite{ilersich2025deep} provided
+mathematical evidence that this approach can transform non-convex landscapes
+into ones that are much easier to optimize. Empirical studies, such as
+\cite{sinha2020curriculum}, have used Gaussian smoothing to filter out noise
+during training, and \cite{gupta2025efficient} demonstrated that using
+intermediate checkpoints as smoothed objectives can guide models through a
+gradual learning process.
+
+Despite these advances, most existing methods rely on fixed schedules for
+adjusting the level of smoothing or regularization. These schedules are often
+chosen manually and do not adapt to the model's progress \cite{wang2021survey}.
+This limitation motivates the development of automated, data-driven scheduling
+methods, which is a central focus of this thesis.
+
+\section{Multi-Task and Multi-Objective Optimization}
+
+To move between objectives of different difficulty, the problem can be set up
+as a multi-task learning scenario. Here, the total loss is a weighted sum of
+several component losses. However, curriculum learning and multi-task learning
+have different goals when it comes to how these tasks interact.
+
+\subsection{Gradient Conflict and Balancing}
+In multi-task learning, the usual goal is to balance progress across all tasks.
+One common problem is negative transfer, where learning one task can interfere
+with another. Methods like GradNorm \cite{chen2018gradnorm} adjust task weights
+to keep gradient magnitudes similar, while PCGrad \cite{yu2020gradient}
+modifies gradients to reduce interference. Sener and Koltun
+\cite{sener2018multi} proposed the Multi-Gradient Descent Algorithm (MGDA),
+which seeks a solution where no task can be improved without hurting another.
+Surveys such as \cite{chen2024gradient} discuss these approaches and note that,
+while they help balance tasks, they do not support the sequential learning
+needed for curricula.
+
+\subsection{The Equilibrium-Disequilibrium Conflict}
+Curriculum learning requires the model to focus on easier tasks first and
+gradually shift to harder ones, rather than balancing all tasks equally.
+Standard balancing methods often fail here because they might upweight the hard
+task too early if its gradient magnitude is small, or maintain the easy task's
+weight indefinitely. \cite{lanzillotta2025multitask} recently challenged the
+assumption that standard MTL objectives are optimal for continual learning,
+arguing that static multi-task solutions fail to account for distributional
+drift and that dynamic adaptation of the loss landscape is required.
+
+\subsection{Pareto Continual Learning}
+Bridging this gap, \cite{lai2025pareto} introduced \textbf{Pareto Continual
+    Learning}, which reformulates the stability-plasticity trade-off (retaining old
+knowledge vs. learning new tasks) as a Multi-Objective Optimization (MOO)
+problem. Instead of finding a single fixed weight, they learn a set of
+Pareto-optimal solutions conditioned on a preference vector. This allows the
+system to dynamically select the optimal trade-off during inference. Similarly,
+\cite{mao2022metaweighting} proposed \textbf{MetaWeighting}, identifying a
+critical gap between training loss and generalization loss in MTL. By treating
+task weights as hyperparameters optimized via a bi-level optimization loop
+(meta-learning), MetaWeighting explicitly minimizes generalization loss. This
+distinction is vital for this thesis: we do not merely want to balance the
+gradients of the smoothed and sharp losses; we want to schedule them to
+maximize final validation performance.
+
+\section{Meta-Learning and Continual Adaptation}
+
+Meta-learning, or ``learning to learn,'' provides the algorithmic engine to
+automate the curriculum schedule. While early meta-learning focused on learning
+initializations (e.g., MAML \cite{finn2017model}) for few-shot adaptation, the
+field has expanded into \textbf{Meta-Continual Learning (MCL)}.
+
+\subsection{Taxonomy of Meta-Continual Frameworks}
+A recent survey by \cite{son2024meta} provides a rigorous taxonomy for the
+intersection of these fields. They distinguish between \textit{Continual
+    Meta-Learning} (learning to learn from a sequence of tasks) and
+\textit{Meta-Continual Learning} (using meta-learning to solve the catastrophic
+forgetting problem). Our research aligns with their definition of
+\textbf{Continual Bi-Level Learning}, where the optimization process itself is
+updated online.
+
+\subsection{Meta-Optimization of Learning Dynamics}
+In this framework, the learning process is split into two loops. The inner loop
+updates model parameters $\theta$ on the current curriculum stage via standard
+gradient descent. The outer loop updates meta-parameters $\phi$ (in our case,
+the loss weights) to minimize a validation loss. Algorithms like
+\textbf{La-MAML} \cite{gupta2020lamaml} employ this structure to learn
+per-parameter learning rates that align gradients across sequential tasks.
+\cite{wu2024meta} recently improved upon this with \textbf{VR-MCL}, introducing
+variance reduction techniques to stabilize the online Hessian approximation
+required for these bi-level updates.
+
+Furthermore, \cite{woo2025meta} extended MCL to \textbf{Neural Fields}
+(MCL-NF). They demonstrated that meta-learning could efficiently reconstruct
+complex 3D scenes and signals by dynamically modulating the network's capacity,
+a process analogous to the resolution-based curriculum proposed in this thesis.
+
+\subsection{The Stability-Plasticity Dilemma in Curriculum}
+A unique challenge arises when applying meta-learning to curriculum generation:
+the stability-plasticity dilemma. In standard continual learning, the goal is
+to prevent the forgetting of old tasks (stability) \cite{parisi2019continual}.
+In our curriculum context, the dilemma is inverted: the model must be
+``plastic'' enough to abandon the smoothed approximation (the easy task) and
+``stable'' enough to converge on the hard task.
+
+\cite{banayeeanzade2025theoretical} provides theoretical insights into overparameterized models in such multi-task setups, suggesting that without explicit regularization, the interplay between model capacity and task similarity determines the success of transfer. Pure meta-learning of loss weights can be unstable; without constraints, a meta-learner might exploit the easy smoothed loss to achieve artificially low training error without ever transitioning to the hard target function. This necessitates the monotonic regularization strategies explored in this thesis.
+
+\section{Synthesis}
+
+The literature reveals a convergence of these three ideas. Continuation methods
+(Gaussian smoothing) provide the theoretical justification for creating a
+hierarchy of smoothed loss functions to solve non-convex problems
+\cite{ilersich2025deep}. Multi-Objective Optimization provides the
+architectural framework to compute these losses simultaneously
+\cite{chen2024gradient}. Meta-Learning provides the bi-level optimization
+machinery to automate the weighting \cite{son2024meta}.
+
+Existing methods fail to fully integrate these components. Heuristic CL lacks
+adaptability. Standard MTL (like GradNorm) seeks equilibrium rather than the
+sequential directionality required for curricula. Pure meta-learning lacks the
+constraints to enforce a monotonic increase in difficulty. This thesis fills
+this gap by using regularized meta-learning to dynamically discover the optimal
+curriculum trajectory. By enforcing monotonic constraints on the
+meta-gradients, the method ensures the stability of the continuation process
+while leveraging the adaptability of meta-learning.
+
+\chapter{Implementation}
+
+Rozdziały dokumentujące pracę własną studenta: opisujące ideę, sposób lub
+metodę rozwiązania postawionego problemu oraz rozdziały opisujące techniczną
+stronę rozwiązania --- dokumentacja techniczna, przeprowadzone testy, badania i
+uzyskane wyniki.
+
+Praca musi zawierać elementy pracy własnej autora adekwatne do jego wiedzy
+praktycznej uzyskanej w okresie studiów. Za pracę własną autora można uznać
+np.: stworzenie aplikacji informatycznej lub jej fragmentu, zaproponowanie
+algorytmu rozwiązania problemu szczegółowego, przedstawienie projektu
+np.~systemu informatycznego lub sieci komputerowej, analizę i ocenę nowych
+technologii lub rozwiązań informatycznych wykorzystywanych w
+przedsiębiorstwach, itp.
+
+Autor powinien zadbać o właściwą dokumentację pracy własnej obejmującą
+specyfikację założeń i sposób realizacji poszczególnych zadań wraz z ich oceną
+i opisem napotkanych problemów. W przypadku prac o charakterze
+projektowo-implementacyjnym, ta część pracy jest zastępowana dokumentacją
+techniczną i użytkową systemu.
+
+W pracy \textbf{nie należy zamieszczać całego kodu źródłowego} opracowanych
+programów. Kod źródłowy napisanych programów, wszelkie oprogramowanie
+wytworzone i wykorzystane w pracy, wyniki przeprowadzonych eksperymentów
+powinny być umieszczone np. na płycie CD, stanowiącej dodatek do pracy.
+
+\section*{Styl tekstu}
+
+Należy\footnote{Uwagi o stylu pochodzą częściowo ze stron prof. Macieja
+    Drozdowskiego~\cite{Drozdowski2006}.} stosować formę bezosobową, tj.~\emph{w
+    pracy rozważono ......, w ramach pracy zaprojektowano ....}, a nie: \emph{w
+    pracy rozważyłem, w ramach pracy zaprojektowałem}. Odwołania do wcześniejszych
+fragmentów tekstu powinny mieć następującą postać: ,,Jak wspomniano wcześniej,
+....'', ,,Jak wykazano powyżej ....''. Należy unikać długich zdań.
+
+Niedopuszczalne są zwroty używane w języku potocznym. W pracy należy używać
+terminologii informatycznej, która ma sprecyzowaną treść i znaczenie.
+
+Niedopuszczalne jest pisanie pracy metodą \emph{cut\&paste}, bo jest to plagiat
+i dowód intelektualnej indolencji autora. Dane zagadnienie należy opisać
+własnymi słowami. Zawsze trzeba powołać się na zewnętrzne źródła.
+
+\chapter{Conclusions}
+
+Zakończenie pracy zwane również Uwagami końcowymi lub Podsumowaniem powinno
+zawierać ustosunkowanie się autora do zadań wskazanych we wstępie do pracy, a w
+szczególności do celu i zakresu pracy oraz porównanie ich z faktycznymi
+wynikami pracy. Podejście takie umożliwia jasne określenie stopnia realizacji
+założonych celów oraz zwrócenie uwagi na wyniki osiągnięte przez autora w
+ramach jego samodzielnej pracy.
+
+Integralną częścią pracy są również dodatki, aneksy i załączniki zawierające
+stworzone w ramach pracy programy, aplikacje i projekty.
+
+%--------------------------------------
+% Literatura
+%--------------------------------------
+
+\bibliographystyle{plain}{\raggedright\sloppy\small\bibliography{bibliografia}}
+
+%--------------------------------------
+% Dodatki
+%--------------------------------------
+
+\cleardoublepage\appendix%
+\newpage
+\chapter{Systematic Literature Review Protocol}
+\chaptermark{SLR Protocol}{}
+
+This chapter presents the protocol for the Systematic Literature Review
+(\acronym{SLR}) which serves as the foundation for the research component of
+this thesis. The protocol has been developed in accordance with the
+\acronym{PRISMA} guidelines and the \acronym{PICOC} framework.
+
+\section{Review Identification}
+
+The objective of this review is to synthesize current methodologies that
+utilize \termdef{Meta-Optimization} to dynamically schedule loss functions
+representing decomposed sub-tasks of varying difficulty (e.g., via function
+approximation, smoothing, or auxiliary objectives) in deep learning scenarios.
+
+\section{The PICOC Framework}
+
+To precisely define the scope of the search, the \acronym{PICOC} framework
+(Population, Intervention, Comparison, Outcome, Context) was utilized. Details
+are presented in Table~\ref{tab:picoc}.
+
+\begin{table}[ht]
+    \fcmtcaption{Definition of the review scope using the PICOC framework.}\label{tab:picoc}
+    \centering\footnotesize%
+    \begin{tabular}{l >{\rightskip\fill}p{10cm}}
+        \toprule
+        Component             & Definition                                                                                                                                                               \\
+        \midrule
+        \textbf{P}opulation   & Deep Neural Networks (\acronym{DNN}) in Multi-Task Learning (\acronym{MTL}) settings, considering both hard and soft parameter sharing architectures.                    \\
+        \textbf{I}ntervention & Adaptive Curriculum Learning (e.g., Self-Paced Learning, RL-based teachers) and Meta-Learning based loss reweighting (e.g., MAML, Learning to Reweight).                 \\
+        \textbf{C}omparison   & 1. Static heuristics (Predefined curricula). \newline 2. Standard \acronym{MTL} baselines (Uniform weighting). \newline 3. Heuristic dynamic weighting (e.g., GradNorm). \\
+        \textbf{O}utcome      & \textbf{Primary:} Mitigation of Negative Transfer, Generalization performance. \newline \textbf{Secondary:} Optimization stability, Convergence speed.                   \\
+        \textbf{C}ontext      & Machine Learning research (excluding purely psychological curriculum studies without algorithmic implementation).                                                        \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Research Questions (RQs)}
+
+The following research questions have been defined to guide the data extraction
+process:
+
+\begin{description}
+    \item[RQ1 (Curriculum)] How do adaptive approaches (e.g., Self-Paced Learning,
+          RL-based teachers) differ from static heuristics in defining training
+          schedules?
+    \item[RQ2 (Multi-Task)] What strategies are employed to mitigate negative transfer
+          (e.g., gradient conflict resolution) in hard vs. soft parameter sharing
+          architectures?
+    \item[RQ3 (Meta-Optimization)] How are meta-learning algorithms (e.g., MAML,
+          reweighting) applied to optimize loss weights or data selection dynamically?
+\end{description}
+
+\section{Search Strategy}
+
+The search strategy relies on the intersection of three conceptual blocks:
+\emph{Curriculum Learning}, \emph{Meta-Optimization}, and \emph{Multi-Task
+    Learning}. Below are the specific queries designed for scientific databases.
+
+\subsection{Scopus / Web of Science}
+
+This is the primary source due to its broad indexing coverage.
+
+\begin{verbatim}
+TITLE-ABS-KEY (
+  ("curriculum learning" OR "self-paced learning" OR "loss weighting" 
+   OR "adaptive weighting" OR "dynamic weighting") 
+  AND ("meta-learning" OR "meta-optimization" OR "learning to weight" 
+   OR "gradient-based" OR "differentiable" OR "automated") 
+  AND ("multi-task" OR "multi-objective" OR "auxiliary learning" 
+   OR "multi-loss" OR "negative transfer")
+) AND ( DOCTYPE(ar) OR DOCTYPE(cp) ) AND NOT ( "reinforcement learning" )
+\end{verbatim}
+
+\subsection{IEEE Xplore}
+
+A stricter syntax is required here (using the \texttt{"All Metadata"}
+operator).
+
+\begin{verbatim}
+("All Metadata":"curriculum learning" OR "All Metadata":"self-paced learning" 
+ OR "All Metadata":"loss weighting" OR "All Metadata":"adaptive weighting" 
+ OR "All Metadata":"dynamic weighting") 
+AND ("All Metadata":"meta-learning" OR "All Metadata":"meta-optimization" 
+ OR "All Metadata":"learning to weight" OR "All Metadata":"gradient-based" 
+ OR "All Metadata":"differentiable" OR "All Metadata":"automated") 
+AND ("All Metadata":"multi-task" OR "All Metadata":"multi-objective" 
+ OR "All Metadata":"auxiliary learning" OR "All Metadata":"multi-loss")
+\end{verbatim}
+
+\subsection{Google Scholar}
+
+Due to limitations in boolean logic handling, the search will be conducted
+using shorter, phrases:
+\begin{verbatim}
+"dynamic weighting" "multi task" "curriculum learning"
+\end{verbatim}
+due to large number of hits, I chose to only take into consideration papers
+released after 2023.
+
+\subsection{Snowballing Strategy}
+
+To complement the database search and ensure comprehensive coverage, a
+snowballing procedure will be applied:
+\begin{itemize}
+    \item \textbf{Forward Snowballing:} Reviewing papers that cite seminal works identified in the supervisor's recommendations (e.g., \emph{GradNorm}, \emph{MAML}, \emph{Self-Paced Learning}) to identify recent advancements.
+    \item \textbf{Backward Snowballing:} Examining the reference lists of included primary studies to identify foundational papers or missed relevant studies.
+\end{itemize}
+
+\section{Selection Criteria and Data Extraction}
+
+The selection process will be conducted in two stages: title/abstract screening
+followed by full-text review.
+
+\begin{figure}[t]
+    \centering
+    \resizebox{0.95\textwidth}{!}{
+        \input{figures/prisma_flow.tex}
+    }
+    \fcmfcaption{Schematic of the PRISMA selection process.}\label{rys:prisma}
+\end{figure}
+
+\paragraph{Inclusion Criteria.} The review will include papers that:
+\begin{enumerate}
+    \item Propose a method for \emph{automating} the training process (adaptive
+          curriculum or loss weighting).
+    \item Address Multi-Task Learning challenges, specifically Negative Transfer or
+          parameter sharing.
+    \item Utilize Meta-Learning, Self-Paced Learning, or Reinforcement Learning
+          approaches.
+    \item Were published between 2017 and 2025.
+\end{enumerate}
+
+\paragraph{Data Extraction.} The following information will be extracted from selected papers:
+\begin{itemize}
+    \item \textbf{Metadata:} Title, year, publication venue.
+    \item \textbf{Methodology:} Type of Curriculum (Static/Adaptive/SPL) and Optimization strategy.
+    \item \textbf{Architecture:} Hard vs. Soft parameter sharing.
+    \item \textbf{Results:} Mitigation of negative transfer and generalization improvements.
+\end{itemize}
+
+\ppcolophon
+
+\end{document}
