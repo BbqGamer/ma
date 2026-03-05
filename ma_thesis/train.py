@@ -28,30 +28,40 @@ def init_weights_lecun(m):
             nn.init.zeros_(m.bias)
 
 
-class ResBlock(nn.Module):
-    """Residual block with two linear layers and SiLU activation."""
+ACTIVATIONS = {
+    "silu": nn.SiLU,
+    "tanh": nn.Tanh,
+    "gelu": nn.GELU,
+    "relu": nn.ReLU,
+}
 
-    def __init__(self, dim):
+
+class ResBlock(nn.Module):
+    """Residual block with two linear layers and configurable activation."""
+
+    def __init__(self, dim, activation: str = "silu"):
         super().__init__()
+        act_cls = ACTIVATIONS[activation]
         self.block = nn.Sequential(
             nn.Linear(dim, dim),
-            nn.SiLU(),
+            act_cls(),
             nn.Linear(dim, dim),
         )
-        self.act = nn.SiLU()
+        self.act = act_cls()
 
     def forward(self, x):
         return self.act(x + self.block(x))
 
 
 class MLP(nn.Module):
-    def __init__(self, hidden_dim=256, num_blocks=4):
+    def __init__(self, hidden_dim=256, num_blocks=4, activation: str = "silu"):
         super().__init__()
+        act_cls = ACTIVATIONS[activation]
         self.input_proj = nn.Sequential(
             nn.Linear(2, hidden_dim),
-            nn.SiLU(),
+            act_cls(),
         )
-        self.blocks = nn.Sequential(*[ResBlock(hidden_dim) for _ in range(num_blocks)])
+        self.blocks = nn.Sequential(*[ResBlock(hidden_dim, activation) for _ in range(num_blocks)])
         self.output_proj = nn.Linear(hidden_dim, 1)
         self.apply(init_weights_lecun)
 
@@ -391,7 +401,10 @@ def main(
     n_val = int(0.2 * num_samples)
     n_train = num_samples - n_val
 
-    perm = torch.randperm(num_samples, device=device)
+    # Deterministic split — same seed = same partition across all runs
+    split_gen = torch.Generator(device=device)
+    split_gen.manual_seed(42)
+    perm = torch.randperm(num_samples, device=device, generator=split_gen)
     train_indices = perm[:n_train]
     val_indices = perm[n_train:]
 

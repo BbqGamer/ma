@@ -25,12 +25,16 @@ dependencies = [
     "mkdocs",
     "numpy>=2.2.6",
     "openai>=2.9.0",
+    "optuna>=4.0",
     "pip",
     "polars>=1.36.1",
     "python-dotenv",
     "ruff",
+    "scikit-learn>=1.6",
+    "scipy>=1.15",
     "tqdm",
     "typer",
+    "torch>=2.10.0",
 ]
 requires-python = "~=3.10.0"
 
