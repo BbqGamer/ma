@@ -5,6 +5,7 @@ from loguru import logger
 import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
+import optuna
 import polars as pl
 from scipy.interpolate import griddata
 import torch
@@ -151,6 +152,32 @@ class FourierFeatureMLP(nn.Module):
         return self.output_proj(x_enc)
 
 
+def build_model(hp: dict, device: torch.device) -> nn.Module:
+    """Construct a model from a hyperparameter dict (as produced by the sweep)."""
+    arch = hp.get("model_arch", "mlp")
+    if arch == "siren":
+        model = SIREN(
+            hidden_dim=hp["hidden_dim"],
+            num_layers=hp.get("num_layers", 4),
+            omega_0=hp.get("omega_0", 30.0),
+        )
+    elif arch == "fourier":
+        model = FourierFeatureMLP(
+            hidden_dim=hp["hidden_dim"],
+            num_blocks=hp.get("num_blocks", 4),
+            activation=hp.get("activation", "silu"),
+            num_fourier=hp.get("num_fourier", 128),
+            sigma=hp.get("sigma", 10.0),
+        )
+    else:
+        model = MLP(
+            hidden_dim=hp["hidden_dim"],
+            num_blocks=hp.get("num_blocks", 4),
+            activation=hp.get("activation", "silu"),
+        )
+    return model.to(device)
+
+
 def plot_model_surface(
     model,
     device,
@@ -245,6 +272,8 @@ def train_one_level(
     output_dir: Path,
     parent_run_id: str,
     global_step: int,
+    x_min: np.ndarray = None,
+    x_max: np.ndarray = None,
 ) -> int:
     """Train the model on a single sigma level. Returns updated global_step."""
     n_train = X_train.shape[0]
@@ -258,7 +287,7 @@ def train_one_level(
             optimizer, T_max=epochs, eta_min=lr * 0.01
         )
         criterion = nn.MSELoss()
-        steps_per_epoch = n_train // batch_size
+        steps_per_epoch = max(1, n_train // batch_size)
         logger.info(f"Starting training on {n_train} samples (validation: {n_val})...")
 
         train_loss_history = []
@@ -345,6 +374,8 @@ def train_one_level(
                     title=f"{func_name} — {level} — epoch {epoch}",
                     save_path=snap_path,
                     Zg_true=Zg_true,
+                    x_min=x_min,
+                    x_max=x_max,
                 )
                 mlflow.log_artifact(str(snap_path), artifact_path="snapshots")
                 logger.info(f"Saved snapshot at epoch {epoch} → {snap_path.name}")
@@ -392,9 +423,11 @@ def train_one_level(
             x_range,
             y_range,
             grid_res,
-            title=f"MLP after {level} (stage {level_idx + 1}/{total_levels})",
+            title=f"{func_name} after {level} (stage {level_idx + 1}/{total_levels})",
             save_path=surf_path,
             Zg_true=Zg_true,
+            x_min=x_min,
+            x_max=x_max,
         )
         mlflow.log_artifact(str(surf_path), artifact_path="figures")
         mlflow.log_artifact(
@@ -416,8 +449,8 @@ def train_one_level(
 def main(
     input_path: Path = PROCESSED_DATA_DIR / "ackley.parquet",
     output_dir: Path = FIGURES_DIR,
-    patience: int = 10,
-    min_delta: float = 1e-4,
+    patience: int = 30,
+    min_delta: float = 1e-5,
     epochs: int = 1000,
     batch_size: int = 64,
     lr: float = 1e-3,
@@ -437,23 +470,53 @@ def main(
         None,
         help="Custom MLflow run name. Auto-generated if not provided.",
     ),
+    # --- Model architecture (manual) ---
+    model_arch: str = typer.Option(
+        "mlp", help="Model architecture: mlp, siren, or fourier."
+    ),
+    hidden_dim: int = typer.Option(256, help="Hidden dimension."),
+    num_blocks: int = typer.Option(4, help="Residual blocks (mlp / fourier)."),
+    activation: str = typer.Option("silu", help="Activation (mlp / fourier)."),
+    num_layers: int = typer.Option(4, help="Number of SIREN layers."),
+    omega_0: float = typer.Option(30.0, help="SIREN frequency multiplier ω₀."),
+    num_fourier: int = typer.Option(128, help="Number of Fourier features."),
+    fourier_sigma: float = typer.Option(10.0, help="Fourier feature scale σ."),
+    # --- Auto-load best trial from a completed Optuna sweep ---
+    from_sweep: Optional[str] = typer.Option(
+        None,
+        help="Path to Optuna SQLite DB (e.g. reports/figures/sweep/sweep_eggholder.db). "
+        "Loads the best trial's hyper-parameters, overriding manual arch options.",
+    ),
+    study_name: Optional[str] = typer.Option(
+        None,
+        help="Optuna study name inside --from-sweep DB. Required with --from-sweep.",
+    ),
 ):
     """
-    Train an MLP on Gaussian continuation datasets.
+    Train a model on Gaussian-continuation datasets (curriculum learning).
 
-    Modes:
+    Modes
+    -----
       - curriculum: train sequentially through all sigma levels (default).
       - single: train on a single sigma level only (use --sigma-level).
 
-    Examples:
-      # Full curriculum
-      python -m ma_thesis.train --input-path data/processed/ackley.parquet
+    The model architecture and hyper-parameters can be set manually via CLI
+    options **or** loaded automatically from a completed Optuna sweep using
+    ``--from-sweep`` + ``--study-name``.
+
+    Examples
+    --------
+      # Full curriculum with best sweep hyper-parameters
+      python -m ma_thesis.train \\
+          --input-path data/processed/eggholder.parquet \\
+          --from-sweep reports/figures/sweep/sweep_eggholder.db \\
+          --study-name baseline-sweep-eggholder
+
+      # Manual SIREN curriculum
+      python -m ma_thesis.train --model-arch siren --omega-0 30 --hidden-dim 256
 
       # Train only on the raw (hardest) target
       python -m ma_thesis.train --mode single --sigma-level -1
-
-      # Train only on the most smoothed target
-      python -m ma_thesis.train --mode single --sigma-level 0
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
@@ -461,9 +524,57 @@ def main(
     func_name = input_path.stem
     logger.info(f"Training on {func_name} dataset from {input_path}")
 
-    # Read parquet dataset
+    # ------------------------------------------------------------------
+    # Resolve hyper-parameters (from sweep DB or manual CLI options)
+    # ------------------------------------------------------------------
+    if from_sweep is not None:
+        if study_name is None:
+            logger.error("--study-name is required when using --from-sweep")
+            raise typer.Exit(code=1)
+        storage = f"sqlite:///{from_sweep}"
+        study = optuna.load_study(study_name=study_name, storage=storage)
+        best = study.best_trial
+        hp = dict(best.params)
+        logger.success(
+            f"Loaded best trial #{best.number} from study '{study_name}' "
+            f"(val_loss={best.value:.6f})"
+        )
+        logger.info(f"  Hyper-parameters: {hp}")
+        # Override CLI defaults with sweep values
+        model_arch = hp.get("model_arch", model_arch)
+        hidden_dim = hp.get("hidden_dim", hidden_dim)
+        batch_size = hp.get("batch_size", batch_size)
+        lr = hp.get("lr", lr)
+        num_blocks = hp.get("num_blocks", num_blocks)
+        activation = hp.get("activation", activation)
+        num_layers = hp.get("num_layers", num_layers)
+        omega_0 = hp.get("omega_0", omega_0)
+        num_fourier = hp.get("num_fourier", num_fourier)
+        fourier_sigma = hp.get("sigma", fourier_sigma)
+    else:
+        hp = {
+            "model_arch": model_arch,
+            "hidden_dim": hidden_dim,
+            "batch_size": batch_size,
+            "lr": lr,
+            "num_blocks": num_blocks,
+            "activation": activation,
+            "num_layers": num_layers,
+            "omega_0": omega_0,
+            "num_fourier": num_fourier,
+            "sigma": fourier_sigma,
+        }
+
+    # ------------------------------------------------------------------
+    # Data loading with [-1, 1] input scaling
+    # ------------------------------------------------------------------
     df = pl.read_parquet(input_path)
-    X = torch.from_numpy(df.select(["x1", "x2"]).to_numpy()).float().to(device)
+    X_np = df.select(["x1", "x2"]).to_numpy()
+    x_min = X_np.min(axis=0)  # shape (2,)
+    x_max = X_np.max(axis=0)
+    X_scaled = 2.0 * (X_np - x_min) / (x_max - x_min) - 1.0
+    X = torch.from_numpy(X_scaled).float().to(device)
+    logger.info(f"Input scaled to [-1, 1]  (x_min={x_min}, x_max={x_max})")
 
     # Identify sigma level columns (y_sigma_0, y_sigma_1, ...)
     sigma_cols = sorted(
@@ -482,7 +593,6 @@ def main(
         if sigma_level is None:
             logger.error("--sigma-level is required when mode='single'")
             raise typer.Exit(code=1)
-        # Support negative indexing
         idx = sigma_level if sigma_level >= 0 else len(sigma_cols) + sigma_level
         if idx < 0 or idx >= len(sigma_cols):
             logger.error(
@@ -494,19 +604,17 @@ def main(
         default_run_name = f"{func_name}_single_{sigma_cols[idx]}"
     elif mode == "curriculum":
         levels_to_train = list(enumerate(sigma_cols))
-        default_run_name = f"{func_name}_curriculum"
+        default_run_name = f"{func_name}_curriculum_{model_arch}"
     else:
         logger.error(f"Unknown mode '{mode}'. Use 'curriculum' or 'single'.")
         raise typer.Exit(code=1)
 
     actual_run_name = run_name or default_run_name
 
-    # Split into train and validation (80/20) - consistent across levels
+    # Deterministic 80/20 split — same seed = same partition as sweep.py
     num_samples = X.shape[0]
     n_val = int(0.2 * num_samples)
     n_train = num_samples - n_val
-
-    # Deterministic split — same seed = same partition across all runs
     split_gen = torch.Generator(device=device)
     split_gen.manual_seed(42)
     perm = torch.randperm(num_samples, device=device, generator=split_gen)
@@ -521,14 +629,17 @@ def main(
     output_dir.mkdir(parents=True, exist_ok=True)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Initialize model
-    model = MLP().to(device)
+    # ------------------------------------------------------------------
+    # Build model (mlp / siren / fourier)
+    # ------------------------------------------------------------------
+    model = build_model(hp, device)
+    n_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Model: {model_arch}  ({n_params:,} params)")
 
     # Pre-compute true surface grid for snapshot plots
-    X_np = df.select(["x1", "x2"]).to_numpy()
     Y_hard_np = df[hard_col].to_numpy()
-    x_range = (X_np[:, 0].min(), X_np[:, 0].max())
-    y_range = (X_np[:, 1].min(), X_np[:, 1].max())
+    x_range = (float(X_np[:, 0].min()), float(X_np[:, 0].max()))
+    y_range = (float(X_np[:, 1].min()), float(X_np[:, 1].max()))
     xg = np.linspace(x_range[0], x_range[1], grid_res)
     yg = np.linspace(y_range[0], y_range[1], grid_res)
     Xg, Yg = np.meshgrid(xg, yg)
@@ -540,8 +651,10 @@ def main(
     with mlflow.start_run(run_name=actual_run_name) as parent_run:
         mlflow.log_params(
             {
+                **hp,
                 "function": func_name,
                 "mode": mode,
+                "n_params": n_params,
                 "num_samples": num_samples,
                 "n_train": n_train,
                 "n_val": n_val,
@@ -550,10 +663,9 @@ def main(
                 "patience": patience,
                 "min_delta": min_delta,
                 "max_epochs": epochs,
-                "batch_size": batch_size,
-                "lr": lr,
                 "snapshot_interval": snapshot_interval,
                 "device": str(device),
+                "from_sweep": str(from_sweep) if from_sweep else "manual",
             }
         )
         mlflow.log_artifact(str(input_path), artifact_path="data")
@@ -592,10 +704,12 @@ def main(
                 output_dir=output_dir,
                 parent_run_id=parent_run.info.run_id,
                 global_step=global_step,
+                x_min=x_min,
+                x_max=x_max,
             )
 
         # Save and log final model
-        model_path = MODELS_DIR / f"{func_name}_mlp.pt"
+        model_path = MODELS_DIR / f"{func_name}_{model_arch}.pt"
         torch.save(model.state_dict(), model_path)
         mlflow.log_artifact(str(model_path), artifact_path="model")
         logger.success(f"Final model saved to {model_path}")
