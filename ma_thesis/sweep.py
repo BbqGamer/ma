@@ -39,7 +39,7 @@ import torch.optim as optim
 import typer
 
 from ma_thesis.config import FIGURES_DIR, PROCESSED_DATA_DIR
-from ma_thesis.train import ACTIVATIONS, MLP, plot_model_surface
+from ma_thesis.train import ACTIVATIONS, MLP, SIREN, FourierFeatureMLP, plot_model_surface
 
 app = typer.Typer()
 
@@ -69,6 +69,12 @@ class SweepContext:
     y_range: tuple
     Zg_true: np.ndarray
     output_dir: Path
+    df: pl.DataFrame = None
+    # Input scaling params (shape (2,) each) — used to map grid back for plots
+    x_min: np.ndarray = None
+    x_max: np.ndarray = None
+    # Restrict model architectures to search over (None = all)
+    model_archs: tuple = ("mlp", "siren", "fourier")
     # How often to report to pruner (every N epochs)
     report_interval: int = 10
 
@@ -93,37 +99,94 @@ class Objective:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def suggest(trial: optuna.Trial) -> dict:
+    def suggest(trial: optuna.Trial, model_archs: tuple) -> dict:
         """Define the search space.  Easy to extend with new hyper-params."""
-        return {
+        arch = trial.suggest_categorical("model_arch", list(model_archs))
+        hp: dict = {
+            "model_arch": arch,
             "hidden_dim": trial.suggest_categorical("hidden_dim", [64, 128, 256, 512]),
-            "num_blocks": trial.suggest_int("num_blocks", 2, 6, step=2),
-            "activation": trial.suggest_categorical("activation", list(ACTIVATIONS.keys())),
-            "lr": trial.suggest_float("lr", 1e-4, 3e-2, log=True),
             "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
         }
+        if arch == "siren":
+            hp["num_layers"] = trial.suggest_int("num_layers", 3, 8)
+            hp["omega_0"] = trial.suggest_float("omega_0", 10.0, 60.0)
+            hp["lr"] = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        elif arch == "fourier":
+            hp["num_blocks"] = trial.suggest_int("num_blocks", 2, 6, step=2)
+            hp["activation"] = trial.suggest_categorical("activation", list(ACTIVATIONS.keys()))
+            hp["num_fourier"] = trial.suggest_categorical("num_fourier", [64, 128, 256])
+            hp["sigma"] = trial.suggest_float("sigma", 1.0, 30.0)
+            hp["lr"] = trial.suggest_float("lr", 1e-4, 3e-2, log=True)
+        else:  # mlp
+            hp["num_blocks"] = trial.suggest_int("num_blocks", 2, 6, step=2)
+            hp["activation"] = trial.suggest_categorical("activation", list(ACTIVATIONS.keys()))
+            hp["lr"] = trial.suggest_float("lr", 1e-4, 3e-2, log=True)
+        return hp
 
     # ------------------------------------------------------------------
 
     def __call__(self, trial: optuna.Trial) -> float:
         ctx = self.ctx
-        hp = self.suggest(trial)
+        hp = self.suggest(trial, ctx.model_archs)
 
-        model = MLP(
-            hidden_dim=hp["hidden_dim"],
-            num_blocks=hp["num_blocks"],
-            activation=hp["activation"],
-        ).to(ctx.device)
+        arch = hp["model_arch"]
+        if arch == "siren":
+            model = SIREN(
+                hidden_dim=hp["hidden_dim"],
+                num_layers=hp["num_layers"],
+                omega_0=hp["omega_0"],
+            ).to(ctx.device)
+        elif arch == "fourier":
+            model = FourierFeatureMLP(
+                hidden_dim=hp["hidden_dim"],
+                num_blocks=hp["num_blocks"],
+                activation=hp["activation"],
+                num_fourier=hp["num_fourier"],
+                sigma=hp["sigma"],
+            ).to(ctx.device)
+        else:
+            model = MLP(
+                hidden_dim=hp["hidden_dim"],
+                num_blocks=hp["num_blocks"],
+                activation=hp["activation"],
+            ).to(ctx.device)
+
         n_params = sum(p.numel() for p in model.parameters())
 
-        run_label = (
-            f"trial{trial.number:03d}"
-            f"_h{hp['hidden_dim']}_b{hp['num_blocks']}"
-            f"_{hp['activation']}_lr{hp['lr']:.1e}_bs{hp['batch_size']}"
-        )
+        if arch == "siren":
+            run_label = (
+                f"trial{trial.number:03d}_siren"
+                f"_h{hp['hidden_dim']}_l{hp['num_layers']}"
+                f"_w{hp['omega_0']:.0f}_lr{hp['lr']:.1e}_bs{hp['batch_size']}"
+            )
+        elif arch == "fourier":
+            run_label = (
+                f"trial{trial.number:03d}_fourier"
+                f"_h{hp['hidden_dim']}_b{hp['num_blocks']}"
+                f"_f{hp['num_fourier']}_s{hp['sigma']:.1f}"
+                f"_lr{hp['lr']:.1e}_bs{hp['batch_size']}"
+            )
+        else:
+            run_label = (
+                f"trial{trial.number:03d}_mlp"
+                f"_h{hp['hidden_dim']}_b{hp['num_blocks']}"
+                f"_{hp['activation']}_lr{hp['lr']:.1e}_bs{hp['batch_size']}"
+            )
 
+        if ctx.df is not None:
+            target_cols = [c for c in ctx.df.columns if c.startswith("y_sigma_")]
+            target_col = target_cols[-1] if target_cols else None
+            dataset = mlflow.data.from_polars(
+                ctx.df,
+                source=f"{ctx.func_name}.parquet",
+                targets=target_col,
+            )
+        else:
+            dataset = None
         with mlflow.start_run(run_name=run_label, nested=False):
             mlflow.log_params({**hp, "n_params": n_params, "function": ctx.func_name})
+            if dataset is not None:
+                mlflow.log_input(dataset, context="training")
 
             best_val_loss = self._train(trial, model, hp, run_label)
 
@@ -204,6 +267,7 @@ class Objective:
                 if trial.should_prune():
                     mlflow.log_metric("best_val_loss", best_val_loss)
                     mlflow.set_tag("pruned", "true")
+                    mlflow.end_run(status="KILLED")
                     raise optuna.TrialPruned()
 
             if patience_counter >= ctx.patience:
@@ -220,6 +284,22 @@ class Objective:
 
         # --- artefacts: learning curve + surface plot ---
         self._log_artefacts(model, train_hist, val_hist, run_label, best_val_loss)
+
+        # --- log learned surface at end of training ---
+        surf_path = ctx.output_dir / f"{run_label}_final_surface.png"
+        plot_model_surface(
+            model,
+            ctx.device,
+            ctx.x_range,
+            ctx.y_range,
+            ctx.grid_res,
+            title=f"Learned Surface — {ctx.func_name} — {run_label}\nval_loss={best_val_loss:.5f}",
+            save_path=surf_path,
+            Zg_true=ctx.Zg_true,
+            x_min=ctx.x_min,
+            x_max=ctx.x_max,
+        )
+        mlflow.log_artifact(str(surf_path), artifact_path="final_surface")
 
         logger.info(
             f"  Trial {trial.number} done — "
@@ -265,6 +345,8 @@ class Objective:
             title=f"{ctx.func_name} — {run_label}\nval_loss={best_val_loss:.5f}",
             save_path=surf_path,
             Zg_true=ctx.Zg_true,
+            x_min=ctx.x_min,
+            x_max=ctx.x_max,
         )
         mlflow.log_artifact(str(surf_path), artifact_path="figures")
 
@@ -276,10 +358,30 @@ class Objective:
 
 def load_and_split(
     input_path: Path, device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, str, str]:
-    """Load parquet, pick the hardest sigma column, return 80/20 split."""
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    str,
+    str,
+    pl.DataFrame,
+    np.ndarray,
+    np.ndarray,
+]:
+    """Load parquet, pick the hardest sigma column, return 80/20 split.
+
+    Input features are scaled to [-1, 1] so that SIREN / Fourier models
+    receive coordinates in a range where their sine activations are
+    well-behaved.  The original coordinate bounds (``x_min``, ``x_max``)
+    are returned so that plotting utilities can undo the mapping.
+    """
     df = pl.read_parquet(input_path)
-    X = torch.from_numpy(df.select(["x1", "x2"]).to_numpy()).float().to(device)
+    X_np = df.select(["x1", "x2"]).to_numpy()
+    x_min = X_np.min(axis=0)  # shape (2,)
+    x_max = X_np.max(axis=0)  # shape (2,)
+    X_scaled = 2.0 * (X_np - x_min) / (x_max - x_min) - 1.0
+    X = torch.from_numpy(X_scaled).float().to(device)
 
     sigma_cols = sorted(
         [c for c in df.columns if c.startswith("y_sigma_")],
@@ -304,6 +406,9 @@ def load_and_split(
         y[perm[n_train:]],
         func_name,
         hard_col,
+        df,
+        x_min,
+        x_max,
     )
 
 
@@ -324,6 +429,11 @@ def main(
     grid_res: int = 80,
     seed: int = 0,
     storage: Optional[str] = None,
+    experiment_name: Optional[str] = None,
+    model_archs: str = typer.Option(
+        "mlp,siren,fourier",
+        help="Comma-separated list of model architectures to search over: mlp, siren, fourier.",
+    ),
 ):
     """
     Run a TPE hyperparameter sweep to find the best baseline model.
@@ -335,13 +445,15 @@ def main(
     logger.info(f"Device: {device}")
 
     # --- data ---
-    X_train, y_train, X_val, y_val, func_name, hard_col = load_and_split(input_path, device)
+    X_train, y_train, X_val, y_val, func_name, hard_col, df, x_min, x_max = load_and_split(
+        input_path, device
+    )
     logger.info(
         f"Sweep on {func_name} ({hard_col})  |  train={X_train.shape[0]}  val={X_val.shape[0]}"
     )
+    logger.info(f"Input scaled to [-1, 1]  (x_min={x_min}, x_max={x_max})")
 
     # Pre-compute true surface for the plots
-    df = pl.read_parquet(input_path)
     X_np = df.select(["x1", "x2"]).to_numpy()
     Y_np = df[hard_col].to_numpy()
     x_range = (float(X_np[:, 0].min()), float(X_np[:, 0].max()))
@@ -352,6 +464,9 @@ def main(
     Zg_true = griddata(X_np, Y_np, (Xg, Yg), method="cubic", fill_value=np.nan)
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    archs_tuple = tuple(a.strip() for a in model_archs.split(",") if a.strip())
+    logger.info(f"Model architectures in search space: {archs_tuple}")
 
     # --- sweep context ---
     ctx = SweepContext(
@@ -369,11 +484,15 @@ def main(
         y_range=y_range,
         Zg_true=Zg_true,
         output_dir=output_dir,
+        df=df,
+        x_min=x_min,
+        x_max=x_max,
+        model_archs=archs_tuple,
         report_interval=report_interval,
     )
 
     # --- MLflow ---
-    experiment_name = f"baseline-sweep-{func_name}"
+    experiment_name = experiment_name or f"baseline-sweep-{func_name}"
     mlflow.set_experiment(experiment_name)
 
     # --- Optuna study (persisted in SQLite) ---
@@ -381,7 +500,7 @@ def main(
         db_path = output_dir / f"sweep_{func_name}.db"
         storage = f"sqlite:///{db_path}"
 
-    study_name = f"baseline-{func_name}"
+    study_name = experiment_name
     study = optuna.create_study(
         study_name=study_name,
         storage=storage,
@@ -428,15 +547,22 @@ def _print_summary(study: optuna.Study, func_name: str, experiment_name: str) ->
         logger.warning("No trials completed — consider raising patience or epochs.")
         return
 
-    top = sorted(complete, key=lambda t: t.value)[:5]
+    top = sorted(complete, key=lambda t: t.value if t.value is not None else float("inf"))[:5]
     logger.info(f"TOP 5 configurations for {func_name}:")
     for rank, t in enumerate(top, 1):
         p = t.params
-        logger.info(
-            f"  #{rank}  trial={t.number}  val_loss={t.value:.6f}  |  "
-            f"h={p['hidden_dim']}  blocks={p['num_blocks']}  "
-            f"act={p['activation']}  lr={p['lr']:.2e}  bs={p['batch_size']}"
-        )
+        arch = p.get("model_arch", "mlp")
+        detail = f"h={p['hidden_dim']}  arch={arch}"
+        if "num_blocks" in p:
+            detail += f"  blocks={p['num_blocks']}"
+        if "activation" in p:
+            detail += f"  act={p['activation']}"
+        if "omega_0" in p:
+            detail += f"  ω₀={p['omega_0']:.1f}"
+        if "num_fourier" in p:
+            detail += f"  fourier={p['num_fourier']}"
+        detail += f"  lr={p['lr']:.2e}  bs={p['batch_size']}"
+        logger.info(f"  #{rank}  trial={t.number}  val_loss={t.value:.6f}  |  {detail}")
 
     best = study.best_trial
     logger.success(f"Best trial: #{best.number}  val_loss={best.value:.6f}  params={best.params}")
