@@ -32,14 +32,14 @@ import mlflow
 import numpy as np
 import optuna
 import polars as pl
-from scipy.interpolate import griddata
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import typer
 
+from ma_thesis.common import load_and_split, plot_model_surface, prepare_surface_grid
 from ma_thesis.config import FIGURES_DIR, PROCESSED_DATA_DIR
-from ma_thesis.train import ACTIVATIONS, MLP, SIREN, FourierFeatureMLP, plot_model_surface
+from ma_thesis.models import ACTIVATIONS, build_model
 
 app = typer.Typer()
 
@@ -129,27 +129,9 @@ class Objective:
         ctx = self.ctx
         hp = self.suggest(trial, ctx.model_archs)
 
+        # Build model using shared utility from models module
+        model = build_model(hp, ctx.device)
         arch = hp["model_arch"]
-        if arch == "siren":
-            model = SIREN(
-                hidden_dim=hp["hidden_dim"],
-                num_layers=hp["num_layers"],
-                omega_0=hp["omega_0"],
-            ).to(ctx.device)
-        elif arch == "fourier":
-            model = FourierFeatureMLP(
-                hidden_dim=hp["hidden_dim"],
-                num_blocks=hp["num_blocks"],
-                activation=hp["activation"],
-                num_fourier=hp["num_fourier"],
-                sigma=hp["sigma"],
-            ).to(ctx.device)
-        else:
-            model = MLP(
-                hidden_dim=hp["hidden_dim"],
-                num_blocks=hp["num_blocks"],
-                activation=hp["activation"],
-            ).to(ctx.device)
 
         n_params = sum(p.numel() for p in model.parameters())
 
@@ -352,64 +334,9 @@ class Objective:
 
 
 # ---------------------------------------------------------------------------
-# Data loading & splitting (shared with train.py — same seed, same split)
+# Data loading & splitting (now imported from common.py)
 # ---------------------------------------------------------------------------
-
-
-def load_and_split(
-    input_path: Path, device: torch.device
-) -> tuple[
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    torch.Tensor,
-    str,
-    str,
-    pl.DataFrame,
-    np.ndarray,
-    np.ndarray,
-]:
-    """Load parquet, pick the hardest sigma column, return 80/20 split.
-
-    Input features are scaled to [-1, 1] so that SIREN / Fourier models
-    receive coordinates in a range where their sine activations are
-    well-behaved.  The original coordinate bounds (``x_min``, ``x_max``)
-    are returned so that plotting utilities can undo the mapping.
-    """
-    df = pl.read_parquet(input_path)
-    X_np = df.select(["x1", "x2"]).to_numpy()
-    x_min = X_np.min(axis=0)  # shape (2,)
-    x_max = X_np.max(axis=0)  # shape (2,)
-    X_scaled = 2.0 * (X_np - x_min) / (x_max - x_min) - 1.0
-    X = torch.from_numpy(X_scaled).float().to(device)
-
-    sigma_cols = sorted(
-        [c for c in df.columns if c.startswith("y_sigma_")],
-        key=lambda c: int(c.split("_")[-1]),
-    )
-    hard_col = sigma_cols[-1]
-    y = torch.from_numpy(df[hard_col].to_numpy()).float().unsqueeze(1).to(device)
-
-    # Deterministic 80/20 split (must stay in sync with train.py)
-    n = X.shape[0]
-    n_val = int(0.2 * n)
-    n_train = n - n_val
-    gen = torch.Generator(device=device)
-    gen.manual_seed(42)
-    perm = torch.randperm(n, device=device, generator=gen)
-
-    func_name = input_path.stem
-    return (
-        X[perm[:n_train]],
-        y[perm[:n_train]],
-        X[perm[n_train:]],
-        y[perm[n_train:]],
-        func_name,
-        hard_col,
-        df,
-        x_min,
-        x_max,
-    )
+# See ma_thesis.common.load_and_split for implementation
 
 
 # ---------------------------------------------------------------------------
@@ -454,14 +381,7 @@ def main(
     logger.info(f"Input scaled to [-1, 1]  (x_min={x_min}, x_max={x_max})")
 
     # Pre-compute true surface for the plots
-    X_np = df.select(["x1", "x2"]).to_numpy()
-    Y_np = df[hard_col].to_numpy()
-    x_range = (float(X_np[:, 0].min()), float(X_np[:, 0].max()))
-    y_range = (float(X_np[:, 1].min()), float(X_np[:, 1].max()))
-    xg = np.linspace(x_range[0], x_range[1], grid_res)
-    yg = np.linspace(y_range[0], y_range[1], grid_res)
-    Xg, Yg = np.meshgrid(xg, yg)
-    Zg_true = griddata(X_np, Y_np, (Xg, Yg), method="cubic", fill_value=np.nan)
+    x_range, y_range, Zg_true = prepare_surface_grid(df, hard_col, grid_res)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

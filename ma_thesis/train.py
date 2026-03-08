@@ -7,237 +7,22 @@ import mlflow
 import numpy as np
 import optuna
 import polars as pl
-from scipy.interpolate import griddata
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import typer
 
+from ma_thesis.common import plot_model_surface, prepare_surface_grid
 from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
+from ma_thesis.models import build_model
 
 app = typer.Typer()
 
 
-def init_weights_lecun(m):
-    """
-    Matches Flax's default 'lecun_normal' initialization.
-    Flax Dense uses truncated normal with stddev = 1/sqrt(fan_in).
-    """
-    if isinstance(m, nn.Linear):
-        nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="linear")
-        if m.bias is not None:
-            nn.init.zeros_(m.bias)
-
-
-ACTIVATIONS = {
-    "silu": nn.SiLU,
-    "tanh": nn.Tanh,
-    "gelu": nn.GELU,
-    "relu": nn.ReLU,
-}
-
-
-class ResBlock(nn.Module):
-    """Residual block with two linear layers and configurable activation."""
-
-    def __init__(self, dim, activation: str = "silu"):
-        super().__init__()
-        act_cls = ACTIVATIONS[activation]
-        self.block = nn.Sequential(
-            nn.Linear(dim, dim),
-            act_cls(),
-            nn.Linear(dim, dim),
-        )
-        self.act = act_cls()
-
-    def forward(self, x):
-        return self.act(x + self.block(x))
-
-
-class MLP(nn.Module):
-    def __init__(self, hidden_dim=256, num_blocks=4, activation: str = "silu"):
-        super().__init__()
-        act_cls = ACTIVATIONS[activation]
-        self.input_proj = nn.Sequential(
-            nn.Linear(2, hidden_dim),
-            act_cls(),
-        )
-        self.blocks = nn.Sequential(*[ResBlock(hidden_dim, activation) for _ in range(num_blocks)])
-        self.output_proj = nn.Linear(hidden_dim, 1)
-        self.apply(init_weights_lecun)
-
-    def forward(self, x):
-        x = self.input_proj(x)
-        x = self.blocks(x)
-        return self.output_proj(x)
-
-
-class SirenLayer(nn.Module):
-    """Single sine layer with SIREN-specific weight initialisation."""
-
-    def __init__(self, in_dim: int, out_dim: int, omega_0: float = 30.0, is_first: bool = False):
-        super().__init__()
-        self.omega_0 = omega_0
-        self.linear = nn.Linear(in_dim, out_dim)
-        with torch.no_grad():
-            if is_first:
-                bound = 1.0 / in_dim
-            else:
-                bound = np.sqrt(6.0 / in_dim) / omega_0
-            self.linear.weight.uniform_(-bound, bound)
-            if self.linear.bias is not None:
-                self.linear.bias.zero_()
-
-    def forward(self, x):
-        return torch.sin(self.omega_0 * self.linear(x))
-
-
-class SIREN(nn.Module):
-    """Sinusoidal Representation Network.
-
-    Particularly effective for functions with high-frequency components
-    (e.g. Eggholder, which contains sin(sqrt(...)) terms).
-
-    Reference: Sitzmann et al., "Implicit Neural Representations with
-    Periodic Activation Functions", NeurIPS 2020.
-    """
-
-    def __init__(self, hidden_dim: int = 256, num_layers: int = 4, omega_0: float = 30.0):
-        super().__init__()
-        layers: list[nn.Module] = [SirenLayer(2, hidden_dim, omega_0=omega_0, is_first=True)]
-        for _ in range(num_layers - 1):
-            layers.append(SirenLayer(hidden_dim, hidden_dim, omega_0=omega_0))
-        self.net = nn.Sequential(*layers)
-        self.output = nn.Linear(hidden_dim, 1)
-        nn.init.zeros_(self.output.bias)
-
-    def forward(self, x):
-        return self.output(self.net(x))
-
-
-class FourierFeatureMLP(nn.Module):
-    """MLP preceded by random Fourier feature encoding.
-
-    Maps inputs through [sin(2π B x), cos(2π B x)] before the MLP,
-    giving the network a head-start at representing high-frequency patterns.
-    B is sampled once at init and kept fixed (not trained).
-
-    Reference: Tancik et al., "Fourier Features Let Networks Learn High
-    Frequency Functions in Low Dimensional Domains", NeurIPS 2020.
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int = 256,
-        num_blocks: int = 4,
-        activation: str = "silu",
-        num_fourier: int = 128,
-        sigma: float = 10.0,
-    ):
-        super().__init__()
-        B = torch.randn(2, num_fourier) * sigma
-        self.register_buffer("B", B)
-        input_dim = 2 * num_fourier  # sin + cos channels
-        act_cls = ACTIVATIONS[activation]
-        self.input_proj = nn.Sequential(nn.Linear(input_dim, hidden_dim), act_cls())
-        self.blocks = nn.Sequential(*[ResBlock(hidden_dim, activation) for _ in range(num_blocks)])
-        self.output_proj = nn.Linear(hidden_dim, 1)
-        self.apply(init_weights_lecun)
-
-    def forward(self, x):
-        x_proj = 2 * np.pi * (x @ self.B)
-        x_enc = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
-        x_enc = self.input_proj(x_enc)
-        x_enc = self.blocks(x_enc)
-        return self.output_proj(x_enc)
-
-
-def build_model(hp: dict, device: torch.device) -> nn.Module:
-    """Construct a model from a hyperparameter dict (as produced by the sweep)."""
-    arch = hp.get("model_arch", "mlp")
-    if arch == "siren":
-        model = SIREN(
-            hidden_dim=hp["hidden_dim"],
-            num_layers=hp.get("num_layers", 4),
-            omega_0=hp.get("omega_0", 30.0),
-        )
-    elif arch == "fourier":
-        model = FourierFeatureMLP(
-            hidden_dim=hp["hidden_dim"],
-            num_blocks=hp.get("num_blocks", 4),
-            activation=hp.get("activation", "silu"),
-            num_fourier=hp.get("num_fourier", 128),
-            sigma=hp.get("sigma", 10.0),
-        )
-    else:
-        model = MLP(
-            hidden_dim=hp["hidden_dim"],
-            num_blocks=hp.get("num_blocks", 4),
-            activation=hp.get("activation", "silu"),
-        )
-    return model.to(device)
-
-
-def plot_model_surface(
-    model,
-    device,
-    x_range,
-    y_range,
-    grid_res,
-    title,
-    save_path,
-    Zg_true=None,
-    x_min=None,
-    x_max=None,
-):
-    """Render the model's current learned surface as a 3D plot.
-
-    Parameters
-    ----------
-    x_min, x_max : np.ndarray, optional
-        If provided (shape ``(2,)``), grid coordinates are scaled to [-1, 1]
-        before being fed to the model.  Required when the model was trained
-        on normalised inputs (e.g. SIREN / Fourier feature networks).
-    """
-    xg = np.linspace(x_range[0], x_range[1], grid_res)
-    yg = np.linspace(y_range[0], y_range[1], grid_res)
-    Xg, Yg = np.meshgrid(xg, yg)
-    grid_np = np.column_stack([Xg.ravel(), Yg.ravel()])
-
-    # Scale to [-1, 1] when the model was trained on normalised inputs
-    if x_min is not None and x_max is not None:
-        grid_np = 2.0 * (grid_np - x_min) / (x_max - x_min) - 1.0
-
-    grid_points = torch.from_numpy(grid_np).float().to(device)
-
-    model.eval()
-    with torch.no_grad():
-        Zg_pred = model(grid_points).cpu().numpy().reshape(grid_res, grid_res)
-
-    ncols = 2 if Zg_true is not None else 1
-    fig = plt.figure(figsize=(7 * ncols, 5))
-
-    if Zg_true is not None:
-        ax1 = fig.add_subplot(1, 2, 1, projection="3d")
-        ax1.plot_surface(Xg, Yg, Zg_true, cmap="viridis", edgecolor="none", alpha=0.95)
-        ax1.set_title("True function")
-        ax1.set_xlabel("x1")
-        ax1.set_ylabel("x2")
-        ax1.set_zlabel("f(x)")
-        ax2 = fig.add_subplot(1, 2, 2, projection="3d")
-    else:
-        ax2 = fig.add_subplot(1, 1, 1, projection="3d")
-
-    ax2.plot_surface(Xg, Yg, Zg_pred, cmap="plasma", edgecolor="none", alpha=0.95)
-    ax2.set_title(title)
-    ax2.set_xlabel("x1")
-    ax2.set_ylabel("x2")
-    ax2.set_zlabel("f(x)")
-
-    plt.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return save_path
+# ---------------------------------------------------------------------------
+# Model definitions moved to ma_thesis/models.py
+# Plotting utilities moved to ma_thesis/common.py
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -637,13 +422,7 @@ def main(
     logger.info(f"Model: {model_arch}  ({n_params:,} params)")
 
     # Pre-compute true surface grid for snapshot plots
-    Y_hard_np = df[hard_col].to_numpy()
-    x_range = (float(X_np[:, 0].min()), float(X_np[:, 0].max()))
-    y_range = (float(X_np[:, 1].min()), float(X_np[:, 1].max()))
-    xg = np.linspace(x_range[0], x_range[1], grid_res)
-    yg = np.linspace(y_range[0], y_range[1], grid_res)
-    Xg, Yg = np.meshgrid(xg, yg)
-    Zg_true = griddata(X_np, Y_hard_np, (Xg, Yg), method="cubic", fill_value=np.nan)
+    x_range, y_range, Zg_true = prepare_surface_grid(df, hard_col, grid_res)
 
     # --- MLflow setup ---
     mlflow.set_experiment(experiment_name)
@@ -659,7 +438,7 @@ def main(
                 "n_train": n_train,
                 "n_val": n_val,
                 "num_sigma_levels": len(sigma_cols),
-                "levels_trained": [l for _, l in levels_to_train],
+                "levels_trained": [level for _, level in levels_to_train],
                 "patience": patience,
                 "min_delta": min_delta,
                 "max_epochs": epochs,
