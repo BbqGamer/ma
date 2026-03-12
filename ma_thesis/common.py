@@ -9,12 +9,14 @@ This module contains common functionality used across sweep.py and train.py:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
-from scipy.interpolate import griddata
 import torch
+import torch.nn as nn
+from scipy.interpolate import griddata
 
 # Default random seed for reproducible train/val splits
 TRAIN_VAL_SPLIT_SEED = 42
@@ -115,17 +117,17 @@ def load_and_split(
 
 
 def plot_model_surface(
-    model,
-    device,
-    x_range,
-    y_range,
-    grid_res,
-    title,
-    save_path,
-    Zg_true=None,
-    x_min=None,
-    x_max=None,
-):
+    model: nn.Module,
+    device: torch.device,
+    x_range: tuple[float, float],
+    y_range: tuple[float, float],
+    grid_res: int,
+    title: str,
+    save_path: Path | str,
+    Zg_true: np.ndarray | None = None,
+    x_min: np.ndarray | None = None,
+    x_max: np.ndarray | None = None,
+) -> Path:
     """Render the model's current learned surface as a 3D plot.
 
     Parameters
@@ -196,18 +198,14 @@ def plot_model_surface(
     plt.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    return save_path
+    return Path(save_path)
 
 
 def prepare_surface_grid(
     df: pl.DataFrame,
     hard_col: str,
     grid_res: int,
-) -> tuple[
-    tuple[float, float],  # x_range
-    tuple[float, float],  # y_range
-    np.ndarray,  # Zg_true (grid_res × grid_res)
-]:
+) -> tuple[tuple[float, float], tuple[float, float], np.ndarray]:
     """Pre-compute interpolated ground truth surface for plotting.
 
     Parameters

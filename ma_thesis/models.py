@@ -10,12 +10,14 @@ All models expect 2D input (x1, x2) and produce scalar output.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import torch
 import torch.nn as nn
 
 
-def init_weights_lecun(m):
+def init_weights_lecun(m: nn.Module) -> None:
     """
     Matches Flax's default 'lecun_normal' initialization.
     Flax Dense uses truncated normal with stddev = 1/sqrt(fan_in).
@@ -26,7 +28,7 @@ def init_weights_lecun(m):
             nn.init.zeros_(m.bias)
 
 
-ACTIVATIONS = {
+ACTIVATIONS: dict[str, type[nn.Module]] = {
     "silu": nn.SiLU,
     "tanh": nn.Tanh,
     "gelu": nn.GELU,
@@ -37,7 +39,7 @@ ACTIVATIONS = {
 class ResBlock(nn.Module):
     """Residual block with two linear layers and configurable activation."""
 
-    def __init__(self, dim, activation: str = "silu"):
+    def __init__(self, dim: int, activation: str = "silu") -> None:
         super().__init__()
         act_cls = ACTIVATIONS[activation]
         self.block = nn.Sequential(
@@ -47,7 +49,7 @@ class ResBlock(nn.Module):
         )
         self.act = act_cls()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.act(x + self.block(x))
 
 
@@ -67,7 +69,7 @@ class MLP(nn.Module):
         Activation function name (must be in ACTIVATIONS dict)
     """
 
-    def __init__(self, hidden_dim=256, num_blocks=4, activation: str = "silu"):
+    def __init__(self, hidden_dim: int = 256, num_blocks: int = 4, activation: str = "silu") -> None:
         super().__init__()
         act_cls = ACTIVATIONS[activation]
         self.input_proj = nn.Sequential(
@@ -78,7 +80,7 @@ class MLP(nn.Module):
         self.output_proj = nn.Linear(hidden_dim, 1)
         self.apply(init_weights_lecun)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.input_proj(x)
         x = self.blocks(x)
         return self.output_proj(x)
@@ -87,7 +89,9 @@ class MLP(nn.Module):
 class SirenLayer(nn.Module):
     """Single sine layer with SIREN-specific weight initialisation."""
 
-    def __init__(self, in_dim: int, out_dim: int, omega_0: float = 30.0, is_first: bool = False):
+    def __init__(
+        self, in_dim: int, out_dim: int, omega_0: float = 30.0, is_first: bool = False
+    ) -> None:
         super().__init__()
         self.omega_0 = omega_0
         self.linear = nn.Linear(in_dim, out_dim)
@@ -100,7 +104,7 @@ class SirenLayer(nn.Module):
             if self.linear.bias is not None:
                 self.linear.bias.zero_()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.sin(self.omega_0 * self.linear(x))
 
 
@@ -123,7 +127,9 @@ class SIREN(nn.Module):
         Frequency multiplier for sine activations
     """
 
-    def __init__(self, hidden_dim: int = 256, num_layers: int = 4, omega_0: float = 30.0):
+    def __init__(
+        self, hidden_dim: int = 256, num_layers: int = 4, omega_0: float = 30.0
+    ) -> None:
         super().__init__()
         layers: list[nn.Module] = [SirenLayer(2, hidden_dim, omega_0=omega_0, is_first=True)]
         for _ in range(num_layers - 1):
@@ -132,7 +138,7 @@ class SIREN(nn.Module):
         self.output = nn.Linear(hidden_dim, 1)
         nn.init.zeros_(self.output.bias)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.output(self.net(x))
 
 
@@ -167,7 +173,7 @@ class FourierFeatureMLP(nn.Module):
         activation: str = "silu",
         num_fourier: int = 128,
         sigma: float = 10.0,
-    ):
+    ) -> None:
         super().__init__()
         B = torch.randn(2, num_fourier) * sigma
         self.register_buffer("B", B)
@@ -178,7 +184,7 @@ class FourierFeatureMLP(nn.Module):
         self.output_proj = nn.Linear(hidden_dim, 1)
         self.apply(init_weights_lecun)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_proj = 2 * np.pi * (x @ self.B)
         x_enc = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
         x_enc = self.input_proj(x_enc)
@@ -186,7 +192,7 @@ class FourierFeatureMLP(nn.Module):
         return self.output_proj(x_enc)
 
 
-def build_model(hp: dict, device: torch.device) -> nn.Module:
+def build_model(hp: dict[str, Any], device: torch.device) -> nn.Module:
     """Construct a model from a hyperparameter dict (as produced by the sweep).
 
     Parameters

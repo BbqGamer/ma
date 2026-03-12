@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from loguru import logger
 import matplotlib.pyplot as plt
@@ -31,18 +31,18 @@ app = typer.Typer()
 
 
 def train_one_level(
-    model,
+    model: nn.Module,
     level: str,
     level_idx: int,
     total_levels: int,
-    X_train,
-    y_train,
-    X_val,
-    y_val,
-    y_hard_val,
+    X_train: torch.Tensor,
+    y_train: torch.Tensor,
+    X_val: torch.Tensor,
+    y_val: torch.Tensor,
+    y_hard_val: torch.Tensor,
     hard_col: str,
     func_name: str,
-    device,
+    device: torch.device,
     *,
     lr: float,
     epochs: int,
@@ -51,14 +51,14 @@ def train_one_level(
     min_delta: float,
     grid_res: int,
     snapshot_interval: int,
-    x_range: tuple,
-    y_range: tuple,
-    Zg_true,
+    x_range: tuple[float, float],
+    y_range: tuple[float, float],
+    Zg_true: np.ndarray,
     output_dir: Path,
     parent_run_id: str,
     global_step: int,
-    x_min: np.ndarray = None,
-    x_max: np.ndarray = None,
+    x_min: np.ndarray | None = None,
+    x_max: np.ndarray | None = None,
 ) -> int:
     """Train the model on a single sigma level. Returns updated global_step."""
     n_train = X_train.shape[0]
@@ -246,12 +246,12 @@ def main(
         "curriculum",
         help="Training mode: 'curriculum' (all sigmas sequentially) or 'single' (one sigma only).",
     ),
-    sigma_level: Optional[int] = typer.Option(
+    sigma_level: int | None = typer.Option(
         None,
         help="Sigma level index to train on (0 = most smoothed, -1 = raw). "
         "Required for mode='single'. Supports negative indexing.",
     ),
-    run_name: Optional[str] = typer.Option(
+    run_name: str | None = typer.Option(
         None,
         help="Custom MLflow run name. Auto-generated if not provided.",
     ),
@@ -267,16 +267,16 @@ def main(
     num_fourier: int = typer.Option(128, help="Number of Fourier features."),
     fourier_sigma: float = typer.Option(10.0, help="Fourier feature scale σ."),
     # --- Auto-load best trial from a completed Optuna sweep ---
-    from_sweep: Optional[str] = typer.Option(
+    from_sweep: str | None = typer.Option(
         None,
         help="Path to Optuna SQLite DB (e.g. reports/figures/sweep/sweep_eggholder.db). "
         "Loads the best trial's hyper-parameters, overriding manual arch options.",
     ),
-    study_name: Optional[str] = typer.Option(
+    study_name: str | None = typer.Option(
         None,
         help="Optuna study name inside --from-sweep DB. Required with --from-sweep.",
     ),
-):
+) -> None:
     """
     Train a model on Gaussian-continuation datasets (curriculum learning).
 

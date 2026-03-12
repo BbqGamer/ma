@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from loguru import logger
 import matplotlib.pyplot as plt
@@ -65,16 +65,16 @@ class SweepContext:
     min_delta: float
     # Plotting helpers
     grid_res: int
-    x_range: tuple
-    y_range: tuple
+    x_range: tuple[float, float]
+    y_range: tuple[float, float]
     Zg_true: np.ndarray
     output_dir: Path
-    df: pl.DataFrame = None
+    df: pl.DataFrame | None = None
     # Input scaling params (shape (2,) each) — used to map grid back for plots
-    x_min: np.ndarray = None
-    x_max: np.ndarray = None
+    x_min: np.ndarray | None = None
+    x_max: np.ndarray | None = None
     # Restrict model architectures to search over (None = all)
-    model_archs: tuple = ("mlp", "siren", "fourier")
+    model_archs: tuple[str, ...] = ("mlp", "siren", "fourier")
     # How often to report to pruner (every N epochs)
     report_interval: int = 10
 
@@ -99,10 +99,10 @@ class Objective:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def suggest(trial: optuna.Trial, model_archs: tuple) -> dict:
+    def suggest(trial: optuna.Trial, model_archs: tuple[str, ...]) -> dict[str, Any]:
         """Define the search space.  Easy to extend with new hyper-params."""
         arch = trial.suggest_categorical("model_arch", list(model_archs))
-        hp: dict = {
+        hp: dict[str, Any] = {
             "model_arch": arch,
             "hidden_dim": trial.suggest_categorical("hidden_dim", [64, 128, 256, 512]),
             "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
@@ -184,7 +184,7 @@ class Objective:
         self,
         trial: optuna.Trial,
         model: nn.Module,
-        hp: dict,
+        hp: dict[str, Any],
         run_label: str,
     ) -> float:
         ctx = self.ctx
