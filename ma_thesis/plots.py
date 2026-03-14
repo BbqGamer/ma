@@ -63,7 +63,7 @@ def main(
             yg = np.linspace(y_range[0], y_range[1], grid_res)
             Xg, Yg = np.meshgrid(xg, yg)
             Zg = griddata(X, Y, (Xg, Yg), method="cubic", fill_value=np.nan)
-            surf = ax1.plot_surface(Xg, Yg, Zg, cmap="viridis", edgecolor="none", alpha=0.95)
+            ax1.plot_surface(Xg, Yg, Zg, cmap="viridis", edgecolor="none", alpha=0.95)
             ax1.set_title(f"{y_col}\nSurface plot")
             ax1.set_xlabel("x1")
             ax1.set_ylabel("x2")

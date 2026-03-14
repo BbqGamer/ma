@@ -1,0 +1,17 @@
+run:
+  method: sweep
+  function: eggholder
+  regenerate_data: true
+  num_samples: 12000
+  num_sigmas: 6
+  sigma_scale: 7.0
+  seed: 42
+  experiment_name: sweep-eggholder-v1
+  sweep_storage: sqlite:///reports/optuna/sweep_eggholder_v1.db
+  n_trials: 90
+  epochs: 900
+  patience: 45
+  min_delta: 0.00001
+  report_interval: 10
+  grid_res: 70
+  model_archs: "mlp,siren,fourier"

@@ -1,5 +1,7 @@
+import json
 from pathlib import Path
-from typing import Any, Optional
+import sys
+from typing import Any
 
 from loguru import logger
 import matplotlib.pyplot as plt
@@ -17,6 +19,14 @@ from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
 from ma_thesis.models import build_model
 
 app = typer.Typer()
+
+
+def _log_run_config(output_dir: Path, payload: dict[str, Any]) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    config_path = output_dir / "run_config.json"
+    config_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    mlflow.log_artifact(str(config_path), artifact_path="config")
+    return config_path
 
 
 # ---------------------------------------------------------------------------
@@ -256,9 +266,7 @@ def main(
         help="Custom MLflow run name. Auto-generated if not provided.",
     ),
     # --- Model architecture (manual) ---
-    model_arch: str = typer.Option(
-        "mlp", help="Model architecture: mlp, siren, or fourier."
-    ),
+    model_arch: str = typer.Option("mlp", help="Model architecture: mlp, siren, or fourier."),
     hidden_dim: int = typer.Option(256, help="Hidden dimension."),
     num_blocks: int = typer.Option(4, help="Residual blocks (mlp / fourier)."),
     activation: str = typer.Option("silu", help="Activation (mlp / fourier)."),
@@ -428,6 +436,14 @@ def main(
     mlflow.set_experiment(experiment_name)
 
     with mlflow.start_run(run_name=actual_run_name) as parent_run:
+        mlflow.set_tags(
+            {
+                "strategy": mode,
+                "function": func_name,
+                "model_arch": str(model_arch),
+                "entrypoint": "ma_thesis.train",
+            }
+        )
         mlflow.log_params(
             {
                 **hp,
@@ -448,6 +464,31 @@ def main(
             }
         )
         mlflow.log_artifact(str(input_path), artifact_path="data")
+        _log_run_config(
+            output_dir / "configs",
+            {
+                "argv": sys.argv,
+                "input_path": str(input_path),
+                "mode": mode,
+                "run_name": actual_run_name,
+                "experiment_name": experiment_name,
+                "hyperparameters": hp,
+                "training": {
+                    "patience": patience,
+                    "min_delta": min_delta,
+                    "epochs": epochs,
+                    "batch_size": batch_size,
+                    "lr": lr,
+                },
+                "dataset": {
+                    "function": func_name,
+                    "num_samples": int(num_samples),
+                    "train_samples": int(n_train),
+                    "val_samples": int(n_val),
+                    "sigma_columns": sigma_cols,
+                },
+            },
+        )
 
         global_step = 0
 
@@ -488,9 +529,12 @@ def main(
             )
 
         # Save and log final model
-        model_path = MODELS_DIR / f"{func_name}_{model_arch}.pt"
+        run_id = parent_run.info.run_id
+        model_path = MODELS_DIR / f"{func_name}_{mode}_{model_arch}_{run_id[:8]}.pt"
         torch.save(model.state_dict(), model_path)
         mlflow.log_artifact(str(model_path), artifact_path="model")
+        mlflow.pytorch.log_model(model, artifact_path="model_pt")
+        mlflow.log_param("checkpoint_path", str(model_path))
         logger.success(f"Final model saved to {model_path}")
 
         # Log the final hard validation loss to the parent run

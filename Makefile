@@ -61,7 +61,12 @@ create_environment:
 ## Make dataset
 .PHONY: data
 data: requirements
-	$(PYTHON_INTERPRETER) ma_thesis/dataset.py
+	$(PYTHON_INTERPRETER) -m ma_thesis.experiment prepare-data --function all
+
+## Run one experiment from a single command
+.PHONY: experiment
+experiment: requirements
+	$(PYTHON_INTERPRETER) -m ma_thesis.experiment run --method curriculum --function ackley
 
 
 #################################################################################

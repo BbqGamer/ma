@@ -1,0 +1,17 @@
+run:
+  method: sweep
+  function: peaks
+  regenerate_data: true
+  num_samples: 10000
+  num_sigmas: 5
+  sigma_scale: 5.0
+  seed: 42
+  experiment_name: sweep-peaks-v1
+  sweep_storage: sqlite:///reports/optuna/sweep_peaks_v1.db
+  n_trials: 80
+  epochs: 800
+  patience: 40
+  min_delta: 0.00001
+  report_interval: 10
+  grid_res: 90
+  model_archs: "mlp,siren,fourier"

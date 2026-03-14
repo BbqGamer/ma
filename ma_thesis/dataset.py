@@ -7,7 +7,16 @@ from sklearn.neighbors import NearestNeighbors
 import typer
 
 from ma_thesis.config import PROCESSED_DATA_DIR
-from ma_thesis.data import ackley, eggholder, levy
+from ma_thesis.data import (
+    ackley,
+    bukin_function_6,
+    eggholder,
+    franke,
+    friedman1_2d,
+    friedman2_2d,
+    levy,
+    peaks,
+)
 
 app = typer.Typer()
 
@@ -16,6 +25,11 @@ FUNCTIONS = {
     "ackley": (ackley, (-5, 5), (-5, 5)),
     "levy": (levy, (-10, 10), (-10, 10)),
     "eggholder": (eggholder, (-512, 512), (-512, 512)),
+    "bukin": (bukin_function_6, (-15, -5), (-3, 3)),
+    "franke": (franke, (0, 1), (0, 1)),
+    "peaks": (peaks, (-3, 3), (-3, 3)),
+    "friedman1_2d": (friedman1_2d, (0, 1), (0, 1)),
+    "friedman2_2d": (friedman2_2d, (0, 1), (0, 1)),
 }
 
 
@@ -70,13 +84,21 @@ def generate_and_smooth(func, x_range, y_range, N=2000, K=6, sigma_scale=5, seed
 @app.command()
 def main(
     function: str = typer.Option(
-        "ackley", help="Function to use: ackley, levy, eggholder, or 'all' for all functions"
+        "ackley",
+        help=(
+            "Function to use: ackley, levy, eggholder, bukin, franke, peaks, "
+            "friedman1_2d, friedman2_2d, or 'all' for all."
+        ),
     ),
     output_dir: Path = PROCESSED_DATA_DIR,
     num_samples: int = 4000,
     num_sigmas: int = 3,
     sigma_scale: float = 5.0,
     seed: int = 42,
+    output_name: str | None = typer.Option(
+        None,
+        help="Optional output filename for single function generation (e.g. ackley_n4000_k3.parquet).",
+    ),
 ):
     """
     Generate function dataset(s) with Gaussian continuation smoothing.
@@ -93,6 +115,10 @@ def main(
         logger.error(
             f"Unknown function '{function}'. Available: {', '.join(FUNCTIONS.keys())}, 'all'"
         )
+        raise typer.Exit(code=1)
+
+    if function.lower() == "all" and output_name:
+        logger.error("--output-name can only be used with a single function, not with 'all'.")
         raise typer.Exit(code=1)
 
     # Process each function
@@ -123,7 +149,8 @@ def main(
             logger.info(f"  Sigma {i}: {sigma:.4f}")
 
         df = pl.DataFrame(data)
-        output_path = output_dir / f"{func_name}.parquet"
+        filename = output_name if output_name else f"{func_name}.parquet"
+        output_path = output_dir / filename
         df.write_parquet(output_path)
         logger.success(f"Dataset saved to {output_path}")
 

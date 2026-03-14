@@ -1,0 +1,17 @@
+run:
+  method: sweep
+  function: ackley
+  regenerate_data: true
+  num_samples: 8000
+  num_sigmas: 5
+  sigma_scale: 5.0
+  seed: 42
+  experiment_name: sweep-ackley-v1
+  sweep_storage: sqlite:///reports/optuna/sweep_ackley_v1.db
+  n_trials: 70
+  epochs: 700
+  patience: 35
+  min_delta: 0.00001
+  report_interval: 10
+  grid_res: 80
+  model_archs: "mlp,siren,fourier"

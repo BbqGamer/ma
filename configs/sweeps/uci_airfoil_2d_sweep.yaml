@@ -1,0 +1,14 @@
+run:
+  method: sweep
+  # function key is still required by current runner; dataset comes from input_path.
+  function: ackley
+  regenerate_data: false
+  input_path: data/processed/uci_airfoil_2d.parquet
+  experiment_name: sweep-uci-airfoil-2d-v1
+  n_trials: 120
+  epochs: 900
+  patience: 45
+  min_delta: 0.00001
+  report_interval: 10
+  grid_res: 80
+  model_archs: "mlp,siren,fourier"

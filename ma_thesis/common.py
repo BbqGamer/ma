@@ -9,14 +9,13 @@ This module contains common functionality used across sweep.py and train.py:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
+from scipy.interpolate import griddata
 import torch
 import torch.nn as nn
-from scipy.interpolate import griddata
 
 # Default random seed for reproducible train/val splits
 TRAIN_VAL_SPLIT_SEED = 42

@@ -1,0 +1,17 @@
+run:
+  method: sweep
+  function: friedman2_2d
+  regenerate_data: true
+  num_samples: 12000
+  num_sigmas: 6
+  sigma_scale: 5.0
+  seed: 42
+  experiment_name: sweep-friedman2-2d-v1
+  sweep_storage: sqlite:///reports/optuna/sweep_friedman2_2d_v1.db
+  n_trials: 90
+  epochs: 900
+  patience: 45
+  min_delta: 0.00001
+  report_interval: 10
+  grid_res: 90
+  model_archs: "mlp,siren,fourier"

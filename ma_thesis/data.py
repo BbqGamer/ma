@@ -95,3 +95,44 @@ def smooth(func, window_size=0.1, samples=50):
         return vals / samples
 
     return smoothed
+
+
+def franke(x):
+    """Franke function on [0, 1]^2 (classic interpolation/regression benchmark)."""
+    x = np.asarray(x)
+    x1 = x[:, 0]
+    x2 = x[:, 1]
+    term1 = 0.75 * np.exp(-((9 * x1 - 2) ** 2 + (9 * x2 - 2) ** 2) / 4)
+    term2 = 0.75 * np.exp(-((9 * x1 + 1) ** 2) / 49 - (9 * x2 + 1) / 10)
+    term3 = 0.5 * np.exp(-((9 * x1 - 7) ** 2 + (9 * x2 - 3) ** 2) / 4)
+    term4 = -0.2 * np.exp(-((9 * x1 - 4) ** 2 + (9 * x2 - 7) ** 2))
+    return term1 + term2 + term3 + term4
+
+
+def peaks(x):
+    """MATLAB-style Peaks surface (2D nonlinear regression benchmark)."""
+    x = np.asarray(x)
+    x1 = x[:, 0]
+    x2 = x[:, 1]
+    term1 = 3 * (1 - x1) ** 2 * np.exp(-(x1**2) - (x2 + 1) ** 2)
+    term2 = -10 * (x1 / 5 - x1**3 - x2**5) * np.exp(-(x1**2) - x2**2)
+    term3 = -(1 / 3) * np.exp(-((x1 + 1) ** 2) - x2**2)
+    return term1 + term2 + term3
+
+
+def friedman1_2d(x):
+    """2D analogue of Friedman #1 with fixed nuisance coordinates."""
+    x = np.asarray(x)
+    x1 = x[:, 0]
+    x2 = x[:, 1]
+    # Keep the first interaction from Friedman #1 and collapse the rest.
+    return 10 * np.sin(np.pi * x1 * x2) + 11.2 * x1 + 5.0
+
+
+def friedman2_2d(x):
+    """2D analogue inspired by Friedman #2 geometry."""
+    x = np.asarray(x)
+    x1 = x[:, 0]
+    x2 = x[:, 1]
+    # Keep ratio-like nonlinearity to induce steep manifolds.
+    return np.sqrt(x1**2 + (x2 * x1 - 1.0 / (x2 + 0.1)) ** 2)

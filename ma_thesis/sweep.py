@@ -23,7 +23,9 @@ Sort by ``best_val_loss`` to find the winning configuration.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+import sys
 from typing import Any, Optional
 
 from loguru import logger
@@ -42,6 +44,14 @@ from ma_thesis.config import FIGURES_DIR, PROCESSED_DATA_DIR
 from ma_thesis.models import ACTIVATIONS, build_model
 
 app = typer.Typer()
+
+
+def _log_run_config(output_dir: Path, payload: dict[str, Any]) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    config_path = output_dir / "sweep_config.json"
+    config_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    mlflow.log_artifact(str(config_path), artifact_path="config")
+    return config_path
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +176,32 @@ class Objective:
         else:
             dataset = None
         with mlflow.start_run(run_name=run_label, nested=False):
+            mlflow.set_tags(
+                {
+                    "strategy": "sweep_trial",
+                    "function": ctx.func_name,
+                    "model_arch": arch,
+                    "entrypoint": "ma_thesis.sweep",
+                    "optuna_trial": str(trial.number),
+                }
+            )
             mlflow.log_params({**hp, "n_params": n_params, "function": ctx.func_name})
+            _log_run_config(
+                ctx.output_dir / "configs",
+                {
+                    "argv": sys.argv,
+                    "trial_number": trial.number,
+                    "run_label": run_label,
+                    "function": ctx.func_name,
+                    "hyperparameters": hp,
+                    "training_budget": {
+                        "epochs": ctx.epochs,
+                        "patience": ctx.patience,
+                        "min_delta": ctx.min_delta,
+                        "report_interval": ctx.report_interval,
+                    },
+                },
+            )
             if dataset is not None:
                 mlflow.log_input(dataset, context="training")
 

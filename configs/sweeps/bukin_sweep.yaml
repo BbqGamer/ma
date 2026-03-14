@@ -1,0 +1,17 @@
+run:
+  method: sweep
+  function: bukin
+  regenerate_data: true
+  num_samples: 10000
+  num_sigmas: 6
+  sigma_scale: 8.0
+  seed: 42
+  experiment_name: sweep-bukin-v1
+  sweep_storage: sqlite:///reports/optuna/sweep_bukin_v1.db
+  n_trials: 70
+  epochs: 700
+  patience: 35
+  min_delta: 0.00001
+  report_interval: 10
+  grid_res: 80
+  model_archs: "mlp,siren,fourier"

@@ -27,12 +27,74 @@ source .venv/bin/activate
 make requirements          # runs `uv sync`
 
 # generate smoothed datasets (Ackley, Levy, Eggholder)
-make data                  # runs ma_thesis/dataset.py
+make data
+
+# run one experiment (single script orchestrator)
+python -m ma_thesis.experiment run --method curriculum --function ackley
+
+# run from yaml config
+python -m ma_thesis.experiment run-config configs/sweeps/ackley_sweep.yaml
 
 # lint / format
 make lint
 make format
 ```
+
+## Unified Experiment Runner
+
+Use a single entrypoint for all experiment types:
+
+```bash
+# curriculum learning
+python -m ma_thesis.experiment run --method curriculum --function ackley
+
+# single sigma level
+python -m ma_thesis.experiment run --method single --function ackley --sigma-level -1
+
+# meta-curriculum
+python -m ma_thesis.experiment run --method meta --function eggholder --model-arch fourier
+
+# optuna sweep
+python -m ma_thesis.experiment run --method sweep --function levy --n-trials 80
+```
+
+Each run writes:
+- MLflow params/tags with explicit `strategy` + `model_arch`
+- model artifacts (`.pt` checkpoint + MLflow PyTorch model for train/meta)
+- run manifest JSON in `reports/runs/` with invoked arguments
+
+Datasets are versioned by default, e.g.:
+- `data/processed/ackley_n8000_k5_ss5_seed42.parquet`
+
+## YAML Experiment Configs
+
+You can commit reproducible experiment plans in YAML and run them with one command:
+
+```bash
+python -m ma_thesis.experiment run-config configs/sweeps/ackley_sweep.yaml
+python -m ma_thesis.experiment run-config configs/sweeps/levy_sweep.yaml
+python -m ma_thesis.experiment run-config configs/sweeps/eggholder_sweep.yaml
+python -m ma_thesis.experiment run-config configs/sweeps/bukin_sweep.yaml
+python -m ma_thesis.experiment run-config configs/sweeps/franke_sweep.yaml
+python -m ma_thesis.experiment run-config configs/sweeps/peaks_sweep.yaml
+python -m ma_thesis.experiment run-config configs/sweeps/friedman1_2d_sweep.yaml
+python -m ma_thesis.experiment run-config configs/sweeps/friedman2_2d_sweep.yaml
+```
+
+Typical workflow:
+1. Run sweep config for a function.
+2. Open MLflow, pick best trial hyperparameters.
+3. Run curriculum/meta with those exact hyperparameters (or via `--from-sweep` and `--study-name` for curriculum).
+
+Config templates for step 3:
+- `configs/experiments/curriculum_from_sweep_template.yaml`
+- `configs/experiments/meta_manual_template.yaml`
+
+Start-and-leave sweep pack:
+- `./scripts/run_sweep_pack.sh`
+- Detailed logs: `reports/logs/sweep_pack_*.log`
+- Summary: `reports/logs/sweep_pack_*_summary.log`
+- Optuna DBs (resumable): `reports/optuna/*.db`
 
 ## Project Structure
 
@@ -45,12 +107,12 @@ make format
 │   ├── config.py          <- Paths and project-wide constants
 │   ├── data.py            <- Benchmark functions (Ackley, Levy, Eggholder, …)
 │   ├── dataset.py         <- Gaussian continuation data generator (CLI via Typer)
-│   ├── features.py        <- Feature engineering (placeholder)
-│   ├── plots.py           <- Visualisation of smoothed surfaces
-│   ├── train.py           <- MLP model definition and training loop (PyTorch + MLflow)
-│   └── modeling/
-│       ├── train.py       <- Model training entry point (placeholder)
-│       └── predict.py     <- Inference entry point (placeholder)
+│   ├── experiment.py      <- Single orchestrator CLI for data + train + sweep
+│   ├── train.py           <- Curriculum/single training (PyTorch + MLflow)
+│   ├── meta_train.py      <- Meta-curriculum training (bi-level optimization)
+│   ├── sweep.py           <- Optuna hyperparameter sweeps
+│   ├── models.py          <- Model architectures and factory
+│   └── common.py          <- Shared data splitting + plotting utilities
 │
 ├── notebooks/             <- Interactive notebooks (Marimo / Jupyter)
 │   ├── gaussian.ipynb     <- Gaussian smoothing explorations
@@ -100,5 +162,3 @@ and supervisor meeting notes. See `docs/mkdocs.yml` for configuration.
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
-
-
