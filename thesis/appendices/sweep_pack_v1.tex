@@ -1,0 +1,31 @@
+% Auto-generated archival appendix snippet for sweep-pack v1.
+\chapter{Sweep Pack v1 Reproducibility Snapshot}
+\label{app:sweep-pack-v1}
+
+This appendix references the immutable archive in
+\texttt{docs/results/2026-03-14\_sweep-pack-v1.md}.
+
+\textbf{Run window:} 2026-03-14T15:15:21+01:00 to 2026-03-15T02:41:45+01:00.\\
+\textbf{Source commit (pre-archive):} \texttt{bf8f54969c16dd7f16ee57e87313f20fb0f9c99c}.\\
+\textbf{Trials:} 630 total, 336 finished, 294 pruned.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrll}
+\toprule
+Function & Best val loss & Median val loss & Best arch & Pruned \\
+\midrule
+franke\_n10000\_k5\_ss4\_seed42 & 2.526e-06 & 1.162e-05 & mlp & 41.2\% \\
+friedman2\_2d\_n12000\_k6\_ss5\_seed42 & 3.901e-06 & 5.083e-05 & mlp & 48.9\% \\
+friedman1\_2d\_n12000\_k5\_ss4p5\_seed42 & 1.078e-05 & 1.285e-04 & mlp & 40.0\% \\
+peaks\_n10000\_k5\_ss5\_seed42 & 3.635e-05 & 3.945e-04 & siren & 51.2\% \\
+bukin\_n10000\_k6\_ss8\_seed42 & 7.625e-05 & 7.444e-03 & mlp & 35.7\% \\
+ackley\_n8000\_k5\_ss5\_seed42 & 2.024e-04 & 2.888e-01 & mlp & 50.0\% \\
+levy\_n9000\_k5\_ss6\_seed42 & 6.195e-03 & 1.033e+00 & mlp & 57.1\% \\
+eggholder\_n12000\_k6\_ss7\_seed42 & 6.023e+01 & 1.458e+03 & fourier & 48.9\% \\
+\bottomrule
+\end{tabular}
+\caption{Best trial per function for sweep pack v1.}
+\label{tab:sweep-pack-v1-best}
+\end{table}

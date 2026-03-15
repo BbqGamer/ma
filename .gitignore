@@ -192,6 +192,9 @@ cython_debug/
 
 __marimo__/
 reports/figures/
+reports/logs/*.log
+reports/optuna/*.db
+reports/results/*_trial_stats.csv
 mlruns
 mlflow.db
 models/

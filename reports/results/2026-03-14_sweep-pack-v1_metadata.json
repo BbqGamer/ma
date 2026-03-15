@@ -1,0 +1,79 @@
+{
+  "archive_id": "2026-03-14_sweep-pack-v1",
+  "artifacts": {
+    "best_runs_csv": "reports/results/2026-03-14_sweep-pack-v1_best_runs.csv",
+    "env_snapshot": "reports/results/2026-03-14_sweep-pack-v1_env.txt",
+    "mlflow_db": "mlflow.db",
+    "run_log": "reports/logs/sweep_pack_20260314_151521.log",
+    "summary_log": "reports/logs/sweep_pack_20260314_151521_summary.log",
+    "trial_stats_csv": "reports/results/2026-03-14_sweep-pack-v1_trial_stats.csv"
+  },
+  "counts": {
+    "finished": 336,
+    "killed": 294,
+    "total_trials": 630
+  },
+  "created_at_local": "2026-03-15T14:59:31+01:00",
+  "experiments": [
+    {
+      "creation_time": 1773497750911,
+      "experiment_id": 12,
+      "last_update_time": 1773497750911,
+      "name": "sweep-ackley-v1"
+    },
+    {
+      "creation_time": 1773502866912,
+      "experiment_id": 13,
+      "last_update_time": 1773502866912,
+      "name": "sweep-levy-v1"
+    },
+    {
+      "creation_time": 1773508514029,
+      "experiment_id": 14,
+      "last_update_time": 1773508514029,
+      "name": "sweep-bukin-v1"
+    },
+    {
+      "creation_time": 1773514631177,
+      "experiment_id": 15,
+      "last_update_time": 1773514631177,
+      "name": "sweep-eggholder-v1"
+    },
+    {
+      "creation_time": 1773522007204,
+      "experiment_id": 16,
+      "last_update_time": 1773522007204,
+      "name": "sweep-franke-v1"
+    },
+    {
+      "creation_time": 1773525324187,
+      "experiment_id": 17,
+      "last_update_time": 1773525324187,
+      "name": "sweep-peaks-v1"
+    },
+    {
+      "creation_time": 1773528853739,
+      "experiment_id": 18,
+      "last_update_time": 1773528853739,
+      "name": "sweep-friedman1-2d-v1"
+    },
+    {
+      "creation_time": 1773534017679,
+      "experiment_id": 19,
+      "last_update_time": 1773534017679,
+      "name": "sweep-friedman2-2d-v1"
+    }
+  ],
+  "git": {
+    "branch": "master",
+    "commit_sha": "bf8f54969c16dd7f16ee57e87313f20fb0f9c99c"
+  },
+  "locks": {
+    "uv_lock_sha256": "be1ef803f367f75fe580b7c2d1d1faf643c2de4b8befe8af3973e8c128898c2c"
+  },
+  "run_window": {
+    "finished_at": "2026-03-15T02:41:45+01:00",
+    "started_at": "2026-03-14T15:15:21+01:00"
+  },
+  "timezone": "CET"
+}
