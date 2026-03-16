@@ -1,13 +1,39 @@
-% Auto-generated archival appendix snippet for sweep-pack v1.
-\chapter{Sweep Pack v1 Reproducibility Snapshot}
+% Sweep archive appendix with explanatory narrative.
+\chapter{Sweep Pack v1: Hyperparameter Search Baseline}
 \label{app:sweep-pack-v1}
 
-This appendix references the immutable archive in
-\texttt{docs/results/2026-03-14\_sweep-pack-v1.md}.
+\section{Why this experiment was run}
 
-\textbf{Run window:} 2026-03-14T15:15:21+01:00 to 2026-03-15T02:41:45+01:00.\\
-\textbf{Source commit (pre-archive):} \texttt{bf8f54969c16dd7f16ee57e87313f20fb0f9c99c}.\\
-\textbf{Trials:} 630 total, 336 finished, 294 pruned.
+Before evaluating curriculum strategies, I first needed a stable and fair baseline
+for architecture and optimization hyperparameters on each benchmark function.
+The purpose of the sweep pack was to:
+
+\begin{itemize}
+    \item identify strong per-function hyperparameters for downstream comparisons,
+    \item validate that all benchmark datasets and training pipelines are operational,
+    \item quantify variability and pruning behavior in broad search spaces.
+\end{itemize}
+
+Without this step, any later comparison between \texttt{single} and
+\texttt{curriculum} training could be confounded by poor manual hyperparameter
+choices rather than the curriculum method itself.
+
+\section{What was done}
+
+The sweep pack executed eight Optuna studies in sequence
+(\texttt{ackley, levy, bukin, eggholder, franke, peaks, friedman1\_2d, friedman2\_2d}).
+For each function:
+
+\begin{itemize}
+    \item the method was \texttt{sweep},
+    \item model families searched: MLP, SIREN, Fourier,
+    \item objective optimized: validation MSE (\texttt{best\_val\_loss}),
+    \item all trials were logged to MLflow with per-trial configuration and metrics.
+\end{itemize}
+
+Run window: 2026-03-14T15:15:21+01:00 to 2026-03-15T02:41:45+01:00.
+
+\section{Main outcomes}
 
 \begin{table}[h]
 \centering
@@ -29,3 +55,24 @@ eggholder\_n12000\_k6\_ss7\_seed42 & 6.023e+01 & 1.458e+03 & fourier & 48.9\% \\
 \caption{Best trial per function for sweep pack v1.}
 \label{tab:sweep-pack-v1-best}
 \end{table}
+
+\paragraph{Interpretation.}
+The sweep confirms that no single architecture dominates every function.
+MLP is strongest overall, while selected functions favor other inductive biases
+(e.g., Fourier on \texttt{eggholder}, SIREN on \texttt{peaks}). This justifies
+using per-function best hyperparameters in the subsequent curriculum-vs-single
+benchmark.
+
+\section{How this feeds the next stage}
+
+The sweep outputs became fixed inputs to the comparison benchmark:
+
+\begin{itemize}
+    \item same datasets,
+    \item same best-study source (\texttt{from\_sweep}),
+    \item same seeds and evaluation protocol,
+    \item only training strategy changed (single vs curriculum).
+\end{itemize}
+
+This design isolates the effect of curriculum scheduling from unrelated
+hyperparameter tuning effects.
