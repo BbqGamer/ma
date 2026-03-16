@@ -195,6 +195,9 @@ reports/figures/
 reports/logs/*.log
 reports/optuna/*.db
 reports/results/*_trial_stats.csv
+reports/benchmarks/
+reports/runs/*_single.json
+reports/runs/*_curriculum.json
 mlruns
 mlflow.db
 models/
