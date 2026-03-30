@@ -198,6 +198,7 @@ reports/results/*_trial_stats.csv
 reports/benchmarks/
 reports/runs/*_single.json
 reports/runs/*_curriculum.json
+reports/runs/*_sweep.json
 mlruns
 mlflow.db
 models/

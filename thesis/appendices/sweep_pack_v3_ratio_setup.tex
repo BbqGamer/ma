@@ -1,0 +1,181 @@
+% Appendix draft for the current v3 ratio-constrained noisy sweep.
+\chapter{Sweep Pack v3: Experiment Setting (Draft)}
+\label{app:sweep-pack-v3-setup}
+
+\section{Purpose of this experiment}
+
+This experiment defines a stronger baseline for later curriculum-learning
+evaluation by using:
+\begin{itemize}
+    \item fixed data volume and split policy across all functions,
+    \item controlled observation noise in training data generation,
+    \item explicit parameter-to-training-samples constraints,
+    \item expanded optimization diagnostics logged to MLflow.
+\end{itemize}
+
+The objective is to establish a reproducible and non-trivial optimization setup
+before comparing curriculum strategies.
+
+\section{Dataset construction protocol}
+
+For each benchmark function, data are generated from the analytical function and
+saved as two separate files:
+\begin{itemize}
+    \item \texttt{*\_train.parquet}: used for model fitting and internal train/val split,
+    \item \texttt{*\_test.parquet}: used only for final holdout evaluation.
+\end{itemize}
+
+\paragraph{Current default settings (v3).}
+\begin{itemize}
+    \item Total generated samples per function: \texttt{20000}
+    \item Holdout policy: \texttt{10000 train file + 10000 test file}
+    \item Internal split inside train file: \texttt{80/20} (effective \texttt{8000/2000})
+    \item Number of smoothing levels: \texttt{3}
+    \item Noise model: additive Gaussian label noise
+    \item Noise ratio: \texttt{0.03} (relative to target standard deviation)
+    \item Random seed: \texttt{42}
+\end{itemize}
+
+\section{Sweep protocol and search constraints}
+
+\paragraph{Runner.}
+The sweep pack is executed with:
+\begin{verbatim}
+./scripts/run_sweep_pack_v3_ratio.sh
+\end{verbatim}
+
+\paragraph{Functions included.}
+\texttt{ackley, levy, bukin, eggholder, franke, peaks, friedman1\_2d, friedman2\_2d}.
+
+\paragraph{Per-function study settings.}
+\begin{itemize}
+    \item Trials per function: \texttt{90}
+    \item Architectures searched: \texttt{MLP, SIREN, Fourier}
+    \item Early stopping patience: \texttt{25}
+    \item Ratio constraint: \(\texttt{train\_samples} / \texttt{n\_params} \in [5, 10]\)
+\end{itemize}
+
+Because training uses the internal train split (\(\approx 8000\) samples), the
+effective valid parameter range is approximately:
+\[
+    \texttt{n\_params} \in [800, 1600].
+\]
+
+\section{Metrics logged to MLflow}
+
+\paragraph{Primary quality metrics.}
+\begin{itemize}
+    \item \texttt{best\_val\_loss}
+    \item \texttt{final\_hard\_val\_loss}
+    \item \texttt{final\_test\_loss} (from \texttt{*\_test.parquet})
+\end{itemize}
+
+\paragraph{Optimization-stability diagnostics (new).}
+\begin{itemize}
+    \item Step-wise: \texttt{grad\_cosine\_sim}, \texttt{grad\_variance},
+          \texttt{grad\_noise\_scale}, \texttt{gsnr}
+    \item Epoch-wise: \texttt{hessian\_trace}, \texttt{critical\_sharpness},
+          \texttt{weight\_alpha} and layer-wise \texttt{weight\_alpha\_<layer>}
+\end{itemize}
+
+\subsection{Interpretation of roughness and stability metrics}
+
+This subsection explains how each diagnostic should be interpreted when
+presenting results.
+
+\paragraph{1) Gradient cosine similarity (\texttt{grad\_cosine\_sim}, step-wise).}
+For consecutive minibatch gradients \(g_t\) and \(g_{t-1}\), we compute:
+\[
+\cos(g_t, g_{t-1}) = \frac{g_t^\top g_{t-1}}{\|g_t\|\|g_{t-1}\|}.
+\]
+\begin{itemize}
+    \item Values near \(1\): successive updates point in similar directions (stable descent).
+    \item Values near \(0\): weak directional agreement (noisy/random-walk behavior).
+    \item Negative values: oscillation or bouncing between opposite directions.
+\end{itemize}
+
+\paragraph{2) Gradient variance (\texttt{grad\_variance}, step-wise).}
+This is the variance of gradient components at a given optimization step.
+\begin{itemize}
+    \item Low variance: cleaner optimization signal.
+    \item High variance: stronger stochastic noise in updates.
+\end{itemize}
+Large spikes often indicate unstable regions or difficult minibatches.
+
+\paragraph{3) Gradient noise scale (\texttt{grad\_noise\_scale}, step-wise).}
+This is an EMA-based proxy of gradient variance across steps (smoothed noise level).
+\begin{itemize}
+    \item Decreasing trend: training becomes more stable.
+    \item Persistently high values: optimization remains noise-dominated.
+\end{itemize}
+
+\paragraph{4) Gradient signal-to-noise ratio (\texttt{gsnr}, step-wise).}
+Computed as:
+\[
+\mathrm{GSNR} = \frac{(\mathrm{E}[g])^2}{\mathrm{Var}(g)}.
+\]
+\begin{itemize}
+    \item Higher GSNR: learning signal dominates gradient noise.
+    \item Lower GSNR: updates are mostly stochastic noise.
+\end{itemize}
+GSNR is useful for identifying noise-limited training phases.
+
+\paragraph{5) Hutchinson Hessian trace (\texttt{hessian\_trace}, epoch-wise).}
+The Hessian \(H\) captures local curvature of the loss surface. Its trace
+\(\mathrm{tr}(H)\) is estimated using a random Rademacher probe \(v\):
+\[
+\mathrm{tr}(H) \approx v^\top H v.
+\]
+\begin{itemize}
+    \item Higher trace: sharper local curvature.
+    \item Lower trace: flatter local geometry.
+\end{itemize}
+This metric provides a direct proxy of local loss-landscape roughness.
+
+\paragraph{6) Critical sharpness (\texttt{critical\_sharpness}, epoch-wise).}
+This approximates the critical step size \(\eta_c\) along the update direction
+at which loss starts to increase (estimated by short binary search).
+\begin{itemize}
+    \item Larger \(\eta_c\): wider stability margin.
+    \item Smaller \(\eta_c\): near edge-of-stability regime.
+\end{itemize}
+In practice, a very small \(\eta_c\) indicates sensitivity to learning-rate
+perturbations.
+
+\paragraph{7) Spectral alpha (\texttt{weight\_alpha}, epoch-wise).}
+For each weight matrix, singular values are fitted with a power-law slope
+exponent \(\alpha\). The run logs:
+\begin{itemize}
+    \item global mean \texttt{weight\_alpha},
+    \item per-layer values \texttt{weight\_alpha\_<layer>}.
+\end{itemize}
+Typical interpretation:
+\begin{itemize}
+    \item stable moderate \(\alpha\): more regularized representation regime,
+    \item erratic/extreme \(\alpha\): potential representational instability.
+\end{itemize}
+
+\paragraph{How to read them together.}
+The metrics are complementary:
+\begin{itemize}
+    \item Directional stability: \texttt{grad\_cosine\_sim}
+    \item Stochasticity level: \texttt{grad\_variance}, \texttt{grad\_noise\_scale}, \texttt{gsnr}
+    \item Local geometry: \texttt{hessian\_trace}, \texttt{critical\_sharpness}
+    \item Representation structure: \texttt{weight\_alpha}
+\end{itemize}
+This combination allows diagnosing not only final quality but also \emph{how}
+the optimizer traverses the landscape during training.
+
+\paragraph{Traceability and reproducibility.}
+Each run logs:
+\begin{itemize}
+    \item full run configuration as artifact,
+    \item dataset artifacts used by the run (\texttt{train} and \texttt{test}),
+    \item Optuna trial metadata and pruning status.
+\end{itemize}
+
+\section{Status note}
+
+This chapter documents the experimental \emph{setting} only. Detailed numerical
+results, comparative interpretation, and ablation conclusions will be added in a
+later revision once all v3 studies are complete and analyzed.

@@ -33,7 +33,16 @@ FUNCTIONS = {
 }
 
 
-def generate_and_smooth(func, x_range, y_range, N=2000, K=6, sigma_scale=5, seed=42):
+def generate_and_smooth(
+    func,
+    x_range,
+    y_range,
+    N=2000,
+    K=6,
+    sigma_scale=5,
+    seed=42,
+    noise_ratio=0.02,
+):
     """
     Generate dataset and apply Gaussian continuation smoothing.
 
@@ -54,7 +63,11 @@ def generate_and_smooth(func, x_range, y_range, N=2000, K=6, sigma_scale=5, seed
     """
     np.random.seed(seed)
     X = np.random.uniform(x_range[0], x_range[1], size=(N, 2))
-    Y_raw = func(X)
+    Y_raw_clean = func(X)
+    y_std = float(np.std(Y_raw_clean))
+    noise_sigma = max(y_std, 1e-8) * noise_ratio
+    noise = np.random.normal(loc=0.0, scale=noise_sigma, size=Y_raw_clean.shape)
+    Y_raw = Y_raw_clean + noise
 
     # Compute pairwise distance matrix
     neigh = NearestNeighbors(n_neighbors=N, algorithm="auto")
@@ -78,7 +91,20 @@ def generate_and_smooth(func, x_range, y_range, N=2000, K=6, sigma_scale=5, seed
         Y_sigma = W_norm @ Y_raw
         datasets.append((X.copy(), Y_sigma.copy()))
 
-    return X, Y_raw, sigmas, datasets
+    return X, Y_raw, sigmas, datasets, noise_sigma
+
+
+def _derive_split_filenames(func_name: str, output_name: str | None) -> tuple[str, str]:
+    """Return (train_filename, test_filename) using *_train/*_test suffixes."""
+    base = output_name if output_name else f"{func_name}.parquet"
+    if not base.endswith(".parquet"):
+        base = f"{base}.parquet"
+    stem = base.removesuffix(".parquet")
+    if stem.endswith("_train"):
+        stem = stem.removesuffix("_train")
+    if stem.endswith("_test"):
+        stem = stem.removesuffix("_test")
+    return f"{stem}_train.parquet", f"{stem}_test.parquet"
 
 
 @app.command()
@@ -91,13 +117,15 @@ def main(
         ),
     ),
     output_dir: Path = PROCESSED_DATA_DIR,
-    num_samples: int = 4000,
+    num_samples: int = 20000,
     num_sigmas: int = 3,
     sigma_scale: float = 5.0,
+    train_samples: int = 10000,
+    noise_ratio: float = 0.02,
     seed: int = 42,
     output_name: str | None = typer.Option(
         None,
-        help="Optional output filename for single function generation (e.g. ackley_n4000_k3.parquet).",
+        help="Optional output base filename for single function generation.",
     ),
 ):
     """
@@ -124,10 +152,18 @@ def main(
     # Process each function
     for func_name, (func, x_range, y_range) in functions_to_process:
         logger.info(
-            f"Generating {func_name} dataset with {num_samples} samples and {num_sigmas} smoothing levels..."
+            f"Generating {func_name} dataset with {num_samples} samples and "
+            f"{num_sigmas} smoothing levels..."
         )
+        if train_samples <= 0 or train_samples >= num_samples:
+            logger.error(
+                f"Invalid split: train_samples={train_samples}, num_samples={num_samples}. "
+                "Need 0 < train_samples < num_samples."
+            )
+            raise typer.Exit(code=1)
+        test_samples = num_samples - train_samples
 
-        X, Y_raw, sigmas, datasets = generate_and_smooth(
+        X, Y_raw, sigmas, datasets, noise_sigma = generate_and_smooth(
             func=func,
             x_range=x_range,
             y_range=y_range,
@@ -135,7 +171,9 @@ def main(
             K=num_sigmas,
             sigma_scale=sigma_scale,
             seed=seed,
+            noise_ratio=noise_ratio,
         )
+        logger.info(f"  Added Gaussian label noise with σ={noise_sigma:.6f} (ratio={noise_ratio})")
 
         # Build dataframe with x1, x2, and y_sigma_i columns
         data = {
@@ -149,10 +187,22 @@ def main(
             logger.info(f"  Sigma {i}: {sigma:.4f}")
 
         df = pl.DataFrame(data)
-        filename = output_name if output_name else f"{func_name}.parquet"
-        output_path = output_dir / filename
-        df.write_parquet(output_path)
-        logger.success(f"Dataset saved to {output_path}")
+        rng = np.random.default_rng(seed)
+        perm = rng.permutation(num_samples)
+        train_idx = perm[:train_samples]
+        test_idx = perm[train_samples:]
+
+        df_train = df[train_idx.tolist()]
+        df_test = df[test_idx.tolist()]
+        train_filename, test_filename = _derive_split_filenames(func_name, output_name)
+        train_path = output_dir / train_filename
+        test_path = output_dir / test_filename
+        df_train.write_parquet(train_path)
+        df_test.write_parquet(test_path)
+        logger.success(
+            f"Datasets saved to {train_path} (train={train_samples}) "
+            f"and {test_path} (test={test_samples})"
+        )
 
 
 if __name__ == "__main__":

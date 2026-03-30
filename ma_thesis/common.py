@@ -21,6 +21,20 @@ import torch.nn as nn
 TRAIN_VAL_SPLIT_SEED = 42
 
 
+def paired_test_path(input_path: Path) -> Path:
+    """Resolve paired holdout test path from a train dataset path.
+
+    Expected convention is ``*_train.parquet`` and ``*_test.parquet``.
+    If the input stem does not end with ``_train``, ``_test`` is appended.
+    """
+    stem = input_path.stem
+    if stem.endswith("_train"):
+        test_stem = stem.removesuffix("_train") + "_test"
+    else:
+        test_stem = stem + "_test"
+    return input_path.with_name(f"{test_stem}{input_path.suffix}")
+
+
 def load_and_split(
     input_path: Path,
     device: torch.device,

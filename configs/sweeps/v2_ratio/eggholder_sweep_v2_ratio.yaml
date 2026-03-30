@@ -1,0 +1,21 @@
+run:
+  method: sweep
+  function: eggholder
+  regenerate_data: true
+  num_samples: 20000
+  num_sigmas: 3
+  sigma_scale: 7.0
+  train_samples: 10000
+  noise_ratio: 0.02
+  seed: 42
+  experiment_name: sweep-eggholder-v2-ratio
+  sweep_storage: sqlite:///reports/optuna/sweep_eggholder_v2_ratio.db
+  n_trials: 90
+  epochs: 900
+  patience: 25
+  min_delta: 0.00001
+  report_interval: 10
+  grid_res: 70
+  model_archs: "mlp,siren,fourier"
+  min_train_per_param: 5.0
+  max_train_per_param: 10.0

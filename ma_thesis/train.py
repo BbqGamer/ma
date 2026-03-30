@@ -14,9 +14,16 @@ import torch.nn as nn
 import torch.optim as optim
 import typer
 
-from ma_thesis.common import plot_model_surface, prepare_surface_grid
+from ma_thesis.common import paired_test_path, plot_model_surface, prepare_surface_grid
 from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
 from ma_thesis.models import build_model
+from ma_thesis.optimization_metrics import (
+    StepMetricsState,
+    compute_step_metrics,
+    critical_sharpness,
+    hutchinson_hessian_trace,
+    layerwise_spectral_alpha,
+)
 
 app = typer.Typer()
 
@@ -84,6 +91,8 @@ def train_one_level(
         criterion = nn.MSELoss()
         steps_per_epoch = max(1, n_train // batch_size)
         logger.info(f"Starting training on {n_train} samples (validation: {n_val})...")
+        step_metrics_state = StepMetricsState()
+        opt_step = 0
 
         train_loss_history = []
         val_loss_history = []
@@ -111,6 +120,10 @@ def train_one_level(
                 outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
                 loss.backward()
+                step_metrics = compute_step_metrics(model, step_metrics_state)
+                if step_metrics:
+                    mlflow.log_metrics(step_metrics, step=opt_step)
+                    opt_step += 1
                 optimizer.step()
                 epoch_loss += loss.item()
 
@@ -145,6 +158,26 @@ def train_one_level(
                 run_id=parent_run_id,
             )
             global_step += 1
+
+            probe_n = min(batch_size, n_train)
+            x_probe = x_perm[:probe_n]
+            y_probe = y_perm[:probe_n]
+            prev_mode = model.training
+            model.eval()
+            try:
+                h_trace = hutchinson_hessian_trace(model, criterion, x_probe, y_probe)
+                c_sharp = critical_sharpness(model, criterion, x_probe, y_probe, lr_ref=lr)
+                alpha_mean, alpha_by_layer = layerwise_spectral_alpha(model)
+            finally:
+                model.train(prev_mode)
+            epoch_metrics = {
+                "hessian_trace": h_trace,
+                "critical_sharpness": c_sharp,
+                "weight_alpha": alpha_mean,
+            }
+            mlflow.log_metrics(epoch_metrics, step=epoch)
+            for layer_name, alpha in alpha_by_layer.items():
+                mlflow.log_metric(f"weight_alpha_{layer_name}", alpha, step=epoch)
 
             if val_loss < best_val_loss - min_delta:
                 best_val_loss = val_loss
@@ -242,7 +275,7 @@ def train_one_level(
 
 @app.command()
 def main(
-    input_path: Path = PROCESSED_DATA_DIR / "ackley.parquet",
+    input_path: Path = PROCESSED_DATA_DIR / "ackley_n20000_k3_ss5_seed42_train.parquet",
     output_dir: Path = FIGURES_DIR,
     patience: int = 30,
     min_delta: float = 1e-5,
@@ -381,6 +414,28 @@ def main(
     y_hard_all = torch.from_numpy(df[hard_col].to_numpy()).float().unsqueeze(1).to(device)
     logger.info(f"Hard (raw) target column: {hard_col}")
 
+    # Optional paired holdout set (same schema as train set)
+    test_path = paired_test_path(input_path)
+    X_test: torch.Tensor | None = None
+    y_hard_test: torch.Tensor | None = None
+    if test_path.exists():
+        df_test = pl.read_parquet(test_path)
+        if hard_col not in df_test.columns:
+            logger.warning(
+                f"Paired test file exists but missing '{hard_col}': {test_path}. "
+                "Skipping final_test_loss logging."
+            )
+        else:
+            X_test_np = df_test.select(["x1", "x2"]).to_numpy()
+            X_test_scaled = 2.0 * (X_test_np - x_min) / (x_max - x_min) - 1.0
+            X_test = torch.from_numpy(X_test_scaled).float().to(device)
+            y_hard_test = (
+                torch.from_numpy(df_test[hard_col].to_numpy()).float().unsqueeze(1).to(device)
+            )
+            logger.info(f"Using holdout test set from {test_path} ({X_test.shape[0]} samples)")
+    else:
+        logger.warning(f"No paired test file found at {test_path}; test loss will not be logged.")
+
     # Determine which levels to train on
     if mode == "single":
         if sigma_level is None:
@@ -453,6 +508,7 @@ def main(
                 "num_samples": num_samples,
                 "n_train": n_train,
                 "n_val": n_val,
+                "n_test": int(X_test.shape[0]) if X_test is not None else 0,
                 "num_sigma_levels": len(sigma_cols),
                 "levels_trained": [level for _, level in levels_to_train],
                 "patience": patience,
@@ -464,11 +520,14 @@ def main(
             }
         )
         mlflow.log_artifact(str(input_path), artifact_path="data")
+        if test_path.exists():
+            mlflow.log_artifact(str(test_path), artifact_path="data")
         _log_run_config(
             output_dir / "configs",
             {
                 "argv": sys.argv,
                 "input_path": str(input_path),
+                "test_path": str(test_path),
                 "mode": mode,
                 "run_name": actual_run_name,
                 "experiment_name": experiment_name,
@@ -543,6 +602,11 @@ def main(
             final_pred = model(X_val)
             final_hard_loss = nn.MSELoss()(final_pred, y_hard_val).item()
         mlflow.log_metric("final_hard_val_loss", final_hard_loss)
+        if X_test is not None and y_hard_test is not None:
+            with torch.no_grad():
+                final_test_pred = model(X_test)
+                final_test_loss = nn.MSELoss()(final_test_pred, y_hard_test).item()
+            mlflow.log_metric("final_test_loss", final_test_loss)
         logger.success(f"MLflow run completed: {parent_run.info.run_id}")
 
 

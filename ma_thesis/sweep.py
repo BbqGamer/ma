@@ -39,9 +39,21 @@ import torch.nn as nn
 import torch.optim as optim
 import typer
 
-from ma_thesis.common import load_and_split, plot_model_surface, prepare_surface_grid
+from ma_thesis.common import (
+    load_and_split,
+    paired_test_path,
+    plot_model_surface,
+    prepare_surface_grid,
+)
 from ma_thesis.config import FIGURES_DIR, PROCESSED_DATA_DIR
 from ma_thesis.models import ACTIVATIONS, build_model
+from ma_thesis.optimization_metrics import (
+    StepMetricsState,
+    compute_step_metrics,
+    critical_sharpness,
+    hutchinson_hessian_trace,
+    layerwise_spectral_alpha,
+)
 
 app = typer.Typer()
 
@@ -67,6 +79,8 @@ class SweepContext:
     y_train: torch.Tensor
     X_val: torch.Tensor
     y_val: torch.Tensor
+    X_test: torch.Tensor | None
+    y_test: torch.Tensor | None
     func_name: str
     device: torch.device
     # Training budget
@@ -87,6 +101,9 @@ class SweepContext:
     model_archs: tuple[str, ...] = ("mlp", "siren", "fourier")
     # How often to report to pruner (every N epochs)
     report_interval: int = 10
+    # Train-samples-per-parameter ratio constraints
+    min_train_per_param: float = 5.0
+    max_train_per_param: float = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -114,21 +131,22 @@ class Objective:
         arch = trial.suggest_categorical("model_arch", list(model_archs))
         hp: dict[str, Any] = {
             "model_arch": arch,
-            "hidden_dim": trial.suggest_categorical("hidden_dim", [64, 128, 256, 512]),
+            # Intentionally compact search space for ratio-constrained sweeps.
+            "hidden_dim": trial.suggest_categorical("hidden_dim", [12, 16, 20, 24, 28, 32]),
             "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
         }
         if arch == "siren":
-            hp["num_layers"] = trial.suggest_int("num_layers", 3, 8)
+            hp["num_layers"] = trial.suggest_int("num_layers", 2, 4)
             hp["omega_0"] = trial.suggest_float("omega_0", 10.0, 60.0)
             hp["lr"] = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
         elif arch == "fourier":
-            hp["num_blocks"] = trial.suggest_int("num_blocks", 2, 6, step=2)
+            hp["num_blocks"] = trial.suggest_int("num_blocks", 0, 3)
             hp["activation"] = trial.suggest_categorical("activation", list(ACTIVATIONS.keys()))
-            hp["num_fourier"] = trial.suggest_categorical("num_fourier", [64, 128, 256])
+            hp["num_fourier"] = trial.suggest_categorical("num_fourier", [8, 12, 16, 20, 24, 32])
             hp["sigma"] = trial.suggest_float("sigma", 1.0, 30.0)
             hp["lr"] = trial.suggest_float("lr", 1e-4, 3e-2, log=True)
         else:  # mlp
-            hp["num_blocks"] = trial.suggest_int("num_blocks", 2, 6, step=2)
+            hp["num_blocks"] = trial.suggest_int("num_blocks", 1, 4)
             hp["activation"] = trial.suggest_categorical("activation", list(ACTIVATIONS.keys()))
             hp["lr"] = trial.suggest_float("lr", 1e-4, 3e-2, log=True)
         return hp
@@ -144,6 +162,9 @@ class Objective:
         arch = hp["model_arch"]
 
         n_params = sum(p.numel() for p in model.parameters())
+        n_train = int(ctx.X_train.shape[0])
+        train_per_param = n_train / n_params
+        ratio_valid = ctx.min_train_per_param <= train_per_param <= ctx.max_train_per_param
 
         if arch == "siren":
             run_label = (
@@ -183,9 +204,13 @@ class Objective:
                     "model_arch": arch,
                     "entrypoint": "ma_thesis.sweep",
                     "optuna_trial": str(trial.number),
+                    "ratio_valid": str(ratio_valid).lower(),
                 }
             )
-            mlflow.log_params({**hp, "n_params": n_params, "function": ctx.func_name})
+            mlflow.log_params({**hp, "n_params": n_params, "n_train": n_train, "function": ctx.func_name})
+            if ctx.X_test is not None:
+                mlflow.log_param("n_test", int(ctx.X_test.shape[0]))
+            mlflow.log_metric("train_per_param", train_per_param)
             _log_run_config(
                 ctx.output_dir / "configs",
                 {
@@ -200,11 +225,31 @@ class Objective:
                         "min_delta": ctx.min_delta,
                         "report_interval": ctx.report_interval,
                     },
+                    "ratio_constraint": {
+                        "min_train_per_param": ctx.min_train_per_param,
+                        "max_train_per_param": ctx.max_train_per_param,
+                        "trial_train_per_param": train_per_param,
+                        "trial_ratio_valid": ratio_valid,
+                    },
                 },
             )
             if dataset is not None:
                 mlflow.log_input(dataset, context="training")
 
+            if not ratio_valid:
+                reason = (
+                    "train_per_param_out_of_range:"
+                    f"{train_per_param:.4f}_not_in_[{ctx.min_train_per_param},"
+                    f"{ctx.max_train_per_param}]"
+                )
+                trial.set_user_attr("ratio_valid", False)
+                trial.set_user_attr("ratio_reject_reason", reason)
+                mlflow.set_tag("rejected", "true")
+                mlflow.set_tag("reject_reason", reason)
+                mlflow.end_run(status="KILLED")
+                raise optuna.TrialPruned(reason)
+
+            trial.set_user_attr("ratio_valid", True)
             best_val_loss = self._train(trial, model, hp, run_label)
 
             mlflow.log_metric("best_val_loss", best_val_loss)
@@ -240,6 +285,8 @@ class Objective:
         best_state: dict | None = None
         train_hist: list[float] = []
         val_hist: list[float] = []
+        step_metrics_state = StepMetricsState()
+        opt_step = 0
 
         for epoch in range(ctx.epochs):
             # --- train ---
@@ -255,6 +302,10 @@ class Objective:
                 optimizer.zero_grad(set_to_none=True)
                 loss = criterion(model(x_perm[s:e]), y_perm[s:e])
                 loss.backward()
+                step_metrics = compute_step_metrics(model, step_metrics_state)
+                if step_metrics:
+                    mlflow.log_metrics(step_metrics, step=opt_step)
+                    opt_step += 1
                 optimizer.step()
                 epoch_loss += loss.item()
 
@@ -269,6 +320,27 @@ class Objective:
             val_hist.append(val_loss)
 
             mlflow.log_metrics({"train_loss": avg_train, "val_loss": val_loss}, step=epoch)
+            probe_n = min(hp["batch_size"], n_train)
+            x_probe = x_perm[:probe_n]
+            y_probe = y_perm[:probe_n]
+            prev_mode = model.training
+            model.eval()
+            try:
+                h_trace = hutchinson_hessian_trace(model, criterion, x_probe, y_probe)
+                c_sharp = critical_sharpness(model, criterion, x_probe, y_probe, lr_ref=hp["lr"])
+                alpha_mean, alpha_by_layer = layerwise_spectral_alpha(model)
+            finally:
+                model.train(prev_mode)
+            mlflow.log_metrics(
+                {
+                    "hessian_trace": h_trace,
+                    "critical_sharpness": c_sharp,
+                    "weight_alpha": alpha_mean,
+                },
+                step=epoch,
+            )
+            for layer_name, alpha in alpha_by_layer.items():
+                mlflow.log_metric(f"weight_alpha_{layer_name}", alpha, step=epoch)
 
             # --- early stopping ---
             if val_loss < best_val_loss - ctx.min_delta:
@@ -298,6 +370,12 @@ class Objective:
         if best_state is not None:
             model.load_state_dict(best_state)
         model.eval()
+
+        # Final holdout test loss (if paired test set exists)
+        if ctx.X_test is not None and ctx.y_test is not None:
+            with torch.no_grad():
+                final_test_loss = criterion(model(ctx.X_test), ctx.y_test).item()
+            mlflow.log_metric("final_test_loss", final_test_loss)
 
         # --- artefacts: learning curve + surface plot ---
         self._log_artefacts(model, train_hist, val_hist, run_label, best_val_loss)
@@ -381,7 +459,7 @@ class Objective:
 
 @app.command()
 def main(
-    input_path: Path = PROCESSED_DATA_DIR / "ackley.parquet",
+    input_path: Path = PROCESSED_DATA_DIR / "ackley_n20000_k3_ss5_seed42_train.parquet",
     output_dir: Path = FIGURES_DIR / "sweep",
     n_trials: int = 80,
     epochs: int = 1000,
@@ -392,6 +470,14 @@ def main(
     seed: int = 0,
     storage: Optional[str] = None,
     experiment_name: Optional[str] = None,
+    min_train_per_param: float = typer.Option(
+        5.0,
+        help="Minimum required train-samples-per-parameter ratio.",
+    ),
+    max_train_per_param: float = typer.Option(
+        10.0,
+        help="Maximum required train-samples-per-parameter ratio.",
+    ),
     model_archs: str = typer.Option(
         "mlp,siren,fourier",
         help="Comma-separated list of model architectures to search over: mlp, siren, fourier.",
@@ -415,6 +501,36 @@ def main(
     )
     logger.info(f"Input scaled to [-1, 1]  (x_min={x_min}, x_max={x_max})")
 
+    test_path = paired_test_path(input_path)
+    X_test: torch.Tensor | None = None
+    y_test: torch.Tensor | None = None
+    if test_path.exists():
+        df_test = pl.read_parquet(test_path)
+        if hard_col not in df_test.columns:
+            logger.warning(
+                f"Paired test file exists but missing '{hard_col}': {test_path}. "
+                "Skipping final_test_loss logging."
+            )
+        else:
+            X_test_np = df_test.select(["x1", "x2"]).to_numpy()
+            X_test_scaled = 2.0 * (X_test_np - x_min) / (x_max - x_min) - 1.0
+            X_test = torch.from_numpy(X_test_scaled).float().to(device)
+            y_test = torch.from_numpy(df_test[hard_col].to_numpy()).float().unsqueeze(1).to(device)
+            logger.info(f"Using holdout test set from {test_path} ({X_test.shape[0]} samples)")
+    else:
+        logger.warning(f"No paired test file found at {test_path}; test loss will not be logged.")
+    if min_train_per_param <= 0 or max_train_per_param <= 0:
+        raise typer.BadParameter("min/max train_per_param must be > 0")
+    if min_train_per_param > max_train_per_param:
+        raise typer.BadParameter("min_train_per_param must be <= max_train_per_param")
+    min_params = X_train.shape[0] / max_train_per_param
+    max_params = X_train.shape[0] / min_train_per_param
+    logger.info(
+        "Ratio constraint: "
+        f"{min_train_per_param:.2f} <= train_per_param <= {max_train_per_param:.2f} "
+        f"(valid params in [{min_params:.0f}, {max_params:.0f}] for n_train={X_train.shape[0]})"
+    )
+
     # Pre-compute true surface for the plots
     x_range, y_range, Zg_true = prepare_surface_grid(df, hard_col, grid_res)
 
@@ -429,6 +545,8 @@ def main(
         y_train=y_train,
         X_val=X_val,
         y_val=y_val,
+        X_test=X_test,
+        y_test=y_test,
         func_name=func_name,
         device=device,
         epochs=epochs,
@@ -444,6 +562,8 @@ def main(
         x_max=x_max,
         model_archs=archs_tuple,
         report_interval=report_interval,
+        min_train_per_param=min_train_per_param,
+        max_train_per_param=max_train_per_param,
     )
 
     # --- MLflow ---

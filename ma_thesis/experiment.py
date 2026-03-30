@@ -64,7 +64,7 @@ def _float_token(value: float) -> str:
     return text.replace(".", "p")
 
 
-def _dataset_filename(
+def _dataset_train_filename(
     function: str,
     num_samples: int,
     num_sigmas: int,
@@ -72,7 +72,7 @@ def _dataset_filename(
     seed: int,
 ) -> str:
     return (
-        f"{function}_n{num_samples}_k{num_sigmas}_ss{_float_token(sigma_scale)}_seed{seed}.parquet"
+        f"{function}_n{num_samples}_k{num_sigmas}_ss{_float_token(sigma_scale)}_seed{seed}_train.parquet"
     )
 
 
@@ -93,9 +93,11 @@ def _as_path(value: Any) -> Path | None:
 def prepare_data(
     function: str = typer.Option("all", help="Function name (ackley/levy/eggholder) or all."),
     output_dir: Path = PROCESSED_DATA_DIR,
-    num_samples: int = 4000,
+    num_samples: int = 20000,
     num_sigmas: int = 3,
     sigma_scale: float = 5.0,
+    train_samples: int = 10000,
+    noise_ratio: float = 0.02,
     seed: int = 42,
     versioned_name: bool = typer.Option(
         True,
@@ -105,13 +107,15 @@ def prepare_data(
     """Generate processed datasets without starting training."""
     output_name = None
     if function != "all" and versioned_name:
-        output_name = _dataset_filename(function, num_samples, num_sigmas, sigma_scale, seed)
+        output_name = _dataset_train_filename(function, num_samples, num_sigmas, sigma_scale, seed)
     dataset_main(
         function=function,
         output_dir=output_dir,
         num_samples=num_samples,
         num_sigmas=num_sigmas,
         sigma_scale=sigma_scale,
+        train_samples=train_samples,
+        noise_ratio=noise_ratio,
         seed=seed,
         output_name=output_name,
     )
@@ -135,9 +139,11 @@ def run(
         False,
         help="Regenerate dataset before running the experiment.",
     ),
-    num_samples: int = 4000,
+    num_samples: int = 20000,
     num_sigmas: int = 3,
     sigma_scale: float = 5.0,
+    train_samples: int = 10000,
+    noise_ratio: float = 0.02,
     seed: int = 42,
     experiment_name: str | None = None,
     run_name: str | None = None,
@@ -179,6 +185,8 @@ def run(
     report_interval: int = 10,
     model_archs: str = "mlp,siren,fourier",
     sweep_storage: str | None = None,
+    min_train_per_param: float = 5.0,
+    max_train_per_param: float = 10.0,
 ) -> None:
     """Run a fully logged experiment from one command."""
     method = method.strip().lower()
@@ -195,7 +203,7 @@ def run(
     if method == "single" and sigma_level is None:
         sigma_level = -1
 
-    default_dataset = PROCESSED_DATA_DIR / _dataset_filename(
+    default_dataset = PROCESSED_DATA_DIR / _dataset_train_filename(
         function=function,
         num_samples=num_samples,
         num_sigmas=num_sigmas,
@@ -212,6 +220,8 @@ def run(
             num_samples=num_samples,
             num_sigmas=num_sigmas,
             sigma_scale=sigma_scale,
+            train_samples=train_samples,
+            noise_ratio=noise_ratio,
             seed=seed,
             output_name=resolved_input.name,
         )
@@ -257,6 +267,10 @@ def run(
             "report_interval": report_interval,
             "model_archs": model_archs,
             "sweep_storage": sweep_storage,
+            "min_train_per_param": min_train_per_param,
+            "max_train_per_param": max_train_per_param,
+            "train_samples": train_samples,
+            "noise_ratio": noise_ratio,
             "seed": seed,
         },
     }
@@ -328,6 +342,8 @@ def run(
         storage=sweep_storage,
         experiment_name=experiment_name or f"baseline-sweep-{function}",
         model_archs=model_archs,
+        min_train_per_param=min_train_per_param,
+        max_train_per_param=max_train_per_param,
     )
 
 

@@ -250,7 +250,7 @@ def meta_train_epoch(
 
 @app.command()
 def main(
-    input_path: Path = PROCESSED_DATA_DIR / "eggholder.parquet",
+    input_path: Path = PROCESSED_DATA_DIR / "eggholder_n20000_k3_ss7_seed42_train.parquet",
     output_dir: Path = FIGURES_DIR / "meta_curriculum",
     # --- Training hyperparameters ---
     epochs: int = 200,
