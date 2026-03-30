@@ -15,6 +15,10 @@ Current sweep configs:
 - `configs/sweeps/peaks_sweep.yaml`
 - `configs/sweeps/friedman1_2d_sweep.yaml`
 - `configs/sweeps/friedman2_2d_sweep.yaml`
+- `configs/sweeps/schedule_sweep_eggholder.yaml` (schedule-only curriculum study)
+
+Recommendation for schedule-only studies:
+- Keep `schedule_num_losses` fixed across functions (e.g. always `4`) for fair comparisons.
 
 Templates for non-sweep runs:
 - `configs/experiments/curriculum_from_sweep_template.yaml`

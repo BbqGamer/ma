@@ -24,6 +24,7 @@ from ma_thesis.config import PROCESSED_DATA_DIR, REPORTS_DIR
 from ma_thesis.dataset import FUNCTIONS
 from ma_thesis.dataset import main as dataset_main
 from ma_thesis.meta_train import main as meta_main
+from ma_thesis.schedule_sweep import main as schedule_sweep_main
 from ma_thesis.sweep import main as sweep_main
 from ma_thesis.train import main as train_main
 
@@ -125,7 +126,7 @@ def prepare_data(
 def run(
     method: str = typer.Option(
         "curriculum",
-        help="Experiment method: single, curriculum, meta, or sweep.",
+        help="Experiment method: single, curriculum, meta, sweep, or schedule_sweep.",
     ),
     function: str = typer.Option(
         "ackley",
@@ -149,7 +150,7 @@ def run(
     run_name: str | None = None,
     # Shared model/training options
     model_arch: str = "mlp",
-    hidden_dim: int = 256,
+    hidden_dim: int = 16,
     num_blocks: int = 4,
     activation: str = "silu",
     num_layers: int = 4,
@@ -185,8 +186,16 @@ def run(
     report_interval: int = 10,
     model_archs: str = "mlp,siren,fourier",
     sweep_storage: str | None = None,
-    min_train_per_param: float = 5.0,
-    max_train_per_param: float = 10.0,
+    min_train_per_param: float = 10.0,
+    max_train_per_param: float = 20.0,
+    step_metrics_interval: int = 50,
+    log_dataset_artifact: bool = False,
+    # schedule-sweep options
+    schedule_num_losses: int = 4,
+    study_note: str = (
+        "Optuna schedule-only sweep: frozen model/training hyperparameters, "
+        "optimize hardest-level validation loss."
+    ),
 ) -> None:
     """Run a fully logged experiment from one command."""
     method = method.strip().lower()
@@ -198,8 +207,10 @@ def run(
         raise typer.BadParameter(
             f"Unknown function '{function}'. Allowed: {', '.join(sorted(FUNCTIONS))}."
         )
-    if method not in {"single", "curriculum", "meta", "sweep"}:
-        raise typer.BadParameter("method must be one of: single, curriculum, meta, sweep")
+    if method not in {"single", "curriculum", "meta", "sweep", "schedule_sweep"}:
+        raise typer.BadParameter(
+            "method must be one of: single, curriculum, meta, sweep, schedule_sweep"
+        )
     if method == "single" and sigma_level is None:
         sigma_level = -1
 
@@ -267,8 +278,12 @@ def run(
             "report_interval": report_interval,
             "model_archs": model_archs,
             "sweep_storage": sweep_storage,
+            "schedule_num_losses": schedule_num_losses,
+            "study_note": study_note,
             "min_train_per_param": min_train_per_param,
             "max_train_per_param": max_train_per_param,
+            "step_metrics_interval": step_metrics_interval,
+            "log_dataset_artifact": log_dataset_artifact,
             "train_samples": train_samples,
             "noise_ratio": noise_ratio,
             "seed": seed,
@@ -302,6 +317,9 @@ def run(
             fourier_sigma=fourier_sigma,
             from_sweep=from_sweep,
             study_name=study_name,
+            min_train_per_param=min_train_per_param,
+            step_metrics_interval=step_metrics_interval,
+            log_dataset_artifact=log_dataset_artifact,
         )
         return
 
@@ -326,6 +344,36 @@ def run(
             snapshot_interval=snapshot_interval,
             experiment_name=experiment_name or "meta-curriculum",
             run_name=run_name or run_id,
+            min_train_per_param=min_train_per_param,
+            log_dataset_artifact=log_dataset_artifact,
+        )
+        return
+
+    if method == "schedule_sweep":
+        schedule_sweep_main(
+            input_path=resolved_input,
+            output_dir=run_output_dir,
+            experiment_name=experiment_name or "curriculum-schedule-sweep",
+            study_name=run_name or f"schedule-sweep-{function}",
+            study_note=study_note,
+            storage=sweep_storage,
+            n_trials=n_trials,
+            seed=seed,
+            model_arch=model_arch,
+            hidden_dim=hidden_dim,
+            num_blocks=num_blocks,
+            activation=activation,
+            num_layers=num_layers,
+            omega_0=omega_0,
+            num_fourier=num_fourier,
+            fourier_sigma=fourier_sigma,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            patience=patience,
+            min_delta=min_delta,
+            min_train_per_param=min_train_per_param,
+            num_losses=schedule_num_losses,
         )
         return
 
@@ -342,6 +390,7 @@ def run(
         storage=sweep_storage,
         experiment_name=experiment_name or f"baseline-sweep-{function}",
         model_archs=model_archs,
+        step_metrics_interval=step_metrics_interval,
         min_train_per_param=min_train_per_param,
         max_train_per_param=max_train_per_param,
     )

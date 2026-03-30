@@ -9,6 +9,7 @@ This module contains common functionality used across sweep.py and train.py:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,6 +20,79 @@ import torch.nn as nn
 
 # Default random seed for reproducible train/val splits
 TRAIN_VAL_SPLIT_SEED = 42
+
+
+def count_trainable_params(model: nn.Module) -> int:
+    """Return number of trainable parameters."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def fit_hidden_dim_to_param_budget(
+    hp: dict[str, Any],
+    n_train: int,
+    *,
+    min_train_per_param: float = 10.0,
+    min_hidden_dim: int = 4,
+) -> tuple[dict[str, Any], dict[str, float | int | bool]]:
+    """Shrink hidden_dim to satisfy a train-samples-per-parameter budget.
+
+    The function keeps all non-hidden hyperparameters fixed and searches for
+    the largest hidden_dim that satisfies:
+    ``n_train / n_params >= min_train_per_param``.
+    """
+    if min_train_per_param <= 0:
+        raise ValueError("min_train_per_param must be > 0.")
+    if n_train <= 0:
+        raise ValueError("n_train must be > 0.")
+
+    hp_eff = dict(hp)
+    requested_hidden = int(hp_eff.get("hidden_dim", 0))
+    if requested_hidden <= 0:
+        raise ValueError("hp['hidden_dim'] must be a positive integer.")
+
+    # Local import avoids widening module dependency surface at import time.
+    from ma_thesis.models import build_model
+
+    cpu = torch.device("cpu")
+    target_max_params = max(1, int(n_train / min_train_per_param))
+
+    def _params_for_hidden(hidden_dim: int) -> int:
+        model = build_model({**hp_eff, "hidden_dim": int(hidden_dim)}, cpu)
+        return count_trainable_params(model)
+
+    requested_params = _params_for_hidden(requested_hidden)
+    selected_hidden = requested_hidden
+    selected_params = requested_params
+
+    if requested_params > target_max_params:
+        lower_bound = max(1, int(min_hidden_dim))
+        found = False
+        for hidden in range(requested_hidden - 1, lower_bound - 1, -1):
+            n_params = _params_for_hidden(hidden)
+            if n_params <= target_max_params:
+                selected_hidden = hidden
+                selected_params = n_params
+                found = True
+                break
+        if not found:
+            selected_hidden = lower_bound
+            selected_params = _params_for_hidden(selected_hidden)
+
+    hp_eff["hidden_dim"] = int(selected_hidden)
+    final_ratio = n_train / max(1, selected_params)
+    info: dict[str, float | int | bool] = {
+        "requested_hidden_dim": requested_hidden,
+        "effective_hidden_dim": selected_hidden,
+        "requested_n_params": requested_params,
+        "effective_n_params": selected_params,
+        "n_train": n_train,
+        "min_train_per_param": float(min_train_per_param),
+        "target_max_params": target_max_params,
+        "effective_train_per_param": float(final_ratio),
+        "was_adjusted": selected_hidden != requested_hidden,
+        "budget_satisfied": selected_params <= target_max_params,
+    }
+    return hp_eff, info
 
 
 def paired_test_path(input_path: Path) -> Path:

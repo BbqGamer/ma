@@ -79,6 +79,7 @@ python -m ma_thesis.experiment run-config configs/sweeps/franke_sweep.yaml
 python -m ma_thesis.experiment run-config configs/sweeps/peaks_sweep.yaml
 python -m ma_thesis.experiment run-config configs/sweeps/friedman1_2d_sweep.yaml
 python -m ma_thesis.experiment run-config configs/sweeps/friedman2_2d_sweep.yaml
+python -m ma_thesis.experiment run-config configs/sweeps/schedule_sweep_eggholder.yaml
 ```
 
 Typical workflow:

@@ -101,9 +101,11 @@ class SweepContext:
     model_archs: tuple[str, ...] = ("mlp", "siren", "fourier")
     # How often to report to pruner (every N epochs)
     report_interval: int = 10
+    # How often to compute/log per-step gradient diagnostics
+    step_metrics_interval: int = 50
     # Train-samples-per-parameter ratio constraints
-    min_train_per_param: float = 5.0
-    max_train_per_param: float = 10.0
+    min_train_per_param: float = 10.0
+    max_train_per_param: float = 20.0
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +213,7 @@ class Objective:
             if ctx.X_test is not None:
                 mlflow.log_param("n_test", int(ctx.X_test.shape[0]))
             mlflow.log_metric("train_per_param", train_per_param)
+            mlflow.log_param("step_metrics_interval", int(ctx.step_metrics_interval))
             _log_run_config(
                 ctx.output_dir / "configs",
                 {
@@ -302,12 +305,13 @@ class Objective:
                 optimizer.zero_grad(set_to_none=True)
                 loss = criterion(model(x_perm[s:e]), y_perm[s:e])
                 loss.backward()
-                step_metrics = compute_step_metrics(model, step_metrics_state)
-                if step_metrics:
-                    mlflow.log_metrics(step_metrics, step=opt_step)
-                    opt_step += 1
+                if ctx.step_metrics_interval > 0 and (opt_step % ctx.step_metrics_interval == 0):
+                    step_metrics = compute_step_metrics(model, step_metrics_state)
+                    if step_metrics:
+                        mlflow.log_metrics(step_metrics, step=opt_step)
                 optimizer.step()
                 epoch_loss += loss.item()
+                opt_step += 1
 
             avg_train = epoch_loss / steps_per_epoch
             train_hist.append(avg_train)
@@ -466,16 +470,17 @@ def main(
     patience: int = 30,
     min_delta: float = 1e-5,
     report_interval: int = 10,
+    step_metrics_interval: int = 50,
     grid_res: int = 80,
     seed: int = 0,
     storage: Optional[str] = None,
     experiment_name: Optional[str] = None,
     min_train_per_param: float = typer.Option(
-        5.0,
+        10.0,
         help="Minimum required train-samples-per-parameter ratio.",
     ),
     max_train_per_param: float = typer.Option(
-        10.0,
+        20.0,
         help="Maximum required train-samples-per-parameter ratio.",
     ),
     model_archs: str = typer.Option(
@@ -523,6 +528,8 @@ def main(
         raise typer.BadParameter("min/max train_per_param must be > 0")
     if min_train_per_param > max_train_per_param:
         raise typer.BadParameter("min_train_per_param must be <= max_train_per_param")
+    if step_metrics_interval < 0:
+        raise typer.BadParameter("step_metrics_interval must be >= 0")
     min_params = X_train.shape[0] / max_train_per_param
     max_params = X_train.shape[0] / min_train_per_param
     logger.info(
@@ -562,6 +569,7 @@ def main(
         x_max=x_max,
         model_archs=archs_tuple,
         report_interval=report_interval,
+        step_metrics_interval=step_metrics_interval,
         min_train_per_param=min_train_per_param,
         max_train_per_param=max_train_per_param,
     )

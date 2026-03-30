@@ -14,7 +14,12 @@ import torch.nn as nn
 import torch.optim as optim
 import typer
 
-from ma_thesis.common import paired_test_path, plot_model_surface, prepare_surface_grid
+from ma_thesis.common import (
+    fit_hidden_dim_to_param_budget,
+    paired_test_path,
+    plot_model_surface,
+    prepare_surface_grid,
+)
 from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
 from ma_thesis.models import build_model
 from ma_thesis.optimization_metrics import (
@@ -52,6 +57,7 @@ def train_one_level(
     level: str,
     level_idx: int,
     total_levels: int,
+    stage_idx: int,
     X_train: torch.Tensor,
     y_train: torch.Tensor,
     X_val: torch.Tensor,
@@ -74,6 +80,7 @@ def train_one_level(
     output_dir: Path,
     parent_run_id: str,
     global_step: int,
+    step_metrics_interval: int = 50,
     x_min: np.ndarray | None = None,
     x_max: np.ndarray | None = None,
 ) -> int:
@@ -89,7 +96,7 @@ def train_one_level(
             optimizer, T_max=epochs, eta_min=lr * 0.01
         )
         criterion = nn.MSELoss()
-        steps_per_epoch = max(1, n_train // batch_size)
+        steps_per_epoch = max(1, (n_train + batch_size - 1) // batch_size)
         logger.info(f"Starting training on {n_train} samples (validation: {n_val})...")
         step_metrics_state = StepMetricsState()
         opt_step = 0
@@ -120,12 +127,13 @@ def train_one_level(
                 outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
                 loss.backward()
-                step_metrics = compute_step_metrics(model, step_metrics_state)
-                if step_metrics:
-                    mlflow.log_metrics(step_metrics, step=opt_step)
-                    opt_step += 1
+                if step_metrics_interval > 0 and (opt_step % step_metrics_interval == 0):
+                    step_metrics = compute_step_metrics(model, step_metrics_state)
+                    if step_metrics:
+                        mlflow.log_metrics(step_metrics, step=opt_step)
                 optimizer.step()
                 epoch_loss += loss.item()
+                opt_step += 1
 
             avg_loss = epoch_loss / steps_per_epoch
             train_loss_history.append(avg_loss)
@@ -251,7 +259,7 @@ def train_one_level(
             x_range,
             y_range,
             grid_res,
-            title=f"{func_name} after {level} (stage {level_idx + 1}/{total_levels})",
+            title=f"{func_name} after {level} (stage {stage_idx}/{total_levels})",
             save_path=surf_path,
             Zg_true=Zg_true,
             x_min=x_min,
@@ -300,13 +308,25 @@ def main(
     ),
     # --- Model architecture (manual) ---
     model_arch: str = typer.Option("mlp", help="Model architecture: mlp, siren, or fourier."),
-    hidden_dim: int = typer.Option(256, help="Hidden dimension."),
+    hidden_dim: int = typer.Option(16, help="Hidden dimension (auto-shrunk if over budget)."),
     num_blocks: int = typer.Option(4, help="Residual blocks (mlp / fourier)."),
     activation: str = typer.Option("silu", help="Activation (mlp / fourier)."),
     num_layers: int = typer.Option(4, help="Number of SIREN layers."),
     omega_0: float = typer.Option(30.0, help="SIREN frequency multiplier ω₀."),
     num_fourier: int = typer.Option(128, help="Number of Fourier features."),
     fourier_sigma: float = typer.Option(10.0, help="Fourier feature scale σ."),
+    min_train_per_param: float = typer.Option(
+        10.0,
+        help="Minimum desired train-samples-per-parameter ratio; hidden_dim is auto-shrunk.",
+    ),
+    step_metrics_interval: int = typer.Option(
+        50,
+        help="Log gradient step metrics every N optimizer steps (0 disables).",
+    ),
+    log_dataset_artifact: bool = typer.Option(
+        False,
+        help="If true, uploads train/test parquet files to MLflow artifacts.",
+    ),
     # --- Auto-load best trial from a completed Optuna sweep ---
     from_sweep: str | None = typer.Option(
         None,
@@ -339,13 +359,17 @@ def main(
           --study-name baseline-sweep-eggholder
 
       # Manual SIREN curriculum
-      python -m ma_thesis.train --model-arch siren --omega-0 30 --hidden-dim 256
+      python -m ma_thesis.train --model-arch siren --omega-0 30 --hidden-dim 16
 
       # Train only on the raw (hardest) target
       python -m ma_thesis.train --mode single --sigma-level -1
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
+    if min_train_per_param <= 0:
+        raise typer.BadParameter("min_train_per_param must be > 0.")
+    if step_metrics_interval < 0:
+        raise typer.BadParameter("step_metrics_interval must be >= 0.")
 
     func_name = input_path.stem
     logger.info(f"Training on {func_name} dataset from {input_path}")
@@ -480,8 +504,24 @@ def main(
     # ------------------------------------------------------------------
     # Build model (mlp / siren / fourier)
     # ------------------------------------------------------------------
+    hp, budget = fit_hidden_dim_to_param_budget(
+        hp,
+        n_train=int(n_train),
+        min_train_per_param=min_train_per_param,
+    )
     model = build_model(hp, device)
-    n_params = sum(p.numel() for p in model.parameters())
+    n_params = int(budget["effective_n_params"])
+    if bool(budget["was_adjusted"]):
+        logger.warning(
+            "Auto-adjusted hidden_dim to meet ratio target: "
+            f"{budget['requested_hidden_dim']} -> {budget['effective_hidden_dim']} "
+            f"(train/param={budget['effective_train_per_param']:.2f})"
+        )
+    if not bool(budget["budget_satisfied"]):
+        logger.warning(
+            "Requested ratio target could not be fully satisfied at min hidden_dim="
+            f"{budget['effective_hidden_dim']} (train/param={budget['effective_train_per_param']:.2f})."
+        )
     logger.info(f"Model: {model_arch}  ({n_params:,} params)")
 
     # Pre-compute true surface grid for snapshot plots
@@ -517,11 +557,23 @@ def main(
                 "snapshot_interval": snapshot_interval,
                 "device": str(device),
                 "from_sweep": str(from_sweep) if from_sweep else "manual",
+                "requested_hidden_dim": int(budget["requested_hidden_dim"]),
+                "effective_hidden_dim": int(budget["effective_hidden_dim"]),
+                "target_max_params": int(budget["target_max_params"]),
+                "effective_train_per_param": float(budget["effective_train_per_param"]),
+                "min_train_per_param": float(min_train_per_param),
+                "step_metrics_interval": step_metrics_interval,
+                "log_dataset_artifact": log_dataset_artifact,
             }
         )
-        mlflow.log_artifact(str(input_path), artifact_path="data")
+        mlflow.log_metric("run_started", 1.0, step=0)
+        mlflow.log_param("input_dataset_path", str(input_path))
+        if log_dataset_artifact:
+            mlflow.log_artifact(str(input_path), artifact_path="data")
         if test_path.exists():
-            mlflow.log_artifact(str(test_path), artifact_path="data")
+            mlflow.log_param("test_dataset_path", str(test_path))
+            if log_dataset_artifact:
+                mlflow.log_artifact(str(test_path), artifact_path="data")
         _log_run_config(
             output_dir / "configs",
             {
@@ -551,8 +603,8 @@ def main(
 
         global_step = 0
 
-        for level_idx, level in levels_to_train:
-            logger.info(f"Training level: {level} ({level_idx + 1}/{len(levels_to_train)})")
+        for stage_idx, (level_idx, level) in enumerate(levels_to_train, start=1):
+            logger.info(f"Training level: {level} ({stage_idx}/{len(levels_to_train)})")
             y = torch.from_numpy(df[level].to_numpy()).float().unsqueeze(1).to(device)
             y_train = y[train_indices]
             y_val = y[val_indices]
@@ -562,6 +614,7 @@ def main(
                 level=level,
                 level_idx=level_idx,
                 total_levels=len(levels_to_train),
+                stage_idx=stage_idx,
                 X_train=X_train,
                 y_train=y_train,
                 X_val=X_val,
@@ -583,6 +636,7 @@ def main(
                 output_dir=output_dir,
                 parent_run_id=parent_run.info.run_id,
                 global_step=global_step,
+                step_metrics_interval=step_metrics_interval,
                 x_min=x_min,
                 x_max=x_max,
             )

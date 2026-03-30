@@ -1,0 +1,30 @@
+run:
+  method: schedule_sweep
+  function: bukin
+  regenerate_data: true
+  num_samples: 8000
+  num_sigmas: 5
+  sigma_scale: 8.0
+  train_samples: 4000
+  noise_ratio: 0.02
+  experiment_name: curriculum-schedule-sweep-bukin-v1
+  run_name: schedule-sweep-bukin-v1
+  study_note: >
+    Schedule-only Optuna sweep. Model/training hyperparameters fixed.
+    Optimize hardest-level validation loss to test whether curriculum helps.
+  sweep_storage: sqlite:///reports/optuna/schedule_sweep_bukin_v1.db
+  n_trials: 40
+  seed: 42
+  # Frozen model/training hp:
+  model_arch: mlp
+  hidden_dim: 16
+  num_blocks: 4
+  activation: silu
+  epochs: 300
+  batch_size: 32
+  lr: 0.00013525690179051148
+  patience: 40
+  min_delta: 0.000001
+  min_train_per_param: 10.0
+  # Only schedule varies
+  schedule_num_losses: 4

@@ -28,7 +28,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 import typer
 
-from ma_thesis.common import plot_model_surface, prepare_surface_grid
+from ma_thesis.common import (
+    fit_hidden_dim_to_param_budget,
+    plot_model_surface,
+    prepare_surface_grid,
+)
 from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
 from ma_thesis.models import build_model
 
@@ -261,11 +265,13 @@ def main(
     lambda_reg: float = 0.1,
     # --- Model architecture ---
     model_arch: str = "fourier",
-    hidden_dim: int = 512,
+    hidden_dim: int = 16,
     num_blocks: int = 4,
     activation: str = "gelu",
     num_fourier: int = 64,
     fourier_sigma: float = 1.45,
+    min_train_per_param: float = 10.0,
+    log_dataset_artifact: bool = False,
     # --- Curriculum settings ---
     num_crude: int | None = typer.Option(
         None,
@@ -298,6 +304,8 @@ def main(
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
+    if min_train_per_param <= 0:
+        raise typer.BadParameter("min_train_per_param must be > 0.")
 
     func_name = input_path.stem
     logger.info(f"Training on {func_name} dataset from {input_path}")
@@ -352,8 +360,24 @@ def main(
         "num_fourier": num_fourier,
         "sigma": fourier_sigma,
     }
+    hp, budget = fit_hidden_dim_to_param_budget(
+        hp,
+        n_train=int(n_train),
+        min_train_per_param=min_train_per_param,
+    )
     model = build_model(hp, device)
-    n_params = sum(p.numel() for p in model.parameters())
+    n_params = int(budget["effective_n_params"])
+    if bool(budget["was_adjusted"]):
+        logger.warning(
+            "Auto-adjusted hidden_dim to meet ratio target: "
+            f"{budget['requested_hidden_dim']} -> {budget['effective_hidden_dim']} "
+            f"(train/param={budget['effective_train_per_param']:.2f})"
+        )
+    if not bool(budget["budget_satisfied"]):
+        logger.warning(
+            "Requested ratio target could not be fully satisfied at min hidden_dim="
+            f"{budget['effective_hidden_dim']} (train/param={budget['effective_train_per_param']:.2f})."
+        )
     logger.info(f"Model: {model_arch} ({n_params:,} params)")
 
     # --- Initialize weight parameters u (uniform initialization) ---
@@ -401,9 +425,18 @@ def main(
                 "inner_steps": inner_steps,
                 "lambda_reg": lambda_reg,
                 "device": str(device),
+                "requested_hidden_dim": int(budget["requested_hidden_dim"]),
+                "effective_hidden_dim": int(budget["effective_hidden_dim"]),
+                "target_max_params": int(budget["target_max_params"]),
+                "effective_train_per_param": float(budget["effective_train_per_param"]),
+                "min_train_per_param": float(min_train_per_param),
+                "log_dataset_artifact": log_dataset_artifact,
             }
         )
-        mlflow.log_artifact(str(input_path), artifact_path="data")
+        mlflow.log_metric("run_started", 1.0, step=0)
+        mlflow.log_param("input_dataset_path", str(input_path))
+        if log_dataset_artifact:
+            mlflow.log_artifact(str(input_path), artifact_path="data")
         _log_run_config(
             output_dir / "configs",
             {

@@ -9,7 +9,7 @@ run:
   experiment_name: meta-eggholder-v1
   run_name: meta_eggholder_manual_hp
   model_arch: fourier
-  hidden_dim: 512
+  hidden_dim: 16
   num_blocks: 4
   activation: gelu
   num_fourier: 64

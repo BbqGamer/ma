@@ -17,5 +17,5 @@ run:
   report_interval: 10
   grid_res: 90
   model_archs: "mlp,siren,fourier"
-  min_train_per_param: 5.0
-  max_train_per_param: 10.0
+  min_train_per_param: 10.0
+  max_train_per_param: 20.0
