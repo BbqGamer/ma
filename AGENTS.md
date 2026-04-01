@@ -17,6 +17,12 @@ Core idea:
 3. meta-curriculum (bi-level optimization of loss weights),
 4. Optuna sweeps (model HP or schedule-only HP).
 
+The research goal is to show whether curriculum learning is useful for some cases,
+either when it comes to better generalization or efficiency. All the experiments
+should aim to show the gap or improvement between curriculum and single-target training.
+
+The results should be a publishable paper obtaining signifiant results.
+
 ## Tech Stack (Current)
 
 - Python 3.10
