@@ -291,6 +291,10 @@ def run(
     }
     manifest_path = _write_manifest(REPORTS_DIR / "runs", manifest)
     logger.info(f"Run manifest saved: {manifest_path}")
+    logger.info(
+        f"Dispatching method='{method}' for function='{function}' "
+        f"(run_id={run_id}, output_dir={run_output_dir})"
+    )
 
     if method in {"single", "curriculum"}:
         train_main(

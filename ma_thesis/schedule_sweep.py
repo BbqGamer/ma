@@ -151,7 +151,10 @@ class ScheduleObjective:
         patience_counter = 0
         history: list[dict[str, float]] = []
 
-        with mlflow.start_run(run_name=f"schedule_trial_{trial.number:03d}", nested=True):
+        with mlflow.start_run(run_name=f"schedule_trial_{trial.number:03d}", nested=True) as run:
+            logger.info(
+                f"[schedule trial {trial.number:03d}] MLflow run started: {run.info.run_id}"
+            )
             mlflow.set_tags(
                 {
                     "experiment_type": "curriculum_schedule_search",
@@ -227,6 +230,10 @@ class ScheduleObjective:
                 if trial.should_prune():
                     mlflow.set_tag("pruned", "true")
                     mlflow.log_metric("best_hard_val_loss", best_hard)
+                    logger.info(
+                        f"[schedule trial {trial.number:03d}] pruned at epoch={epoch + 1} "
+                        f"(best_hard={best_hard:.6f})"
+                    )
                     raise optuna.TrialPruned()
 
                 if hard_val < best_hard - ctx.min_delta:
@@ -387,6 +394,9 @@ def main(
     objective = ScheduleObjective(ctx)
 
     with mlflow.start_run(run_name=f"{study_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
+        logger.info(
+            f"MLflow study run started for '{study_name}' in experiment '{experiment_name}'"
+        )
         mlflow.set_tags(
             {
                 "experiment_type": "curriculum_schedule_search",

@@ -198,7 +198,11 @@ class Objective:
             )
         else:
             dataset = None
-        with mlflow.start_run(run_name=run_label, nested=False):
+        with mlflow.start_run(run_name=run_label, nested=False) as run:
+            logger.info(
+                f"[trial {trial.number:03d}] MLflow run started: "
+                f"{run.info.run_id} ({run_label})"
+            )
             mlflow.set_tags(
                 {
                     "strategy": "sweep_trial",
@@ -245,6 +249,7 @@ class Objective:
                     f"{train_per_param:.4f}_not_in_[{ctx.min_train_per_param},"
                     f"{ctx.max_train_per_param}]"
                 )
+                logger.warning(f"[trial {trial.number:03d}] Rejected by ratio constraint: {reason}")
                 trial.set_user_attr("ratio_valid", False)
                 trial.set_user_attr("ratio_reject_reason", reason)
                 mlflow.set_tag("rejected", "true")
@@ -356,10 +361,18 @@ class Objective:
 
             # --- Optuna pruning ---
             if (epoch + 1) % ctx.report_interval == 0:
+                logger.info(
+                    f"[trial {trial.number:03d}] epoch={epoch + 1} "
+                    f"val={val_loss:.6f} best={best_val_loss:.6f}"
+                )
                 trial.report(val_loss, epoch)
                 if trial.should_prune():
                     mlflow.log_metric("best_val_loss", best_val_loss)
                     mlflow.set_tag("pruned", "true")
+                    logger.info(
+                        f"[trial {trial.number:03d}] pruned at epoch={epoch + 1} "
+                        f"(best={best_val_loss:.6f})"
+                    )
                     mlflow.end_run(status="KILLED")
                     raise optuna.TrialPruned()
 

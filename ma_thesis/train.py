@@ -88,7 +88,8 @@ def train_one_level(
     n_train = X_train.shape[0]
     n_val = X_val.shape[0]
 
-    with mlflow.start_run(run_name=f"{func_name}_{level}", nested=True):
+    with mlflow.start_run(run_name=f"{func_name}_{level}", nested=True) as child_run:
+        logger.info(f"MLflow child run started for level '{level}': {child_run.info.run_id}")
         mlflow.log_params({"level": level, "level_idx": level_idx})
 
         optimizer = optim.AdamW(model.parameters(), lr=lr)
@@ -531,6 +532,10 @@ def main(
     mlflow.set_experiment(experiment_name)
 
     with mlflow.start_run(run_name=actual_run_name) as parent_run:
+        logger.info(
+            f"MLflow parent run started: {parent_run.info.run_id} "
+            f"(experiment='{experiment_name}', run_name='{actual_run_name}')"
+        )
         mlflow.set_tags(
             {
                 "strategy": mode,

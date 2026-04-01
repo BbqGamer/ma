@@ -400,6 +400,10 @@ def main(
     x_range, y_range, Zg_true = prepare_surface_grid(df, hard_col, grid_res)
 
     with mlflow.start_run(run_name=actual_run_name) as run:
+        logger.info(
+            f"MLflow run started: {run.info.run_id} "
+            f"(experiment='{experiment_name}', run_name='{actual_run_name}')"
+        )
         mlflow.set_tags(
             {
                 "strategy": "meta",

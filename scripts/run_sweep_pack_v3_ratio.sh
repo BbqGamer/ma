@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -u
+set -o pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
@@ -35,7 +36,7 @@ for cfg in "${CONFIGS[@]}"; do
   echo "" | tee -a "${RUN_LOG}" "${SUMMARY_LOG}"
   echo "=== Running ${cfg} ===" | tee -a "${RUN_LOG}" "${SUMMARY_LOG}"
 
-  if "${PYTHON_BIN}" -m ma_thesis.experiment run-config "${ROOT_DIR}/${cfg}" >>"${RUN_LOG}" 2>&1; then
+  if "${PYTHON_BIN}" -m ma_thesis.experiment run-config "${ROOT_DIR}/${cfg}" 2>&1 | tee -a "${RUN_LOG}"; then
     echo "OK  ${cfg}" | tee -a "${SUMMARY_LOG}"
   else
     echo "FAIL ${cfg} (continuing)" | tee -a "${SUMMARY_LOG}"
