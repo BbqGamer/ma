@@ -1,0 +1,3 @@
+[submodule "CurBench"]
+	path = CurBench
+	url = https://github.com/THUMNLab/CurBench.git
