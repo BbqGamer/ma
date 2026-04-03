@@ -114,7 +114,7 @@ structures early in training. decreasing width during training. They
 demonstrated that this strategy effectively filters out high-frequency noise in
 the loss landscape. Similarly, decay rates (e.g., linear or exponential decay)
 \cite{wang2021survey}. These a weighted sum of component losses $\mathcal{L} =
-    \sum w_i L_i$. However, gradient magnitudes, ensuring all tasks train at
+	\sum w_i L_i$. However, gradient magnitudes, ensuring all tasks train at
 similar rates. Similarly, Training deep neural networks on non-convex loss
 landscapes is a well-known challenge in artificial intelligence. Most standard
 approaches present data and objectives in a fixed way, which can miss important
@@ -158,6 +158,15 @@ during training, and \cite{gupta2025efficient} demonstrated that using
 intermediate checkpoints as smoothed objectives can guide models through a
 gradual learning process.
 
+Recent robust curriculum methods also operate directly at the loss level.
+SuperLoss appends a generic adaptive term to existing objectives and
+automatically downweights high-loss samples, which improves robustness in noisy
+settings without requiring task-specific training pipelines
+\cite{castells2020superloss}. At the evaluation level, CurBench established a
+unified benchmark and toolkit for curriculum learning across vision, language,
+and graph domains, making cross-method comparisons more reproducible
+\cite{zhou2024curbench}.
+
 Despite these advances, most existing methods rely on fixed schedules for
 adjusting the level of smoothing or regularization. These schedules are often
 chosen manually and do not adapt to the model's progress \cite{wang2021survey}.
@@ -195,7 +204,7 @@ drift and that dynamic adaptation of the loss landscape is required.
 
 \subsection{Pareto Continual Learning}
 Bridging this gap, \cite{lai2025pareto} introduced \textbf{Pareto Continual
-    Learning}, which reformulates the stability-plasticity trade-off (retaining old
+	Learning}, which reformulates the stability-plasticity trade-off (retaining old
 knowledge vs. learning new tasks) as a Multi-Objective Optimization (MOO)
 problem. Instead of finding a single fixed weight, they learn a set of
 Pareto-optimal solutions conditioned on a preference vector. This allows the
@@ -218,7 +227,7 @@ field has expanded into \textbf{Meta-Continual Learning (MCL)}.
 \subsection{Taxonomy of Meta-Continual Frameworks}
 A recent survey by \cite{son2024meta} provides a rigorous taxonomy for the
 intersection of these fields. They distinguish between \textit{Continual
-    Meta-Learning} (learning to learn from a sequence of tasks) and
+	Meta-Learning} (learning to learn from a sequence of tasks) and
 \textit{Meta-Continual Learning} (using meta-learning to solve the catastrophic
 forgetting problem). Our research aligns with their definition of
 \textbf{Continual Bi-Level Learning}, where the optimization process itself is
@@ -298,9 +307,9 @@ powinny być umieszczone np. na płycie CD, stanowiącej dodatek do pracy.
 \section*{Styl tekstu}
 
 Należy\footnote{Uwagi o stylu pochodzą częściowo ze stron prof. Macieja
-    Drozdowskiego~\cite{Drozdowski2006}.} stosować formę bezosobową, tj.~\emph{w
-    pracy rozważono ......, w ramach pracy zaprojektowano ....}, a nie: \emph{w
-    pracy rozważyłem, w ramach pracy zaprojektowałem}. Odwołania do wcześniejszych
+	Drozdowskiego~\cite{Drozdowski2006}.} stosować formę bezosobową, tj.~\emph{w
+	pracy rozważono ......, w ramach pracy zaprojektowano ....}, a nie: \emph{w
+	pracy rozważyłem, w ramach pracy zaprojektowałem}. Odwołania do wcześniejszych
 fragmentów tekstu powinny mieć następującą postać: ,,Jak wspomniano wcześniej,
 ....'', ,,Jak wykazano powyżej ....''. Należy unikać długich zdań.
 
@@ -357,19 +366,19 @@ To precisely define the scope of the search, the \acronym{PICOC} framework
 are presented in Table~\ref{tab:picoc}.
 
 \begin{table}[ht]
-    \fcmtcaption{Definition of the review scope using the PICOC framework.}\label{tab:picoc}
-    \centering\footnotesize%
-    \begin{tabular}{l >{\rightskip\fill}p{10cm}}
-        \toprule
-        Component             & Definition                                                                                                                                                               \\
-        \midrule
-        \textbf{P}opulation   & Deep Neural Networks (\acronym{DNN}) in Multi-Task Learning (\acronym{MTL}) settings, considering both hard and soft parameter sharing architectures.                    \\
-        \textbf{I}ntervention & Adaptive Curriculum Learning (e.g., Self-Paced Learning, RL-based teachers) and Meta-Learning based loss reweighting (e.g., MAML, Learning to Reweight).                 \\
-        \textbf{C}omparison   & 1. Static heuristics (Predefined curricula). \newline 2. Standard \acronym{MTL} baselines (Uniform weighting). \newline 3. Heuristic dynamic weighting (e.g., GradNorm). \\
-        \textbf{O}utcome      & \textbf{Primary:} Mitigation of Negative Transfer, Generalization performance. \newline \textbf{Secondary:} Optimization stability, Convergence speed.                   \\
-        \textbf{C}ontext      & Machine Learning research (excluding purely psychological curriculum studies without algorithmic implementation).                                                        \\
-        \bottomrule
-    \end{tabular}
+	\fcmtcaption{Definition of the review scope using the PICOC framework.}\label{tab:picoc}
+	\centering\footnotesize%
+	\begin{tabular}{l >{\rightskip\fill}p{10cm}}
+		\toprule
+		Component             & Definition                                                                                                                                                               \\
+		\midrule
+		\textbf{P}opulation   & Deep Neural Networks (\acronym{DNN}) in Multi-Task Learning (\acronym{MTL}) settings, considering both hard and soft parameter sharing architectures.                    \\
+		\textbf{I}ntervention & Adaptive Curriculum Learning (e.g., Self-Paced Learning, RL-based teachers) and Meta-Learning based loss reweighting (e.g., MAML, Learning to Reweight).                 \\
+		\textbf{C}omparison   & 1. Static heuristics (Predefined curricula). \newline 2. Standard \acronym{MTL} baselines (Uniform weighting). \newline 3. Heuristic dynamic weighting (e.g., GradNorm). \\
+		\textbf{O}utcome      & \textbf{Primary:} Mitigation of Negative Transfer, Generalization performance. \newline \textbf{Secondary:} Optimization stability, Convergence speed.                   \\
+		\textbf{C}ontext      & Machine Learning research (excluding purely psychological curriculum studies without algorithmic implementation).                                                        \\
+		\bottomrule
+	\end{tabular}
 \end{table}
 
 \section{Research Questions (RQs)}
@@ -378,21 +387,21 @@ The following research questions have been defined to guide the data extraction
 process:
 
 \begin{description}
-    \item[RQ1 (Curriculum)] How do adaptive approaches (e.g., Self-Paced Learning,
-          RL-based teachers) differ from static heuristics in defining training
-          schedules?
-    \item[RQ2 (Multi-Task)] What strategies are employed to mitigate negative transfer
-          (e.g., gradient conflict resolution) in hard vs. soft parameter sharing
-          architectures?
-    \item[RQ3 (Meta-Optimization)] How are meta-learning algorithms (e.g., MAML,
-          reweighting) applied to optimize loss weights or data selection dynamically?
+	\item[RQ1 (Curriculum)] How do adaptive approaches (e.g., Self-Paced Learning,
+	      RL-based teachers) differ from static heuristics in defining training
+	      schedules?
+	\item[RQ2 (Multi-Task)] What strategies are employed to mitigate negative transfer
+	      (e.g., gradient conflict resolution) in hard vs. soft parameter sharing
+	      architectures?
+	\item[RQ3 (Meta-Optimization)] How are meta-learning algorithms (e.g., MAML,
+	      reweighting) applied to optimize loss weights or data selection dynamically?
 \end{description}
 
 \section{Search Strategy}
 
 The search strategy relies on the intersection of three conceptual blocks:
 \emph{Curriculum Learning}, \emph{Meta-Optimization}, and \emph{Multi-Task
-    Learning}. Below are the specific queries designed for scientific databases.
+	Learning}. Below are the specific queries designed for scientific databases.
 
 \subsection{Scopus / Web of Science}
 
@@ -440,8 +449,8 @@ released after 2023.
 To complement the database search and ensure comprehensive coverage, a
 snowballing procedure will be applied:
 \begin{itemize}
-    \item \textbf{Forward Snowballing:} Reviewing papers that cite seminal works identified in the supervisor's recommendations (e.g., \emph{GradNorm}, \emph{MAML}, \emph{Self-Paced Learning}) to identify recent advancements.
-    \item \textbf{Backward Snowballing:} Examining the reference lists of included primary studies to identify foundational papers or missed relevant studies.
+	\item \textbf{Forward Snowballing:} Reviewing papers that cite seminal works identified in the supervisor's recommendations (e.g., \emph{GradNorm}, \emph{MAML}, \emph{Self-Paced Learning}) to identify recent advancements.
+	\item \textbf{Backward Snowballing:} Examining the reference lists of included primary studies to identify foundational papers or missed relevant studies.
 \end{itemize}
 
 \section{Selection Criteria and Data Extraction}
@@ -450,30 +459,30 @@ The selection process will be conducted in two stages: title/abstract screening
 followed by full-text review.
 
 \begin{figure}[t]
-    \centering
-    \resizebox{0.95\textwidth}{!}{
-        \input{figures/prisma_flow.tex}
-    }
-    \fcmfcaption{Schematic of the PRISMA selection process.}\label{rys:prisma}
+	\centering
+	\resizebox{0.95\textwidth}{!}{
+		\input{figures/prisma_flow.tex}
+	}
+	\fcmfcaption{Schematic of the PRISMA selection process.}\label{rys:prisma}
 \end{figure}
 
 \paragraph{Inclusion Criteria.} The review will include papers that:
 \begin{enumerate}
-    \item Propose a method for \emph{automating} the training process (adaptive
-          curriculum or loss weighting).
-    \item Address Multi-Task Learning challenges, specifically Negative Transfer or
-          parameter sharing.
-    \item Utilize Meta-Learning, Self-Paced Learning, or Reinforcement Learning
-          approaches.
-    \item Were published between 2017 and 2025.
+	\item Propose a method for \emph{automating} the training process (adaptive
+	      curriculum or loss weighting).
+	\item Address Multi-Task Learning challenges, specifically Negative Transfer or
+	      parameter sharing.
+	\item Utilize Meta-Learning, Self-Paced Learning, or Reinforcement Learning
+	      approaches.
+	\item Were published between 2017 and 2025.
 \end{enumerate}
 
 \paragraph{Data Extraction.} The following information will be extracted from selected papers:
 \begin{itemize}
-    \item \textbf{Metadata:} Title, year, publication venue.
-    \item \textbf{Methodology:} Type of Curriculum (Static/Adaptive/SPL) and Optimization strategy.
-    \item \textbf{Architecture:} Hard vs. Soft parameter sharing.
-    \item \textbf{Results:} Mitigation of negative transfer and generalization improvements.
+	\item \textbf{Metadata:} Title, year, publication venue.
+	\item \textbf{Methodology:} Type of Curriculum (Static/Adaptive/SPL) and Optimization strategy.
+	\item \textbf{Architecture:} Hard vs. Soft parameter sharing.
+	\item \textbf{Results:} Mitigation of negative transfer and generalization improvements.
 \end{itemize}
 
 \input{appendices/sweep_pack_v1}
