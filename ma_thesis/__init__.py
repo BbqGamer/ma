@@ -1,1 +1,2 @@
-from ma_thesis import config  # noqa: F401
+"""ma_thesis package."""
+

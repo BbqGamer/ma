@@ -1,4 +1,4 @@
-"""Meta-learning curriculum training with weighted multi-loss optimization.
+"""Experimental meta-learning curriculum training with weighted multi-loss optimization.
 
 This module implements the curriculum learning framework from docs/design/2026-01-15-proposal.md:
 - Multi-loss weighted training (all sigma levels simultaneously)
@@ -14,14 +14,12 @@ The curriculum schedule enforces:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import sys
 
 from loguru import logger
 import mlflow
 import numpy as np
-import polars as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -34,17 +32,11 @@ from ma_thesis.common import (
     prepare_surface_grid,
 )
 from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
+from ma_thesis.io import load_dataset_bundle, split_train_val_indices
+from ma_thesis.mlflow_utils import log_dataset_reference, log_run_config
 from ma_thesis.models import build_model
 
 app = typer.Typer()
-
-
-def _log_run_config(output_dir: Path, payload: dict) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / "run_config.json"
-    config_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    mlflow.log_artifact(str(config_path), artifact_path="config")
-    return config_path
 
 
 def softmax_weights(u: torch.Tensor) -> torch.Tensor:
@@ -311,18 +303,12 @@ def main(
     logger.info(f"Training on {func_name} dataset from {input_path}")
 
     # --- Load data ---
-    df = pl.read_parquet(input_path)
-    X_np = df.select(["x1", "x2"]).to_numpy()
-    x_min = X_np.min(axis=0)
-    x_max = X_np.max(axis=0)
-    X_scaled = 2.0 * (X_np - x_min) / (x_max - x_min) - 1.0
-    X = torch.from_numpy(X_scaled).float().to(device)
-
-    # Identify all sigma columns
-    sigma_cols = sorted(
-        [col for col in df.columns if col.startswith("y_sigma_")],
-        key=lambda c: int(c.split("_")[-1]),
-    )
+    ds = load_dataset_bundle(input_path, device)
+    df = ds.df
+    X = ds.X
+    x_min = ds.x_min
+    x_max = ds.x_max
+    sigma_cols = ds.sigma_cols
     num_sigma_levels = len(sigma_cols)
     logger.info(f"Found {num_sigma_levels} smoothing levels: {sigma_cols}")
 
@@ -340,14 +326,12 @@ def main(
 
     # Train/val split (80/20)
     n = X.shape[0]
-    n_val = int(0.2 * n)
-    n_train = n - n_val
-    gen = torch.Generator(device=device)
-    gen.manual_seed(42)
-    perm = torch.randperm(n, device=device, generator=gen)
+    train_idx, val_idx = split_train_val_indices(n, device, val_split=0.2, seed=42)
+    n_train = int(train_idx.shape[0])
+    n_val = int(val_idx.shape[0])
 
-    X_train, Y_train_multi = X[perm[:n_train]], Y_multi[perm[:n_train]]
-    X_val, Y_val_multi = X[perm[n_train:]], Y_multi[perm[n_train:]]
+    X_train, Y_train_multi = X[train_idx], Y_multi[train_idx]
+    X_val, Y_val_multi = X[val_idx], Y_multi[val_idx]
 
     logger.info(f"Train: {n_train} samples, Val: {n_val} samples")
 
@@ -407,6 +391,7 @@ def main(
         mlflow.set_tags(
             {
                 "strategy": "meta",
+                "track": "experimental",
                 "function": func_name,
                 "model_arch": str(model_arch),
                 "entrypoint": "ma_thesis.meta_train",
@@ -438,10 +423,12 @@ def main(
             }
         )
         mlflow.log_metric("run_started", 1.0, step=0)
-        mlflow.log_param("input_dataset_path", str(input_path))
-        if log_dataset_artifact:
-            mlflow.log_artifact(str(input_path), artifact_path="data")
-        _log_run_config(
+        log_dataset_reference(
+            input_path,
+            key="input_dataset_path",
+            log_artifact=log_dataset_artifact,
+        )
+        log_run_config(
             output_dir / "configs",
             {
                 "argv": sys.argv,

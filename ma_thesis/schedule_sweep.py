@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-import json
 from pathlib import Path
 from typing import Any
 
@@ -23,48 +22,27 @@ import optuna
 import polars as pl
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import typer
 
 from ma_thesis.common import fit_hidden_dim_to_param_budget
 from ma_thesis.config import FIGURES_DIR, PROCESSED_DATA_DIR
+from ma_thesis.io import load_dataset_bundle, select_sigma_columns, split_train_val_indices
+from ma_thesis.mlflow_utils import log_dataset_reference, log_run_config
 from ma_thesis.models import build_model
+from ma_thesis.training_core import (
+    build_adamw_cosine,
+    compute_steps_per_epoch,
+    iter_minibatches,
+    shuffle_pair,
+)
 
 app = typer.Typer()
-
-
-def _select_sigma_columns(df: pl.DataFrame, num_losses: int) -> list[str]:
-    sigma_cols = sorted(
-        [c for c in df.columns if c.startswith("y_sigma_")],
-        key=lambda c: int(c.split("_")[-1]),
-    )
-    if len(sigma_cols) < num_losses:
-        raise ValueError(
-            f"Dataset has {len(sigma_cols)} y_sigma_* columns, but num_losses={num_losses}. "
-            "Regenerate dataset with more sigma levels."
-        )
-    if num_losses < 2:
-        raise ValueError("num_losses must be >= 2.")
-    if num_losses == len(sigma_cols):
-        return sigma_cols
-
-    idx = np.linspace(0, len(sigma_cols) - 1, num_losses)
-    idx = sorted({int(round(i)) for i in idx})
-    if idx[-1] != len(sigma_cols) - 1:
-        idx[-1] = len(sigma_cols) - 1
-    cols = [sigma_cols[i] for i in idx]
-    return cols
 
 
 def _schedule_weights(epoch: int, total_epochs: int, a: torch.Tensor, b: torch.Tensor, tau: float) -> torch.Tensor:
     t = epoch / max(1, total_epochs - 1)
     logits = a + b * t
     return torch.softmax(logits / tau, dim=0)
-
-
-def _serialize(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _log_weight_plot(history: list[dict[str, float]], trial_number: int, output_dir: Path) -> Path:
@@ -135,16 +113,11 @@ class ScheduleObjective:
         tau = float(schedule["tau"])
 
         model = build_model(ctx.hp, ctx.device)
-        optimizer = optim.AdamW(model.parameters(), lr=ctx.lr)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=ctx.epochs,
-            eta_min=ctx.lr * 0.01,
-        )
+        optimizer, scheduler = build_adamw_cosine(model, lr=ctx.lr, epochs=ctx.epochs)
         mse = nn.MSELoss()
 
         n_train = ctx.X_train.shape[0]
-        steps_per_epoch = max(1, n_train // ctx.batch_size)
+        steps_per_epoch = compute_steps_per_epoch(n_train, ctx.batch_size)
 
         best_hard = float("inf")
         best_state = None
@@ -185,16 +158,10 @@ class ScheduleObjective:
             for epoch in range(ctx.epochs):
                 weights = _schedule_weights(epoch, ctx.epochs, a, b, tau)
                 model.train()
-                perm = torch.randperm(n_train, device=ctx.device)
-                x_perm = ctx.X_train[perm]
-                y_perm = ctx.Y_train[perm]
+                x_perm, y_perm = shuffle_pair(ctx.X_train, ctx.Y_train, device=ctx.device)
                 epoch_loss = 0.0
 
-                for i in range(steps_per_epoch):
-                    s = i * ctx.batch_size
-                    e = s + ctx.batch_size
-                    xb = x_perm[s:e]
-                    yb = y_perm[s:e]  # (batch, levels)
+                for xb, yb in iter_minibatches(x_perm, y_perm, batch_size=ctx.batch_size):
                     optimizer.zero_grad(set_to_none=True)
                     preds = model(xb)
                     losses = torch.stack([mse(preds, yb[:, j : j + 1]) for j in range(n_levels)])
@@ -301,27 +268,19 @@ def main(
         raise typer.BadParameter("min_train_per_param must be > 0.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    df = pl.read_parquet(input_path)
+    ds = load_dataset_bundle(input_path, device)
+    df = ds.df
     func_name = input_path.stem
-    levels = _select_sigma_columns(df, num_losses)
+    levels = select_sigma_columns(df, num_losses=num_losses)
     logger.info(f"Selected levels for schedule search: {levels}")
 
-    X_np = df.select(["x1", "x2"]).to_numpy()
-    x_min = X_np.min(axis=0)
-    x_max = X_np.max(axis=0)
-    X_scaled = 2.0 * (X_np - x_min) / (x_max - x_min) - 1.0
-    X = torch.from_numpy(X_scaled).float().to(device)
+    X = ds.X
     Y = torch.from_numpy(np.column_stack([df[c].to_numpy() for c in levels])).float().to(device)
 
-    n = X.shape[0]
-    n_val = int(0.2 * n)
-    n_train = n - n_val
-    gen = torch.Generator(device=device)
-    gen.manual_seed(42)
-    perm = torch.randperm(n, device=device, generator=gen)
-
-    X_train, Y_train = X[perm[:n_train]], Y[perm[:n_train]]
-    X_val, Y_val = X[perm[n_train:]], Y[perm[n_train:]]
+    train_indices, val_indices = split_train_val_indices(X.shape[0], device, val_split=0.2, seed=42)
+    X_train, Y_train = X[train_indices], Y[train_indices]
+    X_val, Y_val = X[val_indices], Y[val_indices]
+    n_train = X_train.shape[0]
 
     hp_requested = {
         "model_arch": model_arch,
@@ -414,7 +373,7 @@ def main(
                 "seed": seed,
                 "num_losses": num_losses,
                 "levels": ",".join(levels),
-                "frozen_model_hp": json.dumps(hp, sort_keys=True),
+                "frozen_model_hp": str(hp),
                 "epochs": epochs,
                 "batch_size": batch_size,
                 "lr": lr,
@@ -427,8 +386,11 @@ def main(
                 "min_train_per_param": float(min_train_per_param),
             }
         )
-        _serialize(
-            output_dir / "study_config.json",
+        log_dataset_reference(input_path, key="input_dataset_path")
+        if ds.test_path.exists():
+            log_dataset_reference(ds.test_path, key="test_dataset_path")
+        log_run_config(
+            output_dir / "config",
             {
                 "input_path": str(input_path),
                 "experiment_name": experiment_name,
@@ -455,15 +417,15 @@ def main(
                     "min_delta": min_delta,
                 },
             },
+            filename="study_config.json",
         )
-        mlflow.log_artifact(str(output_dir / "study_config.json"), artifact_path="config")
 
         study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
         best = study.best_trial
         mlflow.log_metric("best_hard_val_loss", float(best.value))
         mlflow.log_param("best_trial_number", int(best.number))
-        mlflow.log_param("best_schedule_params", json.dumps(best.params, sort_keys=True))
+        mlflow.log_param("best_schedule_params", str(best.params))
 
         logger.success(
             f"Study finished: best trial #{best.number}, "

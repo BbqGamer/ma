@@ -117,7 +117,6 @@ Start-and-leave sweep pack:
 │
 ├── notebooks/             <- Interactive notebooks (Marimo / Jupyter)
 │   ├── gaussian.ipynb     <- Gaussian smoothing explorations
-│   └── functions.py       <- Shared helper functions for notebooks
 │
 ├── docs/                  <- Project documentation (MkDocs)
 │   ├── mkdocs.yml         <- MkDocs configuration

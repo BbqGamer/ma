@@ -23,7 +23,6 @@ Sort by ``best_val_loss`` to find the winning configuration.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 import sys
 from typing import Any, Optional
@@ -36,16 +35,16 @@ import optuna
 import polars as pl
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import typer
 
 from ma_thesis.common import (
-    load_and_split,
-    paired_test_path,
+    count_trainable_params,
     plot_model_surface,
     prepare_surface_grid,
 )
 from ma_thesis.config import FIGURES_DIR, PROCESSED_DATA_DIR
+from ma_thesis.io import load_dataset_bundle, split_train_val_indices
+from ma_thesis.mlflow_utils import log_run_config
 from ma_thesis.models import ACTIVATIONS, build_model
 from ma_thesis.optimization_metrics import (
     StepMetricsState,
@@ -54,16 +53,14 @@ from ma_thesis.optimization_metrics import (
     hutchinson_hessian_trace,
     layerwise_spectral_alpha,
 )
+from ma_thesis.training_core import (
+    build_adamw_cosine,
+    compute_steps_per_epoch,
+    iter_minibatches,
+    shuffle_pair,
+)
 
 app = typer.Typer()
-
-
-def _log_run_config(output_dir: Path, payload: dict[str, Any]) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / "sweep_config.json"
-    config_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    mlflow.log_artifact(str(config_path), artifact_path="config")
-    return config_path
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +160,7 @@ class Objective:
         model = build_model(hp, ctx.device)
         arch = hp["model_arch"]
 
-        n_params = sum(p.numel() for p in model.parameters())
+        n_params = count_trainable_params(model)
         n_train = int(ctx.X_train.shape[0])
         train_per_param = n_train / n_params
         ratio_valid = ctx.min_train_per_param <= train_per_param <= ctx.max_train_per_param
@@ -218,7 +215,7 @@ class Objective:
                 mlflow.log_param("n_test", int(ctx.X_test.shape[0]))
             mlflow.log_metric("train_per_param", train_per_param)
             mlflow.log_param("step_metrics_interval", int(ctx.step_metrics_interval))
-            _log_run_config(
+            log_run_config(
                 ctx.output_dir / "configs",
                 {
                     "argv": sys.argv,
@@ -239,6 +236,7 @@ class Objective:
                         "trial_ratio_valid": ratio_valid,
                     },
                 },
+                filename="sweep_config.json",
             )
             if dataset is not None:
                 mlflow.log_input(dataset, context="training")
@@ -277,16 +275,11 @@ class Objective:
     ) -> float:
         ctx = self.ctx
 
-        optimizer = optim.AdamW(model.parameters(), lr=hp["lr"])
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=ctx.epochs,
-            eta_min=hp["lr"] * 0.01,
-        )
+        optimizer, scheduler = build_adamw_cosine(model, lr=hp["lr"], epochs=ctx.epochs)
         criterion = nn.MSELoss()
 
         n_train = ctx.X_train.shape[0]
-        steps_per_epoch = max(1, n_train // hp["batch_size"])
+        steps_per_epoch = compute_steps_per_epoch(n_train, hp["batch_size"])
 
         best_val_loss = float("inf")
         patience_counter = 0
@@ -299,16 +292,12 @@ class Objective:
         for epoch in range(ctx.epochs):
             # --- train ---
             model.train()
-            perm = torch.randperm(n_train, device=ctx.device)
-            x_perm = ctx.X_train[perm]
-            y_perm = ctx.y_train[perm]
+            x_perm, y_perm = shuffle_pair(ctx.X_train, ctx.y_train, device=ctx.device)
 
             epoch_loss = 0.0
-            for i in range(steps_per_epoch):
-                s = i * hp["batch_size"]
-                e = s + hp["batch_size"]
+            for x_batch, y_batch in iter_minibatches(x_perm, y_perm, batch_size=hp["batch_size"]):
                 optimizer.zero_grad(set_to_none=True)
-                loss = criterion(model(x_perm[s:e]), y_perm[s:e])
+                loss = criterion(model(x_batch), y_batch)
                 loss.backward()
                 if ctx.step_metrics_interval > 0 and (opt_step % ctx.step_metrics_interval == 0):
                     step_metrics = compute_step_metrics(model, step_metrics_state)
@@ -416,7 +405,7 @@ class Objective:
         logger.info(
             f"  Trial {trial.number} done — "
             f"val={best_val_loss:.6f}  ({total_epochs} epochs, "
-            f"{sum(p.numel() for p in model.parameters())} params)"
+            f"{count_trainable_params(model)} params)"
         )
         return best_val_loss
 
@@ -464,12 +453,6 @@ class Objective:
 
 
 # ---------------------------------------------------------------------------
-# Data loading & splitting (now imported from common.py)
-# ---------------------------------------------------------------------------
-# See ma_thesis.common.load_and_split for implementation
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -511,30 +494,29 @@ def main(
     logger.info(f"Device: {device}")
 
     # --- data ---
-    X_train, y_train, X_val, y_val, func_name, hard_col, df, x_min, x_max = load_and_split(
-        input_path, device
-    )
+    ds = load_dataset_bundle(input_path, device)
+    df = ds.df
+    X = ds.X
+    x_min = ds.x_min
+    x_max = ds.x_max
+    hard_col = ds.hard_col
+    y_all = ds.y_hard_all
+    test_path = ds.test_path
+    func_name = input_path.stem
+    train_indices, val_indices = split_train_val_indices(X.shape[0], device, val_split=0.2, seed=42)
+    X_train = X[train_indices]
+    y_train = y_all[train_indices]
+    X_val = X[val_indices]
+    y_val = y_all[val_indices]
     logger.info(
         f"Sweep on {func_name} ({hard_col})  |  train={X_train.shape[0]}  val={X_val.shape[0]}"
     )
     logger.info(f"Input scaled to [-1, 1]  (x_min={x_min}, x_max={x_max})")
 
-    test_path = paired_test_path(input_path)
-    X_test: torch.Tensor | None = None
-    y_test: torch.Tensor | None = None
-    if test_path.exists():
-        df_test = pl.read_parquet(test_path)
-        if hard_col not in df_test.columns:
-            logger.warning(
-                f"Paired test file exists but missing '{hard_col}': {test_path}. "
-                "Skipping final_test_loss logging."
-            )
-        else:
-            X_test_np = df_test.select(["x1", "x2"]).to_numpy()
-            X_test_scaled = 2.0 * (X_test_np - x_min) / (x_max - x_min) - 1.0
-            X_test = torch.from_numpy(X_test_scaled).float().to(device)
-            y_test = torch.from_numpy(df_test[hard_col].to_numpy()).float().unsqueeze(1).to(device)
-            logger.info(f"Using holdout test set from {test_path} ({X_test.shape[0]} samples)")
+    X_test = ds.X_test
+    y_test = ds.y_hard_test
+    if X_test is not None:
+        logger.info(f"Using holdout test set from {test_path} ({X_test.shape[0]} samples)")
     else:
         logger.warning(f"No paired test file found at {test_path}; test loss will not be logged.")
     if min_train_per_param <= 0 or max_train_per_param <= 0:

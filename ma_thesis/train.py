@@ -1,26 +1,23 @@
-import json
 from pathlib import Path
 import sys
-from typing import Any
 
 from loguru import logger
 import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
 import optuna
-import polars as pl
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import typer
 
 from ma_thesis.common import (
     fit_hidden_dim_to_param_budget,
-    paired_test_path,
     plot_model_surface,
     prepare_surface_grid,
 )
 from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
+from ma_thesis.io import load_dataset_bundle, split_train_val_indices
+from ma_thesis.mlflow_utils import log_dataset_reference, log_run_config
 from ma_thesis.models import build_model
 from ma_thesis.optimization_metrics import (
     StepMetricsState,
@@ -29,16 +26,14 @@ from ma_thesis.optimization_metrics import (
     hutchinson_hessian_trace,
     layerwise_spectral_alpha,
 )
+from ma_thesis.training_core import (
+    build_adamw_cosine,
+    compute_steps_per_epoch,
+    iter_minibatches,
+    shuffle_pair,
+)
 
 app = typer.Typer()
-
-
-def _log_run_config(output_dir: Path, payload: dict[str, Any]) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / "run_config.json"
-    config_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    mlflow.log_artifact(str(config_path), artifact_path="config")
-    return config_path
 
 
 # ---------------------------------------------------------------------------
@@ -92,12 +87,9 @@ def train_one_level(
         logger.info(f"MLflow child run started for level '{level}': {child_run.info.run_id}")
         mlflow.log_params({"level": level, "level_idx": level_idx})
 
-        optimizer = optim.AdamW(model.parameters(), lr=lr)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=epochs, eta_min=lr * 0.01
-        )
+        optimizer, scheduler = build_adamw_cosine(model, lr=lr, epochs=epochs)
         criterion = nn.MSELoss()
-        steps_per_epoch = max(1, (n_train + batch_size - 1) // batch_size)
+        steps_per_epoch = compute_steps_per_epoch(n_train, batch_size)
         logger.info(f"Starting training on {n_train} samples (validation: {n_val})...")
         step_metrics_state = StepMetricsState()
         opt_step = 0
@@ -111,19 +103,12 @@ def train_one_level(
         best_model_state = None
 
         for epoch in range(epochs):
-            epoch_perm = torch.randperm(n_train, device=device)
-            x_perm = X_train[epoch_perm]
-            y_perm = y_train[epoch_perm]
+            x_perm, y_perm = shuffle_pair(X_train, y_train, device=device)
 
             epoch_loss = 0.0
             model.train()
 
-            for i in range(steps_per_epoch):
-                start = i * batch_size
-                end = start + batch_size
-                x_batch = x_perm[start:end]
-                y_batch = y_perm[start:end]
-
+            for x_batch, y_batch in iter_minibatches(x_perm, y_perm, batch_size=batch_size):
                 optimizer.zero_grad(set_to_none=True)
                 outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
@@ -419,47 +404,24 @@ def main(
     # ------------------------------------------------------------------
     # Data loading with [-1, 1] input scaling
     # ------------------------------------------------------------------
-    df = pl.read_parquet(input_path)
-    X_np = df.select(["x1", "x2"]).to_numpy()
-    x_min = X_np.min(axis=0)  # shape (2,)
-    x_max = X_np.max(axis=0)
-    X_scaled = 2.0 * (X_np - x_min) / (x_max - x_min) - 1.0
-    X = torch.from_numpy(X_scaled).float().to(device)
+    ds = load_dataset_bundle(input_path, device)
+    df = ds.df
+    X = ds.X
+    x_min = ds.x_min
+    x_max = ds.x_max
+    sigma_cols = ds.sigma_cols
+    hard_col = ds.hard_col
+    y_hard_all = ds.y_hard_all
+    test_path = ds.test_path
+    X_test = ds.X_test
+    y_hard_test = ds.y_hard_test
     logger.info(f"Input scaled to [-1, 1]  (x_min={x_min}, x_max={x_max})")
-
-    # Identify sigma level columns (y_sigma_0, y_sigma_1, ...)
-    sigma_cols = sorted(
-        [col for col in df.columns if col.startswith("y_sigma_")],
-        key=lambda c: int(c.split("_")[-1]),
-    )
     logger.info(f"Found {len(sigma_cols)} smoothing levels: {sigma_cols}")
-
-    # The last sigma column (sigma=0) is the hard/raw target
-    hard_col = sigma_cols[-1]
-    y_hard_all = torch.from_numpy(df[hard_col].to_numpy()).float().unsqueeze(1).to(device)
     logger.info(f"Hard (raw) target column: {hard_col}")
-
-    # Optional paired holdout set (same schema as train set)
-    test_path = paired_test_path(input_path)
-    X_test: torch.Tensor | None = None
-    y_hard_test: torch.Tensor | None = None
-    if test_path.exists():
-        df_test = pl.read_parquet(test_path)
-        if hard_col not in df_test.columns:
-            logger.warning(
-                f"Paired test file exists but missing '{hard_col}': {test_path}. "
-                "Skipping final_test_loss logging."
-            )
-        else:
-            X_test_np = df_test.select(["x1", "x2"]).to_numpy()
-            X_test_scaled = 2.0 * (X_test_np - x_min) / (x_max - x_min) - 1.0
-            X_test = torch.from_numpy(X_test_scaled).float().to(device)
-            y_hard_test = (
-                torch.from_numpy(df_test[hard_col].to_numpy()).float().unsqueeze(1).to(device)
-            )
-            logger.info(f"Using holdout test set from {test_path} ({X_test.shape[0]} samples)")
+    if X_test is not None:
+        logger.info(f"Using holdout test set from {test_path} ({X_test.shape[0]} samples)")
     else:
-        logger.warning(f"No paired test file found at {test_path}; test loss will not be logged.")
+        logger.warning(f"No usable paired test file found at {test_path}; test loss will not be logged.")
 
     # Determine which levels to train on
     if mode == "single":
@@ -486,13 +448,9 @@ def main(
 
     # Deterministic 80/20 split — same seed = same partition as sweep.py
     num_samples = X.shape[0]
-    n_val = int(0.2 * num_samples)
-    n_train = num_samples - n_val
-    split_gen = torch.Generator(device=device)
-    split_gen.manual_seed(42)
-    perm = torch.randperm(num_samples, device=device, generator=split_gen)
-    train_indices = perm[:n_train]
-    val_indices = perm[n_train:]
+    train_indices, val_indices = split_train_val_indices(num_samples, device, val_split=0.2, seed=42)
+    n_train = int(train_indices.shape[0])
+    n_val = int(val_indices.shape[0])
 
     X_train = X[train_indices]
     X_val = X[val_indices]
@@ -572,14 +530,18 @@ def main(
             }
         )
         mlflow.log_metric("run_started", 1.0, step=0)
-        mlflow.log_param("input_dataset_path", str(input_path))
-        if log_dataset_artifact:
-            mlflow.log_artifact(str(input_path), artifact_path="data")
+        log_dataset_reference(
+            input_path,
+            key="input_dataset_path",
+            log_artifact=log_dataset_artifact,
+        )
         if test_path.exists():
-            mlflow.log_param("test_dataset_path", str(test_path))
-            if log_dataset_artifact:
-                mlflow.log_artifact(str(test_path), artifact_path="data")
-        _log_run_config(
+            log_dataset_reference(
+                test_path,
+                key="test_dataset_path",
+                log_artifact=log_dataset_artifact,
+            )
+        log_run_config(
             output_dir / "configs",
             {
                 "argv": sys.argv,

@@ -1,81 +1,73 @@
 # AGENTS.md — Project Context For Coding Assistants
 
-> Use this file first when working in this repository.
+> Read this first. It describes how this repository is actually used today.
 
 ## Project Snapshot
 
-- **Project:** Dynamic Multi-Loss Curriculum Learning with Meta-Optimization
-- **Author:** Adam Korba
-- **Context:** Master's thesis (in progress)
-- **Language split:** Polish thesis text, English code/docs
+- Project: Dynamic Multi-Loss Curriculum Learning with Meta-Optimization
+- Context: Master's thesis implementation (active research code)
+- Code language: English
+- Thesis language: Polish
 
-Core idea:
-- Build Gaussian-continuation targets (`y_sigma_0 ... y_sigma_K`) for 2D benchmark functions.
-- Train neural regressors using:
-1. single-target training,
-2. sequential curriculum over sigma levels,
-3. meta-curriculum (bi-level optimization of loss weights),
-4. Optuna sweeps (model HP or schedule-only HP).
+Goal in one line:
+- Compare `single` vs `curriculum` (and optionally `meta`) training on Gaussian-continuation
+  targets for benchmark regression surfaces, with reproducible sweeps and MLflow tracking.
 
-The research goal is to show whether curriculum learning is useful for some cases,
-either when it comes to better generalization or efficiency. All the experiments
-should aim to show the gap or improvement between curriculum and single-target training.
+## What Is Core vs Optional
 
-The results should be a publishable paper obtaining signifiant results.
+Core training pipeline (high priority):
+- `ma_thesis/experiment.py` (orchestrator CLI)
+- `ma_thesis/dataset.py` (data generation + train/test split)
+- `ma_thesis/train.py` (single/curriculum training)
+- `ma_thesis/sweep.py` (Optuna model HP sweep)
+- `ma_thesis/schedule_sweep.py` (Optuna curriculum schedule-only sweep)
+- `ma_thesis/models.py` (model factory + architectures)
+- `ma_thesis/common.py` (shared training helpers, plotting helpers, parameter budgeting)
+- `ma_thesis/io.py` (shared dataset loading + train/val split)
+- `ma_thesis/mlflow_utils.py` (shared MLflow artifact/config logging)
+- `ma_thesis/training_core.py` (shared optimizer/scheduler and minibatch loop primitives)
 
-## Tech Stack (Current)
+Used but secondary (research/analysis support):
+- `ma_thesis/meta_train.py` (experimental meta-curriculum / bi-level optimization)
+- `ma_thesis/optimization_metrics.py` (diagnostic metrics)
+- `scripts/run_curriculum_benchmark.py`
+- `scripts/analyze_curriculum_benchmark.py`
+
+Archival / frozen results (touch only if needed):
+- `docs/results/2026-03-14_sweep-pack-v1.md` + related frozen result artifacts
+
+## Current Stack
 
 - Python 3.10
-- PyTorch for training loops and models
-- Optuna for sweeps
-- MLflow for experiment tracking
-- Polars / NumPy / SciPy / scikit-learn for data and utilities
+- PyTorch (main training stack)
+- Optuna (hyperparameter search)
+- MLflow (local SQLite backend + filesystem artifacts)
+- Polars, NumPy, SciPy, scikit-learn
 - Typer CLIs
-- Ruff formatting/linting
-- MkDocs for docs
-- LaTeX for thesis
+- Ruff lint/format
+- MkDocs + LaTeX for docs/thesis
 
 Note:
-- `jax` / `flax` are present in dependencies but the main training pipeline currently runs through the PyTorch modules under `ma_thesis/`.
+- `jax` / `flax` may appear in dependencies, but the active training pipeline is PyTorch-based.
 
-## Repository Map
+## Main Commands
 
-### `ma_thesis/` (main package)
-- `experiment.py` — main orchestrator CLI (`run`, `prepare-data`, `run-config`)
-- `dataset.py` — Gaussian continuation dataset generator and train/test split writer
-- `train.py` — single/curriculum training, nested MLflow runs, checkpoints, plots
-- `meta_train.py` — meta-curriculum training (learned multi-loss weights)
-- `sweep.py` — Optuna model-hyperparameter sweep
-- `schedule_sweep.py` — Optuna schedule-only sweep (fixed model/training HP)
-- `models.py` — model definitions + factory (`mlp`, `siren`, `fourier`)
-- `common.py` — shared split/plot helpers and model-parameter budgeting helpers
-- `optimization_metrics.py` — gradient/noise/sharpness/spectral diagnostics
-- `data.py` — benchmark function definitions
-- `config.py` — project paths and constants
-
-### `configs/`
-- `configs/sweeps/*.yaml` — per-function sweep configs
-- `configs/sweeps/v2_ratio/*.yaml`, `v3_ratio/*.yaml` — ratio-constrained sweep packs
-- `configs/experiments/*.yaml` — reusable experiment templates
-
-### `scripts/`
-- Sweep pack runners and benchmark helper scripts.
-- Important: `run_sweep_pack_v3_ratio.sh` is a long-running batch entrypoint.
-
-### Outputs / Tracking
-- `data/processed/` — generated parquet datasets (`*_train.parquet`, `*_test.parquet`)
-- `reports/runs/` — per-run manifest JSON from orchestrator
-- `reports/logs/` — batch script logs
-- `reports/optuna/` — Optuna SQLite files for external study storage
-- `models/` — saved checkpoints (`.pt`)
-- `mlflow.db` + `mlruns/` — MLflow tracking backend + artifacts
-
-## Run Flows (Preferred)
-
-Single entrypoint for most work:
+Environment:
 ```bash
-python -m ma_thesis.experiment run --method curriculum --function ackley
+make create_environment
+source .venv/bin/activate
+make requirements
+```
+
+Data:
+```bash
+make data
+```
+
+Run experiments through single entrypoint:
+```bash
 python -m ma_thesis.experiment run --method single --function ackley --sigma-level -1
+python -m ma_thesis.experiment run --method curriculum --function ackley
 python -m ma_thesis.experiment run --method meta --function eggholder
 python -m ma_thesis.experiment run --method sweep --function levy --n-trials 80
 python -m ma_thesis.experiment run --method schedule_sweep --function ackley
@@ -86,56 +78,70 @@ Run from YAML:
 python -m ma_thesis.experiment run-config configs/sweeps/v3_ratio/ackley_sweep_v3_ratio.yaml
 ```
 
-Batch sweep pack:
+Batch sweep packs:
 ```bash
+bash scripts/run_sweep_pack.sh
+bash scripts/run_sweep_pack_v2_ratio.sh
 bash scripts/run_sweep_pack_v3_ratio.sh
+bash scripts/run_schedule_sweep_pack.sh
 ```
 
-## MLflow Behavior (Important)
-
-Tracking defaults:
-- backend: `sqlite:////<repo>/mlflow.db`
-- artifacts: `<repo>/mlruns`
-
-`train.py` logging structure:
-- parent run: global metrics (`global/train_loss`, etc.) and final metrics
-- child runs (nested): per-level epoch metrics (`train_loss`, `val_loss`, `hard_val_loss`)
-
-If metrics appear “missing”, verify:
-1. correct experiment selected,
-2. status filter includes `RUNNING`/`FINISHED`,
-3. nested runs are visible (or query by `mlflow.parentRunId`).
-
-## Key Conventions
-
-- Use `ma_thesis.config` paths; avoid hardcoded paths.
-- Datasets are parquet and should include sigma columns.
-- Keep CLI configs reproducible via YAML in `configs/`.
-- Ruff line length is 99.
-- Do not commit large generated artifacts unless explicitly intended.
-
-## Common Commands
-
+Quality:
 ```bash
-make create_environment
-source .venv/bin/activate
-make requirements
-
-make data
 make lint
 make format
+```
 
-# MLflow UI using repo-local backend
+## MLflow Setup (Important)
+
+Tracking defaults are repository-local:
+- Backend DB: `sqlite:////home/adam/studies/ma/code/mlflow.db`
+- Artifact root: `/home/adam/studies/ma/code/mlruns`
+
+Start UI with explicit paths:
+```bash
 uv run mlflow ui \
   --backend-store-uri sqlite:////home/adam/studies/ma/code/mlflow.db \
   --default-artifact-root /home/adam/studies/ma/code/mlruns \
   --host 127.0.0.1 --port 5000
 ```
 
+If runs seem missing:
+1. Confirm the same backend URI is used by both training and UI.
+2. Check experiment name exactly (for example `sweep-ackley-v3-ratio`).
+3. Include nested runs in MLflow UI filters.
+4. Verify process logs for MLflow startup warnings/errors.
+
+## Repo Conventions
+
+- Use paths from `ma_thesis.config` where possible.
+- Keep generated datasets in `data/processed/*.parquet`.
+- Keep reproducible plans in `configs/sweeps/*.yaml` and `configs/experiments/*.yaml`.
+- Do not hardcode machine-specific paths outside central config.
+- Ruff max line length is 99.
+
+## Refactor Status
+
+Completed:
+- Shared IO and split handling centralized in `io.py`.
+- Shared MLflow config/dataset logging centralized in `mlflow_utils.py`.
+- Shared training loop primitives extracted to `training_core.py` and used by
+  `train.py`, `sweep.py`, and `schedule_sweep.py`.
+- Dead/non-essential code removed:
+  - `ma_thesis/plots.py`
+  - `notebooks/functions.py`
+  - `scripts/zotero_organize.py`
+
+Recommended next:
+- Keep `meta_train.py` clearly marked as experimental unless it becomes a primary thesis track.
+- Continue separating runtime code (`ma_thesis/`, `configs/`, `scripts/`) from archival thesis artifacts.
+
 ## Research Context
 
-Design notes for the meta-learning formulation are in:
+Design / method docs:
 - `docs/design/2026-01-15-proposal.md`
 - `docs/design/2026-03-02-implementation-plan.md`
 
-Thesis source is under `thesis/` (`main.tex`, bibliography, appendices, figures).
+Thesis sources:
+- `thesis/main.tex`
+- `thesis/appendices/*`

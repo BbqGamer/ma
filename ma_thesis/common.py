@@ -1,10 +1,4 @@
-"""Shared utilities for training and hyperparameter sweeps.
-
-This module contains common functionality used across sweep.py and train.py:
-- Data loading and train/val splitting
-- Plotting utilities for model surfaces
-- Constants and configurations
-"""
+"""Shared utilities for training and hyperparameter sweeps."""
 
 from __future__ import annotations
 
@@ -17,9 +11,6 @@ import polars as pl
 from scipy.interpolate import griddata
 import torch
 import torch.nn as nn
-
-# Default random seed for reproducible train/val splits
-TRAIN_VAL_SPLIT_SEED = 42
 
 
 def count_trainable_params(model: nn.Module) -> int:
@@ -107,100 +98,6 @@ def paired_test_path(input_path: Path) -> Path:
     else:
         test_stem = stem + "_test"
     return input_path.with_name(f"{test_stem}{input_path.suffix}")
-
-
-def load_and_split(
-    input_path: Path,
-    device: torch.device,
-    val_split: float = 0.2,
-    seed: int = TRAIN_VAL_SPLIT_SEED,
-) -> tuple[
-    torch.Tensor,  # X_train
-    torch.Tensor,  # y_train
-    torch.Tensor,  # X_val
-    torch.Tensor,  # y_val
-    str,  # func_name
-    str,  # hard_col (last sigma column)
-    pl.DataFrame,  # df
-    np.ndarray,  # x_min (shape: 2,)
-    np.ndarray,  # x_max (shape: 2,)
-]:
-    """Load parquet, scale inputs to [-1, 1], return train/val split.
-
-    Input features are scaled to [-1, 1] so that SIREN / Fourier models
-    receive coordinates in a range where their sine activations are
-    well-behaved. The original coordinate bounds (x_min, x_max) are
-    returned so that plotting utilities can undo the mapping.
-
-    Parameters
-    ----------
-    input_path : Path
-        Path to .parquet file with columns: x1, x2, y_sigma_0, y_sigma_1, ...
-    device : torch.device
-        Device to place tensors on
-    val_split : float
-        Fraction of data to use for validation (default: 0.2)
-    seed : int
-        Random seed for reproducible split (default: 42)
-
-    Returns
-    -------
-    X_train : torch.Tensor
-        Training inputs, scaled to [-1, 1], shape (n_train, 2)
-    y_train : torch.Tensor
-        Training targets (hardest sigma level), shape (n_train, 1)
-    X_val : torch.Tensor
-        Validation inputs, scaled to [-1, 1], shape (n_val, 2)
-    y_val : torch.Tensor
-        Validation targets (hardest sigma level), shape (n_val, 1)
-    func_name : str
-        Function name (stem of input_path)
-    hard_col : str
-        Name of the hardest (last) sigma column
-    df : pl.DataFrame
-        Original dataframe (for plotting / multi-target access)
-    x_min : np.ndarray
-        Minimum values of original coordinates (before scaling), shape (2,)
-    x_max : np.ndarray
-        Maximum values of original coordinates (before scaling), shape (2,)
-    """
-    df = pl.read_parquet(input_path)
-
-    # Scale inputs to [-1, 1]
-    X_np = df.select(["x1", "x2"]).to_numpy()
-    x_min = X_np.min(axis=0)  # shape (2,)
-    x_max = X_np.max(axis=0)  # shape (2,)
-    X_scaled = 2.0 * (X_np - x_min) / (x_max - x_min) - 1.0
-    X = torch.from_numpy(X_scaled).float().to(device)
-
-    # Pick the hardest (last) sigma column as default target
-    sigma_cols = sorted(
-        [c for c in df.columns if c.startswith("y_sigma_")],
-        key=lambda c: int(c.split("_")[-1]),
-    )
-    hard_col = sigma_cols[-1]
-    y = torch.from_numpy(df[hard_col].to_numpy()).float().unsqueeze(1).to(device)
-
-    # Deterministic 80/20 split
-    n = X.shape[0]
-    n_val = int(val_split * n)
-    n_train = n - n_val
-    gen = torch.Generator(device=device)
-    gen.manual_seed(seed)
-    perm = torch.randperm(n, device=device, generator=gen)
-
-    func_name = input_path.stem
-    return (
-        X[perm[:n_train]],
-        y[perm[:n_train]],
-        X[perm[n_train:]],
-        y[perm[n_train:]],
-        func_name,
-        hard_col,
-        df,
-        x_min,
-        x_max,
-    )
 
 
 def plot_model_surface(
