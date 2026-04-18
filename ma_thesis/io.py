@@ -85,8 +85,10 @@ def select_sigma_columns(df: pl.DataFrame, *, num_losses: int) -> list[str]:
             f"Dataset has {len(sigma_cols)} y_sigma_* columns, but num_losses={num_losses}. "
             "Regenerate dataset with more sigma levels."
         )
-    if num_losses < 2:
-        raise ValueError("num_losses must be >= 2.")
+    if num_losses < 1:
+        raise ValueError("num_losses must be >= 1.")
+    if num_losses == 1:
+        return [sigma_cols[-1]]
     if num_losses == len(sigma_cols):
         return sigma_cols
 
@@ -102,10 +104,16 @@ def split_train_val_indices(
     device: torch.device,
     *,
     val_split: float = 0.2,
+    val_samples: int | None = None,
     seed: int = 42,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return deterministic train/val index tensors."""
-    n_val = int(val_split * num_samples)
+    if val_samples is None:
+        n_val = int(val_split * num_samples)
+    else:
+        n_val = val_samples
+    if n_val < 1 or n_val >= num_samples:
+        raise ValueError("val_samples must satisfy 1 <= val_samples < num_samples.")
     n_train = num_samples - n_val
     split_gen = torch.Generator(device=device)
     split_gen.manual_seed(seed)

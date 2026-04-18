@@ -120,7 +120,7 @@ def main(
     num_samples: int = 20000,
     num_sigmas: int = 3,
     sigma_scale: float = 5.0,
-    train_samples: int = 10000,
+    train_samples: int | None = None,
     noise_ratio: float = 0.02,
     seed: int = 42,
     output_name: str | None = typer.Option(
@@ -155,10 +155,12 @@ def main(
             f"Generating {func_name} dataset with {num_samples} samples and "
             f"{num_sigmas} smoothing levels..."
         )
-        if train_samples <= 0 or train_samples >= num_samples:
+        if train_samples is None:
+            train_samples = num_samples
+        if train_samples <= 0 or train_samples > num_samples:
             logger.error(
                 f"Invalid split: train_samples={train_samples}, num_samples={num_samples}. "
-                "Need 0 < train_samples < num_samples."
+                "Need 0 < train_samples <= num_samples."
             )
             raise typer.Exit(code=1)
         test_samples = num_samples - train_samples
@@ -193,16 +195,21 @@ def main(
         test_idx = perm[train_samples:]
 
         df_train = df[train_idx.tolist()]
-        df_test = df[test_idx.tolist()]
         train_filename, test_filename = _derive_split_filenames(func_name, output_name)
         train_path = output_dir / train_filename
         test_path = output_dir / test_filename
         df_train.write_parquet(train_path)
-        df_test.write_parquet(test_path)
-        logger.success(
-            f"Datasets saved to {train_path} (train={train_samples}) "
-            f"and {test_path} (test={test_samples})"
-        )
+        if test_samples > 0:
+            df_test = df[test_idx.tolist()]
+            df_test.write_parquet(test_path)
+            logger.success(
+                f"Datasets saved to {train_path} (train={train_samples}) "
+                f"and {test_path} (test={test_samples})"
+            )
+        else:
+            if test_path.exists():
+                test_path.unlink()
+            logger.success(f"Dataset saved to {train_path} (train={train_samples}, no test split)")
 
 
 if __name__ == "__main__":

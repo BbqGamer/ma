@@ -33,6 +33,13 @@ def compute_step_metrics(model: nn.Module, state: StepMetricsState) -> dict[str,
     grad = _flatten_grads(model)
     if grad is None:
         return {}
+    if not torch.isfinite(grad).all():
+        return {
+            "grad_variance": float("nan"),
+            "grad_noise_scale": float("nan"),
+            "gsnr": float("nan"),
+            "grad_cosine_sim": float("nan"),
+        }
 
     grad_mean = float(grad.mean().item())
     grad_sq_mean = float((grad * grad).mean().item())
@@ -87,6 +94,8 @@ def hutchinson_hessian_trace(
         return float("nan")
 
     loss = _probe_loss(model, criterion, x_probe, y_probe)
+    if not torch.isfinite(loss):
+        return float("nan")
     grads = torch.autograd.grad(loss, params, create_graph=True)
     vecs = [torch.randint_like(p, low=0, high=2, dtype=torch.int64).float() * 2.0 - 1.0 for p in params]
     gv = sum((g * v).sum() for g, v in zip(grads, vecs, strict=False))
@@ -110,8 +119,13 @@ def critical_sharpness(
 
     with torch.no_grad():
         base_loss = float(_probe_loss(model, criterion, x_probe, y_probe).item())
+    if not torch.isfinite(torch.tensor(base_loss)):
+        return float("nan")
+
 
     loss = _probe_loss(model, criterion, x_probe, y_probe)
+    if not torch.isfinite(loss):
+        return float("nan")
     grads = torch.autograd.grad(loss, params, create_graph=False)
     direction = [-g.detach() for g in grads]
     norm = torch.sqrt(sum((d * d).sum() for d in direction)).item()
@@ -156,7 +170,12 @@ def layerwise_spectral_alpha(model: nn.Module) -> tuple[float, dict[str, float]]
         if param.ndim != 2:
             continue
         w = param.detach()
-        s = torch.linalg.svdvals(w).float()
+        if not torch.isfinite(w).all():
+            continue
+        try:
+            s = torch.linalg.svdvals(w).float()
+        except RuntimeError:
+            continue
         s = s[s > 0]
         if s.numel() < 4:
             continue

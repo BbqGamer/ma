@@ -70,10 +70,14 @@ def _dataset_train_filename(
     num_samples: int,
     num_sigmas: int,
     sigma_scale: float,
+    noise_ratio: float,
     seed: int,
 ) -> str:
     return (
-        f"{function}_n{num_samples}_k{num_sigmas}_ss{_float_token(sigma_scale)}_seed{seed}_train.parquet"
+        f"{function}_n{num_samples}_k{num_sigmas}"
+        f"_ss{_float_token(sigma_scale)}"
+        f"_nr{_float_token(noise_ratio)}"
+        f"_seed{seed}_train.parquet"
     )
 
 
@@ -97,7 +101,7 @@ def prepare_data(
     num_samples: int = 20000,
     num_sigmas: int = 3,
     sigma_scale: float = 5.0,
-    train_samples: int = 10000,
+    train_samples: int | None = None,
     noise_ratio: float = 0.02,
     seed: int = 42,
     versioned_name: bool = typer.Option(
@@ -108,7 +112,14 @@ def prepare_data(
     """Generate processed datasets without starting training."""
     output_name = None
     if function != "all" and versioned_name:
-        output_name = _dataset_train_filename(function, num_samples, num_sigmas, sigma_scale, seed)
+        output_name = _dataset_train_filename(
+            function,
+            num_samples,
+            num_sigmas,
+            sigma_scale,
+            noise_ratio,
+            seed,
+        )
     dataset_main(
         function=function,
         output_dir=output_dir,
@@ -143,13 +154,13 @@ def run(
     num_samples: int = 20000,
     num_sigmas: int = 3,
     sigma_scale: float = 5.0,
-    train_samples: int = 10000,
+    train_samples: int | None = None,
     noise_ratio: float = 0.02,
     seed: int = 42,
     experiment_name: str | None = None,
     run_name: str | None = None,
     # Shared model/training options
-    model_arch: str = "mlp",
+    model_arch: str = "fourier",
     hidden_dim: int = 16,
     num_blocks: int = 4,
     activation: str = "silu",
@@ -178,9 +189,14 @@ def run(
     # meta options
     lr_model: float = 3e-4,
     lr_meta: float = 1e-3,
+    momentum: float = 0.9,
+    lr_decay_gamma: float = 0.999,
     inner_steps: int = 10,
     lambda_reg: float = 0.1,
+    grad_clip_norm: float | None = 1.0,
     num_crude: int | None = None,
+    meta_num_losses: int | None = None,
+    meta_val_samples: int | None = None,
     # sweep options
     n_trials: int = 40,
     report_interval: int = 10,
@@ -214,11 +230,14 @@ def run(
     if method == "single" and sigma_level is None:
         sigma_level = -1
 
+    effective_train_samples = num_samples if train_samples is None else train_samples
+
     default_dataset = PROCESSED_DATA_DIR / _dataset_train_filename(
         function=function,
         num_samples=num_samples,
         num_sigmas=num_sigmas,
         sigma_scale=sigma_scale,
+        noise_ratio=noise_ratio,
         seed=seed,
     )
     resolved_input = input_path or default_dataset
@@ -231,7 +250,7 @@ def run(
             num_samples=num_samples,
             num_sigmas=num_sigmas,
             sigma_scale=sigma_scale,
-            train_samples=train_samples,
+            train_samples=effective_train_samples,
             noise_ratio=noise_ratio,
             seed=seed,
             output_name=resolved_input.name,
@@ -273,7 +292,12 @@ def run(
             "lr_meta": lr_meta,
             "inner_steps": inner_steps,
             "lambda_reg": lambda_reg,
+            "grad_clip_norm": grad_clip_norm,
+            "momentum": momentum,
+            "lr_decay_gamma": lr_decay_gamma,
             "num_crude": num_crude,
+            "meta_num_losses": meta_num_losses,
+            "meta_val_samples": meta_val_samples,
             "n_trials": n_trials,
             "report_interval": report_interval,
             "model_archs": model_archs,
@@ -284,7 +308,7 @@ def run(
             "max_train_per_param": max_train_per_param,
             "step_metrics_interval": step_metrics_interval,
             "log_dataset_artifact": log_dataset_artifact,
-            "train_samples": train_samples,
+            "train_samples": effective_train_samples,
             "noise_ratio": noise_ratio,
             "seed": seed,
         },
@@ -335,8 +359,14 @@ def run(
             batch_size=batch_size,
             lr_model=lr_model,
             lr_meta=lr_meta,
+            momentum=momentum,
+            lr_decay_gamma=lr_decay_gamma,
             inner_steps=inner_steps,
             lambda_reg=lambda_reg,
+            grad_clip_norm=grad_clip_norm,
+            split_seed=seed,
+            noise_ratio=noise_ratio,
+            dataset_function=function,
             model_arch=model_arch,
             hidden_dim=hidden_dim,
             num_blocks=num_blocks,
@@ -344,6 +374,8 @@ def run(
             num_fourier=num_fourier,
             fourier_sigma=fourier_sigma,
             num_crude=num_crude,
+            num_losses=meta_num_losses,
+            val_samples=meta_val_samples,
             grid_res=grid_res,
             snapshot_interval=snapshot_interval,
             experiment_name=experiment_name or "meta-curriculum",

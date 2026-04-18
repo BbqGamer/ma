@@ -199,6 +199,9 @@ reports/benchmarks/
 reports/runs/*_single.json
 reports/runs/*_curriculum.json
 reports/runs/*_sweep.json
+reports/runs/*_meta.json
+reports/status/
+reports/analysis/
 mlruns
 mlflow.db
 models/

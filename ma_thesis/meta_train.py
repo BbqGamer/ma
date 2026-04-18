@@ -15,6 +15,8 @@ The curriculum schedule enforces:
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import os
 import sys
 
 from loguru import logger
@@ -32,11 +34,41 @@ from ma_thesis.common import (
     prepare_surface_grid,
 )
 from ma_thesis.config import FIGURES_DIR, MODELS_DIR, PROCESSED_DATA_DIR
-from ma_thesis.io import load_dataset_bundle, split_train_val_indices
+from ma_thesis.io import load_dataset_bundle, select_sigma_columns, split_train_val_indices
 from ma_thesis.mlflow_utils import log_dataset_reference, log_run_config
 from ma_thesis.models import build_model
+from ma_thesis.optimization_metrics import (
+    StepMetricsState,
+    compute_step_metrics,
+    critical_sharpness,
+    hutchinson_hessian_trace,
+    layerwise_spectral_alpha,
+)
 
 app = typer.Typer()
+
+
+def _write_run_status(path: Path | None, payload: dict[str, object]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _configure_torch_threads_from_env() -> None:
+    num_threads = os.getenv("MA_TORCH_NUM_THREADS")
+    if num_threads:
+        torch.set_num_threads(max(1, int(num_threads)))
+    interop_threads = os.getenv("MA_TORCH_NUM_INTEROP_THREADS")
+    if interop_threads:
+        try:
+            torch.set_num_interop_threads(max(1, int(interop_threads)))
+        except RuntimeError:
+            pass
+
+
+def _all_finite_model_params(model: nn.Module) -> bool:
+    return all(torch.isfinite(param.detach()).all() for param in model.parameters())
 
 
 def softmax_weights(u: torch.Tensor) -> torch.Tensor:
@@ -149,10 +181,16 @@ def meta_train_epoch(
     *,
     model_optimizer: optim.Optimizer,
     meta_optimizer: optim.Optimizer,
+    model_scheduler: optim.lr_scheduler.LRScheduler | None,
+    meta_scheduler: optim.lr_scheduler.LRScheduler | None,
     batch_size: int,
     inner_steps: int,
     num_crude: int,
     lambda_reg: float,
+    sigma_cols: list[str],
+    step_metrics_state: StepMetricsState,
+    lr_ref: float,
+    grad_clip_norm: float | None,
     device: torch.device,
 ) -> dict[str, float]:
     """Perform one meta-training epoch (inner + outer loop).
@@ -192,6 +230,8 @@ def meta_train_epoch(
 
     # --- Inner Loop: Update model parameters θ ---
     inner_losses = []
+    step_metric_history: list[dict[str, float]] = []
+    last_train_batch: tuple[torch.Tensor, torch.Tensor] | None = None
     for _ in range(inner_steps):
         # Sample batch
         indices = torch.randint(0, n_train, (batch_size,), device=device)
@@ -206,8 +246,14 @@ def meta_train_epoch(
         model_optimizer.zero_grad()
         loss = compute_weighted_loss(model, X_batch, Y_batch_multi, weights)
         loss.backward()
+        if grad_clip_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_norm)
+        step_metrics = compute_step_metrics(model, step_metrics_state)
+        if step_metrics:
+            step_metric_history.append(step_metrics)
         model_optimizer.step()
         inner_losses.append(loss.item())
+        last_train_batch = (X_batch, Y_batch_multi[:, -1:])
 
     avg_inner_loss = np.mean(inner_losses)
 
@@ -229,7 +275,21 @@ def meta_train_epoch(
         # Update u
         meta_optimizer.zero_grad()
         meta_loss.backward()
+        if grad_clip_norm is not None:
+            torch.nn.utils.clip_grad_norm_([u], max_norm=grad_clip_norm)
         meta_optimizer.step()
+
+    if model_scheduler is not None:
+        model_scheduler.step()
+    if meta_scheduler is not None:
+        meta_scheduler.step()
+
+    if not torch.isfinite(val_loss) or not torch.isfinite(meta_loss):
+        raise RuntimeError("Non-finite meta objective encountered; likely optimizer divergence.")
+    if not torch.isfinite(u).all():
+        raise RuntimeError("Non-finite meta weights encountered; likely optimizer divergence.")
+    if not _all_finite_model_params(model):
+        raise RuntimeError("Non-finite model parameters encountered; likely optimizer divergence.")
 
     # Gather stats
     weights_np = weights.detach().cpu().numpy()
@@ -237,9 +297,58 @@ def meta_train_epoch(
         "train_loss": avg_inner_loss,
         "val_loss": val_loss.item(),
         "meta_loss": meta_loss.item(),
-        **reg_stats,
-        **{f"weight_{i}": weights_np[i] for i in range(len(weights_np))},
+        "optim/lr_model": float(model_optimizer.param_groups[0]["lr"]),
+        "optim/lr_meta": float(meta_optimizer.param_groups[0]["lr"]),
+        "meta/grad_norm": float(u_grad.detach().norm().item()),
+        "meta/weight_entropy": float(-(weights * torch.log(weights + 1e-12)).sum().item()),
+        "meta/effective_num_losses": float(
+            torch.exp(-(weights * torch.log(weights + 1e-12)).sum()).item()
+        ),
+        "weights/max": float(weights.max().item()),
+        "weights/min": float(weights.min().item()),
+        "meta/crude_penalty": reg_stats["crude_penalty"],
+        "meta/detailed_penalty": reg_stats["detailed_penalty"],
+        "meta/total_reg": reg_stats["total_reg"],
+        **{f"weights/by_index/{i}": weights_np[i] for i in range(len(weights_np))},
+        **{
+            f"weights/by_sigma/{sigma_cols[i]}": weights_np[i] for i in range(len(weights_np))
+        },
     }
+
+    if step_metric_history:
+        step_df = np.asarray(
+            [[m.get(k, np.nan) for k in sorted(step_metric_history[0])] for m in step_metric_history],
+            dtype=float,
+        )
+        for idx, key in enumerate(sorted(step_metric_history[0])):
+            stats[f"difficulty/{key}"] = float(np.nanmean(step_df[:, idx]))
+
+    probe_batch = last_train_batch
+    if probe_batch is not None:
+        x_probe, y_probe = probe_batch
+        criterion = nn.MSELoss()
+        prev_mode = model.training
+        model.eval()
+        try:
+            stats["difficulty/hessian_trace"] = hutchinson_hessian_trace(
+                model,
+                criterion,
+                x_probe,
+                y_probe,
+            )
+            stats["difficulty/critical_sharpness"] = critical_sharpness(
+                model,
+                criterion,
+                x_probe,
+                y_probe,
+                lr_ref=lr_ref,
+            )
+            alpha_mean, alpha_by_layer = layerwise_spectral_alpha(model)
+            stats["difficulty/weight_alpha"] = alpha_mean
+            for layer_name, alpha in alpha_by_layer.items():
+                stats[f"weights/spectral_alpha/{layer_name}"] = alpha
+        finally:
+            model.train(prev_mode)
 
     return stats
 
@@ -253,8 +362,15 @@ def main(
     batch_size: int = 128,
     lr_model: float = 3e-4,
     lr_meta: float = 1e-3,
+    momentum: float = 0.9,
+    lr_decay_gamma: float = 0.999,
     inner_steps: int = 10,
     lambda_reg: float = 0.1,
+    grad_clip_norm: float | None = 1.0,
+    split_seed: int = 42,
+    val_samples: int | None = None,
+    noise_ratio: float | None = None,
+    dataset_function: str | None = None,
     # --- Model architecture ---
     model_arch: str = "fourier",
     hidden_dim: int = 16,
@@ -268,6 +384,10 @@ def main(
     num_crude: int | None = typer.Option(
         None,
         help="Number of crude (high-sigma) levels. Auto-detected as N//2 if not provided.",
+    ),
+    num_losses: int | None = typer.Option(
+        None,
+        help="Use an evenly spaced subset of sigma levels, always including the final loss. Use 1 for the baseline final-loss-only run.",
     ),
     # --- Plotting and logging ---
     grid_res: int = 100,
@@ -294,13 +414,18 @@ def main(
           --lambda-reg 0.5 \\
           --epochs 300
     """
+    status_path_env = os.getenv("MA_META_STATUS_PATH")
+    status_path = Path(status_path_env) if status_path_env else None
+
+    _configure_torch_threads_from_env()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     if min_train_per_param <= 0:
         raise typer.BadParameter("min_train_per_param must be > 0.")
 
-    func_name = input_path.stem
-    logger.info(f"Training on {func_name} dataset from {input_path}")
+    dataset_name = input_path.stem
+    canonical_function = dataset_function or dataset_name.split("_n", 1)[0]
+    logger.info(f"Training on {dataset_name} dataset from {input_path}")
 
     # --- Load data ---
     ds = load_dataset_bundle(input_path, device)
@@ -308,11 +433,16 @@ def main(
     X = ds.X
     x_min = ds.x_min
     x_max = ds.x_max
-    sigma_cols = ds.sigma_cols
+    available_sigma_cols = ds.sigma_cols
+    sigma_cols = available_sigma_cols
+    if num_losses is not None:
+        sigma_cols = select_sigma_columns(df, num_losses=num_losses)
     num_sigma_levels = len(sigma_cols)
-    logger.info(f"Found {num_sigma_levels} smoothing levels: {sigma_cols}")
+    logger.info(
+        f"Using {num_sigma_levels} smoothing levels out of {len(available_sigma_cols)}: {sigma_cols}"
+    )
 
-    # Stack all targets into a multi-target tensor
+    # Stack selected targets into a multi-target tensor
     Y_multi = (
         torch.from_numpy(np.column_stack([df[col].to_numpy() for col in sigma_cols]))
         .float()
@@ -324,9 +454,15 @@ def main(
         num_crude = num_sigma_levels // 2
     logger.info(f"Crude levels: {num_crude}, Detailed levels: {num_sigma_levels - num_crude}")
 
-    # Train/val split (80/20)
+    # Train/val split
     n = X.shape[0]
-    train_idx, val_idx = split_train_val_indices(n, device, val_split=0.2, seed=42)
+    train_idx, val_idx = split_train_val_indices(
+        n,
+        device,
+        val_split=0.2,
+        val_samples=val_samples,
+        seed=split_seed,
+    )
     n_train = int(train_idx.shape[0])
     n_val = int(val_idx.shape[0])
 
@@ -369,15 +505,30 @@ def main(
     logger.info(f"Initialized weight parameters u: {u.detach().cpu().numpy()}")
 
     # --- Optimizers ---
-    model_optimizer = optim.AdamW(model.parameters(), lr=lr_model)
-    meta_optimizer = optim.AdamW([u], lr=lr_meta)
+    model_optimizer = optim.SGD(model.parameters(), lr=lr_model, momentum=momentum)
+    meta_optimizer = optim.SGD([u], lr=lr_meta, momentum=momentum)
+    model_scheduler = optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=lr_decay_gamma)
+    meta_scheduler = optim.lr_scheduler.ExponentialLR(meta_optimizer, gamma=lr_decay_gamma)
 
     # --- MLflow setup ---
     output_dir.mkdir(parents=True, exist_ok=True)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     mlflow.set_experiment(experiment_name)
 
-    actual_run_name = run_name or f"{func_name}_meta_{model_arch}"
+    actual_run_name = run_name or f"{dataset_name}_meta_{model_arch}"
+    _write_run_status(
+        status_path,
+        {
+            "stage": "initializing",
+            "run_name": actual_run_name,
+            "function": canonical_function,
+            "dataset_name": dataset_name,
+            "epochs_total": epochs,
+            "epoch": 0,
+            "progress": 0.0,
+            "input_path": str(input_path),
+        },
+    )
 
     # Prepare ground truth surface for plotting
     hard_col = sigma_cols[-1]
@@ -388,11 +539,26 @@ def main(
             f"MLflow run started: {run.info.run_id} "
             f"(experiment='{experiment_name}', run_name='{actual_run_name}')"
         )
+        _write_run_status(
+            status_path,
+            {
+                "stage": "training",
+                "run_name": actual_run_name,
+                "function": canonical_function,
+                "dataset_name": dataset_name,
+                "mlflow_run_id": run.info.run_id,
+                "epochs_total": epochs,
+                "epoch": 0,
+                "progress": 0.0,
+                "input_path": str(input_path),
+            },
+        )
         mlflow.set_tags(
             {
                 "strategy": "meta",
                 "track": "experimental",
-                "function": func_name,
+                "function": canonical_function,
+                "dataset_name": dataset_name,
                 "model_arch": str(model_arch),
                 "entrypoint": "ma_thesis.meta_train",
             }
@@ -400,20 +566,29 @@ def main(
         mlflow.log_params(
             {
                 **hp,
-                "function": func_name,
+                "function": canonical_function,
+                "dataset_name": dataset_name,
                 "n_params": n_params,
                 "num_samples": n,
                 "n_train": n_train,
                 "n_val": n_val,
                 "num_sigma_levels": num_sigma_levels,
+                "available_num_sigma_levels": len(available_sigma_cols),
                 "num_crude": num_crude,
+                "selected_sigma_cols": ",".join(sigma_cols),
                 "epochs": epochs,
                 "batch_size": batch_size,
                 "lr_model": lr_model,
                 "lr_meta": lr_meta,
                 "inner_steps": inner_steps,
                 "lambda_reg": lambda_reg,
+                "momentum": momentum,
+                "lr_decay_gamma": lr_decay_gamma,
+                "noise_ratio": noise_ratio,
                 "device": str(device),
+                "grad_clip_norm": grad_clip_norm,
+                "split_seed": split_seed,
+                "val_samples": n_val,
                 "requested_hidden_dim": int(budget["requested_hidden_dim"]),
                 "effective_hidden_dim": int(budget["effective_hidden_dim"]),
                 "target_max_params": int(budget["target_max_params"]),
@@ -443,19 +618,30 @@ def main(
                     "lr_meta": lr_meta,
                     "inner_steps": inner_steps,
                     "lambda_reg": lambda_reg,
+                    "momentum": momentum,
+                    "lr_decay_gamma": lr_decay_gamma,
+                    "noise_ratio": noise_ratio,
+                    "grad_clip_norm": grad_clip_norm,
                     "num_crude": num_crude,
+                    "num_losses": num_sigma_levels,
+                    "split_seed": split_seed,
+                    "val_samples": n_val,
                 },
                 "dataset": {
-                    "function": func_name,
+                    "function": canonical_function,
+                    "dataset_name": dataset_name,
                     "num_samples": int(n),
                     "train_samples": int(n_train),
                     "val_samples": int(n_val),
                     "sigma_columns": sigma_cols,
+                    "all_sigma_columns": available_sigma_cols,
                 },
             },
         )
 
         logger.info(f"Starting meta-training for {epochs} epochs...")
+
+        step_metrics_state = StepMetricsState()
 
         # Training loop
         for epoch in range(epochs):
@@ -468,10 +654,16 @@ def main(
                 Y_val_multi=Y_val_multi,
                 model_optimizer=model_optimizer,
                 meta_optimizer=meta_optimizer,
+                model_scheduler=model_scheduler,
+                meta_scheduler=meta_scheduler,
                 batch_size=batch_size,
                 inner_steps=inner_steps,
                 num_crude=num_crude,
                 lambda_reg=lambda_reg,
+                sigma_cols=sigma_cols,
+                step_metrics_state=step_metrics_state,
+                lr_ref=lr_model,
+                grad_clip_norm=grad_clip_norm,
                 device=device,
             )
 
@@ -479,22 +671,45 @@ def main(
             mlflow.log_metrics(stats, step=epoch)
 
             # Print progress
-            weights_str = ", ".join(f"{stats[f'weight_{i}']:.3f}" for i in range(num_sigma_levels))
+            weights_str = ", ".join(
+                f"{stats[f'weights/by_index/{i}']:.3f}" for i in range(num_sigma_levels)
+            )
             logger.info(
                 f"Epoch {epoch:3d} | Train: {stats['train_loss']:.4f} | "
                 f"Val: {stats['val_loss']:.4f} | Weights: [{weights_str}]"
             )
+            _write_run_status(
+                status_path,
+                {
+                    "stage": "training",
+                    "run_name": actual_run_name,
+                    "function": canonical_function,
+                    "dataset_name": dataset_name,
+                    "mlflow_run_id": run.info.run_id,
+                    "epochs_total": epochs,
+                    "epoch": epoch + 1,
+                    "progress": float((epoch + 1) / epochs),
+                    "train_loss": float(stats["train_loss"]),
+                    "val_loss": float(stats["val_loss"]),
+                    "meta_loss": float(stats["meta_loss"]),
+                    "lr_model": float(stats["optim/lr_model"]),
+                    "lr_meta": float(stats["optim/lr_meta"]),
+                    "weights": [
+                        float(stats[f"weights/by_index/{i}"]) for i in range(num_sigma_levels)
+                    ],
+                },
+            )
 
             # Snapshot
             if snapshot_interval > 0 and (epoch + 1) % snapshot_interval == 0:
-                snap_path = output_dir / f"{func_name}_epoch{epoch}.png"
+                snap_path = output_dir / f"{dataset_name}_epoch{epoch}.png"
                 plot_model_surface(
                     model,
                     device,
                     x_range,
                     y_range,
                     grid_res,
-                    title=f"{func_name} - Meta-curriculum - Epoch {epoch}",
+                    title=f"{canonical_function} - Meta-curriculum - Epoch {epoch}",
                     save_path=snap_path,
                     Zg_true=Zg_true,
                     x_min=x_min,
@@ -503,23 +718,15 @@ def main(
                 mlflow.log_artifact(str(snap_path), artifact_path="snapshots")
                 logger.info(f"Saved snapshot → {snap_path.name}")
 
-        # Save final model
-        model_path = MODELS_DIR / f"{func_name}_meta_{model_arch}_{run.info.run_id[:8]}.pt"
-        torch.save(model.state_dict(), model_path)
-        mlflow.log_artifact(str(model_path), artifact_path="model")
-        mlflow.pytorch.log_model(model, artifact_path="model_pt")
-        mlflow.log_param("checkpoint_path", str(model_path))
-        logger.success(f"Final model saved to {model_path}")
-
         # Final surface plot
-        final_surf_path = output_dir / f"{func_name}_meta_final.png"
+        final_surf_path = output_dir / f"{dataset_name}_meta_final.png"
         plot_model_surface(
             model,
             device,
             x_range,
             y_range,
             grid_res,
-            title=f"{func_name} - Meta-curriculum (Final)",
+            title=f"{canonical_function} - Meta-curriculum (Final)",
             save_path=final_surf_path,
             Zg_true=Zg_true,
             x_min=x_min,
@@ -528,6 +735,20 @@ def main(
         mlflow.log_artifact(str(final_surf_path), artifact_path="figures")
 
         logger.success(f"MLflow run completed: {run.info.run_id}")
+        _write_run_status(
+            status_path,
+            {
+                "stage": "completed",
+                "run_name": actual_run_name,
+                "function": canonical_function,
+                "dataset_name": dataset_name,
+                "mlflow_run_id": run.info.run_id,
+                "epochs_total": epochs,
+                "epoch": epochs,
+                "progress": 1.0,
+                "final_figure_path": str(final_surf_path),
+            },
+        )
 
 
 if __name__ == "__main__":
