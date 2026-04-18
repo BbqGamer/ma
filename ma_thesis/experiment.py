@@ -348,6 +348,7 @@ def run(
             min_train_per_param=min_train_per_param,
             step_metrics_interval=step_metrics_interval,
             log_dataset_artifact=log_dataset_artifact,
+            seed=seed,
         )
         return
 

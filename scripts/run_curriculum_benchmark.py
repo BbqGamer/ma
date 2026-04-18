@@ -243,18 +243,18 @@ def main(
     with run_log_path.open("a", encoding="utf-8") as run_log:
         run_log.write(f"[{datetime.now().isoformat()}] benchmark {benchmark_id} started\n")
 
-        for regime in regime_values:
-            for function in functions:
-                spec = specs[function]
+        for seed in seed_values:
+            for regime in regime_values:
+                for function in functions:
+                    spec = specs[function]
 
-                if regime == "equal_time":
-                    regime_epochs = max(1, int(spec.epochs * epoch_scale_for_equal_time))
-                    timeout_sec: int | None = equal_time_cap_seconds
-                else:
-                    regime_epochs = spec.epochs
-                    timeout_sec = None
+                    if regime == "equal_time":
+                        regime_epochs = max(1, int(spec.epochs * epoch_scale_for_equal_time))
+                        timeout_sec: int | None = equal_time_cap_seconds
+                    else:
+                        regime_epochs = spec.epochs
+                        timeout_sec = None
 
-                for seed in seed_values:
                     for method in method_values:
                         idx += 1
                         run_name = (

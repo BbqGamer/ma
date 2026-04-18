@@ -316,6 +316,7 @@ def main(
         False,
         help="If true, uploads train/test parquet files to MLflow artifacts.",
     ),
+    seed: int = typer.Option(42, help="Random seed used for data split and MLflow logging."),
     # --- Auto-load best trial from a completed Optuna sweep ---
     from_sweep: str | None = typer.Option(
         None,
@@ -449,9 +450,14 @@ def main(
 
     actual_run_name = run_name or default_run_name
 
-    # Deterministic 80/20 split — same seed = same partition as sweep.py
+    # Deterministic 80/20 split keyed by the requested seed
     num_samples = X.shape[0]
-    train_indices, val_indices = split_train_val_indices(num_samples, device, val_split=0.2, seed=42)
+    train_indices, val_indices = split_train_val_indices(
+        num_samples,
+        device,
+        val_split=0.2,
+        seed=seed,
+    )
     n_train = int(train_indices.shape[0])
     n_val = int(val_indices.shape[0])
 
@@ -503,6 +509,7 @@ def main(
                 "function": func_name,
                 "model_arch": str(model_arch),
                 "entrypoint": "ma_thesis.train",
+                "seed": str(seed),
             }
         )
         mlflow.log_params(
@@ -530,6 +537,7 @@ def main(
                 "min_train_per_param": float(min_train_per_param),
                 "step_metrics_interval": step_metrics_interval,
                 "log_dataset_artifact": log_dataset_artifact,
+                "seed": seed,
             }
         )
         mlflow.log_metric("run_started", 1.0, step=0)
@@ -567,6 +575,7 @@ def main(
                     "train_samples": int(n_train),
                     "val_samples": int(n_val),
                     "sigma_columns": sigma_cols,
+                    "seed": seed,
                 },
             },
         )
