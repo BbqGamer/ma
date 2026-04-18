@@ -246,42 +246,46 @@ def _build_train_command(
 
 
 def _iter_matrix(
+    seeds: Iterable[int],
     functions: Iterable[str],
     num_losses_values: Iterable[int],
     lrs: Iterable[float],
     noise_ratios: Iterable[float],
-) -> Iterable[tuple[str, int, float, float]]:
-    for function in functions:
-        for num_losses in num_losses_values:
-            for lr in lrs:
-                for noise_ratio in noise_ratios:
-                    yield function, num_losses, lr, noise_ratio
+) -> Iterable[tuple[int, str, int, float, float]]:
+    for seed in seeds:
+        for function in functions:
+            for num_losses in num_losses_values:
+                for lr in lrs:
+                    for noise_ratio in noise_ratios:
+                        yield seed, function, num_losses, lr, noise_ratio
 
 
 def _iter_dataset_jobs(
+    seeds: Iterable[int],
     functions: Iterable[str],
     noise_ratios: Iterable[float],
     *,
     num_samples: int,
     num_sigmas: int,
     sigma_scale: float,
-    seed: int,
-) -> Iterable[tuple[str, float, Path]]:
-    for function in functions:
-        for noise_ratio in noise_ratios:
-            yield (
-                function,
-                noise_ratio,
-                PROCESSED_DATA_DIR
-                / _dataset_train_filename(
-                    function=function,
-                    num_samples=num_samples,
-                    num_sigmas=num_sigmas,
-                    sigma_scale=sigma_scale,
-                    noise_ratio=noise_ratio,
-                    seed=seed,
-                ),
-            )
+) -> Iterable[tuple[int, str, float, Path]]:
+    for seed in seeds:
+        for function in functions:
+            for noise_ratio in noise_ratios:
+                yield (
+                    seed,
+                    function,
+                    noise_ratio,
+                    PROCESSED_DATA_DIR
+                    / _dataset_train_filename(
+                        function=function,
+                        num_samples=num_samples,
+                        num_sigmas=num_sigmas,
+                        sigma_scale=sigma_scale,
+                        noise_ratio=noise_ratio,
+                        seed=seed,
+                    ),
+                )
 
 
 def _run_sequential_job(
@@ -542,7 +546,7 @@ def main(
     momentum: float = typer.Option(0.9, help="SGD momentum."),
     lr_decay_gamma: float = typer.Option(0.999, help="Mild exponential LR decay."),
     grad_clip_norm: float | None = typer.Option(1.0, help="Gradient clipping norm for model and meta updates."),
-    seed: int = typer.Option(42, help="Dataset/train split seed."),
+    seeds: str = typer.Option("42,666,777,888,999", help="Comma-separated dataset/train split seeds."),
     cpus_per_run: int = typer.Option(2, help="CPU cores reserved per training subprocess."),
     num_interop_threads: int = typer.Option(1, help="Torch inter-op threads per subprocess."),
     max_parallel: int = typer.Option(
@@ -562,6 +566,7 @@ def main(
     num_loss_values = _parse_csv_int(num_losses_values)
     lr_values = _parse_csv_float(learning_rates)
     noise_ratio_values = _parse_csv_float(noise_ratios)
+    seed_values = _parse_csv_int(seeds)
 
     if not function_values:
         raise typer.BadParameter("At least one function is required.")
@@ -571,6 +576,8 @@ def main(
         raise typer.BadParameter("At least one learning rate is required.")
     if not noise_ratio_values:
         raise typer.BadParameter("At least one noise ratio is required.")
+    if not seed_values:
+        raise typer.BadParameter("At least one seed is required.")
     if max(num_loss_values) > num_sigmas:
         raise typer.BadParameter("num_sigmas must be >= max(num_losses_values).")
     if max_parallel < 1:
@@ -603,18 +610,20 @@ def main(
 
     dataset_jobs = list(
         _iter_dataset_jobs(
+            seed_values,
             function_values,
             noise_ratio_values,
             num_samples=num_samples,
             num_sigmas=num_sigmas,
             sigma_scale=sigma_scale,
-            seed=seed,
         )
     )
-    matrix = list(_iter_matrix(function_values, num_loss_values, lr_values, noise_ratio_values))
+    matrix = list(
+        _iter_matrix(seed_values, function_values, num_loss_values, lr_values, noise_ratio_values)
+    )
 
     train_jobs: list[tuple[int, str, list[str], str]] = []
-    for idx, (function, num_losses, lr, noise_ratio) in enumerate(matrix, start=1):
+    for idx, (seed, function, num_losses, lr, noise_ratio) in enumerate(matrix, start=1):
         dataset_path = PROCESSED_DATA_DIR / _dataset_train_filename(
             function=function,
             num_samples=num_samples,
@@ -624,7 +633,7 @@ def main(
             seed=seed,
         )
         run_name = (
-            f"{benchmark_id}__{function}__losses{num_losses}"
+            f"{benchmark_id}__seed{seed}__{function}__losses{num_losses}"
             f"__lr{lr:g}__noise{noise_ratio:g}"
         )
         cmd = _build_train_command(
@@ -658,7 +667,7 @@ def main(
         )
 
         log_file.write(f"[{datetime.now().isoformat()}] dataset preparation phase started\n")
-        for function, noise_ratio, dataset_path in dataset_jobs:
+        for seed, function, noise_ratio, dataset_path in dataset_jobs:
             prepare_cmd = _build_prepare_command(
                 function=function,
                 noise_ratio=noise_ratio,
@@ -670,22 +679,22 @@ def main(
                 dataset_path=dataset_path,
             )
             dataset_log_path = LOGS_DIR / (
-                f"{benchmark_id}__prepare__{function}__noise{noise_ratio:g}.log"
+                f"{benchmark_id}__prepare__seed{seed}__{function}__noise{noise_ratio:g}.log"
             )
             if dataset_path.exists() and not force_prepare:
-                msg = f"SKIP prepare existing dataset {dataset_path}"
+                msg = f"SKIP prepare existing dataset seed={seed} {dataset_path}"
                 print(msg)
                 log_file.write(f"[{datetime.now().isoformat()}] {msg}\n")
                 continue
 
             rc = _run_sequential_job(
-                label=f"prepare {function} noise={noise_ratio:g}",
+                label=f"prepare seed={seed} {function} noise={noise_ratio:g}",
                 cmd=prepare_cmd,
                 log_path=dataset_log_path,
                 dry_run=dry_run,
             )
             log_file.write(
-                f"[{datetime.now().isoformat()}] PREPARE function={function} "
+                f"[{datetime.now().isoformat()}] PREPARE seed={seed} function={function} "
                 f"noise={noise_ratio:g} rc={rc} log={dataset_log_path}\n"
             )
             if rc != 0:

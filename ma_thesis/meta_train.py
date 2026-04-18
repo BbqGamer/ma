@@ -561,6 +561,7 @@ def main(
                 "dataset_name": dataset_name,
                 "model_arch": str(model_arch),
                 "entrypoint": "ma_thesis.meta_train",
+                "seed": str(split_seed),
             }
         )
         mlflow.log_params(
@@ -588,6 +589,7 @@ def main(
                 "device": str(device),
                 "grad_clip_norm": grad_clip_norm,
                 "split_seed": split_seed,
+                "seed": split_seed,
                 "val_samples": n_val,
                 "requested_hidden_dim": int(budget["requested_hidden_dim"]),
                 "effective_hidden_dim": int(budget["effective_hidden_dim"]),
