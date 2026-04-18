@@ -99,6 +99,7 @@ def train_one_level(
         hard_val_loss_history = []
 
         best_val_loss = float("inf")
+        best_hard_val_loss = float("inf")
         patience_counter = 0
         best_model_state = None
 
@@ -134,6 +135,7 @@ def train_one_level(
 
                 hard_val_loss = criterion(val_outputs, y_hard_val).item()
                 hard_val_loss_history.append(hard_val_loss)
+                best_hard_val_loss = min(best_hard_val_loss, hard_val_loss)
                 hard_msg = f" | Hard Val Loss: {hard_val_loss:.5f}"
 
             # Log metrics to child run
@@ -211,6 +213,7 @@ def train_one_level(
         mlflow.log_metrics(
             {
                 "best_val_loss": best_val_loss,
+                "best_hard_val_loss": best_hard_val_loss,
                 "final_hard_val_loss": hard_val_loss_history[-1],
                 "total_epochs": len(train_loss_history),
             }
