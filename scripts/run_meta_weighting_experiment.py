@@ -499,7 +499,7 @@ def main(
         help="Benchmark id used in run names and logs.",
     ),
     experiment_name: str = typer.Option(
-        "meta-weighting-simple-v1",
+        "meta-weighting-v1",
         help="MLflow experiment name.",
     ),
     functions: str = typer.Option(
@@ -535,7 +535,7 @@ def main(
         help="Number of smoothing levels to generate. Must be >= max(num_losses_values).",
     ),
     sigma_scale: float = typer.Option(5.0, help="Maximum sigma scale for dataset smoothing."),
-    epochs: int = typer.Option(100, help="Fixed epoch budget for every run."),
+    epochs: int = typer.Option(200, help="Fixed epoch budget for every run."),
     batch_size: int = typer.Option(128, help="Batch size."),
     model_arch: str = typer.Option("fourier", help="Model architecture for all runs."),
     min_train_per_param: float = typer.Option(
