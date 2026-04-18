@@ -4,7 +4,7 @@
 Matrix:
 - functions: levy, ackley, eggholder
 - numbers of weighted partial losses: 1, 2, 3, 5
-- learning rates: 1e-3, 3e-3, 1e-2
+- learning rates: 3e-4, 1e-3, 3e-3, 1e-2, 3e-2
 - noise ratios: 0.0, 0.1, 0.2, 0.3, 0.5
 
 Workflow:
@@ -507,7 +507,7 @@ def main(
         help="Comma-separated numbers of weighted partial losses. Use 1 for the baseline final-loss-only run.",
     ),
     learning_rates: str = typer.Option(
-        "1e-3,3e-3,1e-2",
+        "3e-4,1e-3,3e-3,1e-2,3e-2",
         help="Comma-separated SGD learning rates used for both model and meta updates.",
     ),
     noise_ratios: str = typer.Option(
