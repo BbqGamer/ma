@@ -96,10 +96,6 @@ def _parse_csv_float(values: str) -> list[float]:
     return [float(v.strip()) for v in values.split(",") if v.strip()]
 
 
-def _recommend_max_parallel() -> int:
-    return 2
-
-
 def _available_cpu_ids() -> list[int]:
     try:
         return sorted(os.sched_getaffinity(0))
@@ -550,7 +546,7 @@ def main(
     cpus_per_run: int = typer.Option(2, help="CPU cores reserved per training subprocess."),
     num_interop_threads: int = typer.Option(1, help="Torch inter-op threads per subprocess."),
     max_parallel: int = typer.Option(
-        _recommend_max_parallel(),
+        6,
         help="Maximum number of concurrent training runs. Safe default is 2 for laptop use.",
     ),
     force_prepare: bool = typer.Option(
