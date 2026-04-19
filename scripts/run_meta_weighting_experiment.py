@@ -108,8 +108,9 @@ def _cpu_ids_for_slot(slot: int, *, cpus_per_run: int, available_cpu_ids: list[i
         raise ValueError("cpus_per_run must be >= 1")
     if not available_cpu_ids:
         raise ValueError("No CPUs available for affinity assignment")
-    start = (slot * cpus_per_run) % len(available_cpu_ids)
-    return [available_cpu_ids[(start + i) % len(available_cpu_ids)] for i in range(cpus_per_run)]
+    start = slot * cpus_per_run
+    end = start + cpus_per_run
+    return available_cpu_ids[start:end]
 
 
 def _affinity_preexec_fn(cpu_ids: list[int]):
@@ -391,9 +392,11 @@ def _launch_parallel_jobs(
     completed_jobs = 0
     failures: list[tuple[int, str, int]] = []
     available_cpu_ids = _available_cpu_ids()
+    free_slots = list(range(max_parallel))
 
     while next_job < len(jobs) or active:
-        while next_job < len(jobs) and len(active) < max_parallel:
+        while next_job < len(jobs) and free_slots:
+            slot = free_slots.pop(0)
             idx, run_name, cmd, cmd_text = jobs[next_job]
             run_log_path = LOGS_DIR / f"{run_name}.log"
             status_path = STATUS_DIR / f"{run_name}.json"
@@ -402,7 +405,7 @@ def _launch_parallel_jobs(
             run_log_handle = run_log_path.open("w", encoding="utf-8")
             run_log_handle.write(f"[{datetime.now().isoformat()}] START {cmd_text}\n")
             cpu_ids = _cpu_ids_for_slot(
-                len(active),
+                slot,
                 cpus_per_run=cpus_per_run,
                 available_cpu_ids=available_cpu_ids,
             )
@@ -484,7 +487,11 @@ def _launch_parallel_jobs(
                     f"[{datetime.now().isoformat()}] FAILURE recorded; continuing benchmark "
                     f"run={run_name} rc={rc}\n"
                 )
-            print(f"finished [{idx}/{len(jobs)}] rc={rc} run={run_name}")
+            slot = entry["slot"]
+            assert isinstance(slot, int)
+            free_slots.append(slot)
+            free_slots.sort()
+            print(f"finished [{idx}/{len(jobs)}] rc={rc} run={run_name} slot={slot}")
 
         active = still_active
 
@@ -501,7 +508,7 @@ def main(
     ),
     experiment_name: str = typer.Option(
         "meta-weighting-v1",
-        help="MLflow experiment name.",
+        help="Base MLflow experiment name. Runs are logged to <experiment_name>-<function>.",
     ),
     functions: str = typer.Option(
         "levy,ackley,eggholder",
@@ -597,10 +604,12 @@ def main(
     available_cpu_ids = _available_cpu_ids()
     requested_cpus = max_parallel * cpus_per_run
     if requested_cpus > len(available_cpu_ids):
-        print(
-            "Warning: requested CPU budget "
-            f"({requested_cpus} = {max_parallel}x{cpus_per_run}) exceeds available CPUs "
-            f"({len(available_cpu_ids)}). Affinity sets will wrap and cores will be shared."
+        raise typer.BadParameter(
+            "Requested CPU budget exceeds available logical CPUs: "
+            f"{requested_cpus} = {max_parallel}x{cpus_per_run} > {len(available_cpu_ids)}. "
+            "Reduce --max-parallel or --cpus-per-run to avoid overlapping affinity sets. "
+            "Example valid settings on this machine: --max-parallel 3 --cpus-per-run 4, "
+            "or --max-parallel 6 --cpus-per-run 2."
         )
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -637,6 +646,7 @@ def main(
             f"{benchmark_id}__seed{seed}__{function}__losses{num_losses}"
             f"__lr{lr:g}__noise{noise_ratio:g}"
         )
+        function_experiment_name = _function_experiment_name(experiment_name, function)
         cmd = _build_train_command(
             function=function,
             input_path=dataset_path,
@@ -644,7 +654,7 @@ def main(
             lr_model=lr,
             lr_meta=lr,
             noise_ratio=noise_ratio,
-            experiment_name=experiment_name,
+            experiment_name=function_experiment_name,
             run_name=run_name,
             num_sigmas=num_sigmas,
             epochs=epochs,
