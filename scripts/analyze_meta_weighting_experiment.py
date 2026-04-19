@@ -117,14 +117,21 @@ def _prepare_runs(runs: pd.DataFrame, benchmark_id: str | None) -> pd.DataFrame:
         "params.inner_steps": "inner_steps",
         "params.batch_size": "batch_size",
         "params.epochs": "epochs",
-        "metrics.val_loss": "final_val_loss",
         "metrics.train_loss": "final_train_loss",
         "metrics.meta_loss": "final_meta_loss",
+        "metrics.weighted_val_loss": "final_weighted_val_loss",
         "metrics.lr_model": "final_logged_lr_model",
         "metrics.lr_meta": "final_logged_lr_meta",
     }
     keep_cols = [c for c in rename_map if c in df.columns]
     df = df[keep_cols].rename(columns={c: rename_map[c] for c in keep_cols})
+
+    if "metrics.hard_val_loss" in runs.columns:
+        df["final_val_loss"] = runs.loc[df.index, "metrics.hard_val_loss"]
+    elif "metrics.val_loss" in runs.columns:
+        df["final_val_loss"] = runs.loc[df.index, "metrics.val_loss"]
+    else:
+        df["final_val_loss"] = math.nan
 
     for col in [
         "lr_model",
@@ -138,6 +145,7 @@ def _prepare_runs(runs: pd.DataFrame, benchmark_id: str | None) -> pd.DataFrame:
         "final_val_loss",
         "final_train_loss",
         "final_meta_loss",
+        "final_weighted_val_loss",
         "final_logged_lr_model",
         "final_logged_lr_meta",
     ]:

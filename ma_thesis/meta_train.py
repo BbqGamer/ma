@@ -261,16 +261,18 @@ def meta_train_epoch(
     model.eval()
     with torch.enable_grad():
         weights = softmax_weights(u)
-        val_loss = compute_weighted_loss(model, X_val, Y_val_multi, weights)
+        weighted_val_loss = compute_weighted_loss(model, X_val, Y_val_multi, weights)
+        val_predictions = model(X_val)
+        hard_val_loss = F.mse_loss(val_predictions, Y_val_multi[:, -1:])
 
         # Compute gradient of validation loss w.r.t. u
-        u_grad = torch.autograd.grad(val_loss, u, create_graph=True)[0]
+        u_grad = torch.autograd.grad(weighted_val_loss, u, create_graph=True)[0]
 
         # Monotonic regularization
         reg, reg_stats = compute_monotonic_regularization(u_grad, num_crude, lambda_reg)
 
         # Total meta-objective
-        meta_loss = val_loss + reg
+        meta_loss = weighted_val_loss + reg
 
         # Update u
         meta_optimizer.zero_grad()
@@ -284,7 +286,11 @@ def meta_train_epoch(
     if meta_scheduler is not None:
         meta_scheduler.step()
 
-    if not torch.isfinite(val_loss) or not torch.isfinite(meta_loss):
+    if (
+        not torch.isfinite(weighted_val_loss)
+        or not torch.isfinite(hard_val_loss)
+        or not torch.isfinite(meta_loss)
+    ):
         raise RuntimeError("Non-finite meta objective encountered; likely optimizer divergence.")
     if not torch.isfinite(u).all():
         raise RuntimeError("Non-finite meta weights encountered; likely optimizer divergence.")
@@ -295,7 +301,9 @@ def meta_train_epoch(
     weights_np = weights.detach().cpu().numpy()
     stats = {
         "train_loss": avg_inner_loss,
-        "val_loss": val_loss.item(),
+        "val_loss": hard_val_loss.item(),
+        "hard_val_loss": hard_val_loss.item(),
+        "weighted_val_loss": weighted_val_loss.item(),
         "meta_loss": meta_loss.item(),
         "optim/lr_model": float(model_optimizer.param_groups[0]["lr"]),
         "optim/lr_meta": float(meta_optimizer.param_groups[0]["lr"]),
