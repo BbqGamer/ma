@@ -42,7 +42,6 @@ from ma_thesis.optimization_metrics import (
     compute_step_metrics,
     critical_sharpness,
     hutchinson_hessian_trace,
-    layerwise_spectral_alpha,
 )
 
 app = typer.Typer()
@@ -305,22 +304,17 @@ def meta_train_epoch(
         "hard_val_loss": hard_val_loss.item(),
         "weighted_val_loss": weighted_val_loss.item(),
         "meta_loss": meta_loss.item(),
-        "optim/lr_model": float(model_optimizer.param_groups[0]["lr"]),
-        "optim/lr_meta": float(meta_optimizer.param_groups[0]["lr"]),
-        "meta/grad_norm": float(u_grad.detach().norm().item()),
-        "meta/weight_entropy": float(-(weights * torch.log(weights + 1e-12)).sum().item()),
-        "meta/effective_num_losses": float(
+        "lr_model": float(model_optimizer.param_groups[0]["lr"]),
+        "lr_meta": float(meta_optimizer.param_groups[0]["lr"]),
+        "meta_grad_norm": float(u_grad.detach().norm().item()),
+        "weight_entropy": float(-(weights * torch.log(weights + 1e-12)).sum().item()),
+        "effective_num_losses": float(
             torch.exp(-(weights * torch.log(weights + 1e-12)).sum()).item()
         ),
-        "weights/max": float(weights.max().item()),
-        "weights/min": float(weights.min().item()),
-        "meta/crude_penalty": reg_stats["crude_penalty"],
-        "meta/detailed_penalty": reg_stats["detailed_penalty"],
-        "meta/total_reg": reg_stats["total_reg"],
-        **{f"weights/by_index/{i}": weights_np[i] for i in range(len(weights_np))},
-        **{
-            f"weights/by_sigma/{sigma_cols[i]}": weights_np[i] for i in range(len(weights_np))
-        },
+        "reg_crude_penalty": reg_stats["crude_penalty"],
+        "reg_detailed_penalty": reg_stats["detailed_penalty"],
+        "reg_total": reg_stats["total_reg"],
+        **{f"weight_{sigma_cols[i]}": weights_np[i] for i in range(len(weights_np))},
     }
 
     if step_metric_history:
@@ -329,7 +323,7 @@ def meta_train_epoch(
             dtype=float,
         )
         for idx, key in enumerate(sorted(step_metric_history[0])):
-            stats[f"difficulty/{key}"] = float(np.nanmean(step_df[:, idx]))
+            stats[f"diag_{key}"] = float(np.nanmean(step_df[:, idx]))
 
     probe_batch = last_train_batch
     if probe_batch is not None:
@@ -338,23 +332,19 @@ def meta_train_epoch(
         prev_mode = model.training
         model.eval()
         try:
-            stats["difficulty/hessian_trace"] = hutchinson_hessian_trace(
+            stats["diag_hessian_trace"] = hutchinson_hessian_trace(
                 model,
                 criterion,
                 x_probe,
                 y_probe,
             )
-            stats["difficulty/critical_sharpness"] = critical_sharpness(
+            stats["diag_critical_sharpness"] = critical_sharpness(
                 model,
                 criterion,
                 x_probe,
                 y_probe,
                 lr_ref=lr_ref,
             )
-            alpha_mean, alpha_by_layer = layerwise_spectral_alpha(model)
-            stats["difficulty/weight_alpha"] = alpha_mean
-            for layer_name, alpha in alpha_by_layer.items():
-                stats[f"weights/spectral_alpha/{layer_name}"] = alpha
         finally:
             model.train(prev_mode)
 
@@ -682,7 +672,7 @@ def main(
 
             # Print progress
             weights_str = ", ".join(
-                f"{stats[f'weights/by_index/{i}']:.3f}" for i in range(num_sigma_levels)
+                f"{sigma_col}={stats[f'weight_{sigma_col}']:.3f}" for sigma_col in sigma_cols
             )
             logger.info(
                 f"Epoch {epoch:3d} | Train: {stats['train_loss']:.4f} | "
@@ -702,11 +692,11 @@ def main(
                     "train_loss": float(stats["train_loss"]),
                     "val_loss": float(stats["val_loss"]),
                     "meta_loss": float(stats["meta_loss"]),
-                    "lr_model": float(stats["optim/lr_model"]),
-                    "lr_meta": float(stats["optim/lr_meta"]),
-                    "weights": [
-                        float(stats[f"weights/by_index/{i}"]) for i in range(num_sigma_levels)
-                    ],
+                    "lr_model": float(stats["lr_model"]),
+                    "lr_meta": float(stats["lr_meta"]),
+                    "weights": {
+                        sigma_col: float(stats[f"weight_{sigma_col}"]) for sigma_col in sigma_cols
+                    },
                 },
             )
 
