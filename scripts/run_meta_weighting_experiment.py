@@ -5,7 +5,7 @@ Matrix:
 - functions: levy, ackley, eggholder
 - numbers of weighted partial losses: 1, 2, 3, 5
 - learning rates: 1e-3, 3e-3, 1e-2, 3e-2
-- noise ratios: 0.0, 0.1, 0.2, 0.3, 0.5
+- noise ratios:  0.0, 0.02, 0.05, 0.1, 0.2",
 
 Workflow:
 1. Prepare unique datasets sequentially for every (function, noise_ratio) pair.
@@ -21,7 +21,7 @@ All runs use ma_thesis.meta_train through the unified experiment CLI with:
 - SGD for model and meta weights
 - momentum=0.9
 - mild exponential LR decay
-- 100 epochs
+- 250 epochs
 - no early stopping
 - conservative process/thread limits so the machine stays usable
 """
@@ -552,7 +552,7 @@ def main(
         help="Number of smoothing levels to generate. Must be >= max(num_losses_values).",
     ),
     sigma_scale: float = typer.Option(5.0, help="Maximum sigma scale for dataset smoothing."),
-    epochs: int = typer.Option(200, help="Fixed epoch budget for every run."),
+    epochs: int = typer.Option(250, help="Fixed epoch budget for every run."),
     batch_size: int = typer.Option(128, help="Batch size."),
     model_arch: str = typer.Option("fourier", help="Model architecture for all runs."),
     hidden_dim: int = typer.Option(16, help="Hidden dimension for all runs."),
