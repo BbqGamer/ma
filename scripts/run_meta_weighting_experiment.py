@@ -241,6 +241,10 @@ def _build_train_command(
     ]
 
 
+def _function_experiment_name(experiment_name: str, function: str) -> str:
+    return f"{experiment_name}-{function}"
+
+
 def _iter_matrix(
     seeds: Iterable[int],
     functions: Iterable[str],
@@ -416,6 +420,7 @@ def _launch_parallel_jobs(
             )
             active.append(
                 {
+                    "slot": slot,
                     "idx": idx,
                     "run_name": run_name,
                     "process": process,
@@ -430,8 +435,8 @@ def _launch_parallel_jobs(
                 f"pid={process.pid} run={run_name} cpus={cpu_ids} log={run_log_path}\n"
             )
             print(
-                f"launched [{idx}/{len(jobs)}] pid={process.pid} run={run_name} cpus={cpu_ids} "
-                f"({len(active)}/{max_parallel} active)"
+                f"launched [{idx}/{len(jobs)}] pid={process.pid} run={run_name} "
+                f"slot={slot} cpus={cpu_ids} ({len(active)}/{max_parallel} active)"
             )
             next_job += 1
 
