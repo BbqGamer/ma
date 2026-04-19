@@ -8,8 +8,13 @@ This module implements the curriculum learning framework from docs/design/2026-0
 - Validation-based meta-objective
 
 The curriculum schedule enforces:
-- Crude losses (high sigma): weights must decrease over time
-- Detailed losses (low sigma): weights must increase over time
+- Coarse losses (high sigma): weights should decrease over time
+- Detailed losses (low sigma / hard target): weights should increase over time
+
+Note:
+This implementation uses validation on the hardest target as the outer objective.
+It therefore behaves as validation-guided adaptive loss weighting rather than
+full bilevel meta-learning through the inner optimization trajectory.
 """
 
 from __future__ import annotations
@@ -26,6 +31,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+try:
+    from torch.func import functional_call
+except ImportError:  # pragma: no cover - compatibility for older torch
+    from torch.nn.utils.stateless import functional_call
 import typer
 
 from ma_thesis.common import (
@@ -91,6 +100,8 @@ def compute_weighted_loss(
     X: torch.Tensor,
     Y_multi: torch.Tensor,
     weights: torch.Tensor,
+    *,
+    params: dict[str, torch.Tensor] | None = None,
 ) -> torch.Tensor:
     """Compute weighted sum of losses across all sigma levels.
 
@@ -110,7 +121,7 @@ def compute_weighted_loss(
     torch.Tensor
         Weighted loss (scalar)
     """
-    predictions = model(X)  # (batch_size, 1)
+    predictions = model(X) if params is None else functional_call(model, params, (X,))
 
     # Compute individual losses for each sigma level
     losses = []
@@ -133,16 +144,19 @@ def compute_monotonic_regularization(
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Compute monotonic gradient regularization.
 
-    Penalizes gradients that push weights in the wrong direction:
-    - Crude losses (indices 0 to num_crude-1): should decrease (Δu ≤ 0, so g ≥ 0 is bad)
-    - Detailed losses (indices num_crude to end): should increase (Δu ≥ 0, so g ≤ 0 is bad)
+    Penalizes gradients that push weights in the wrong direction under SGD updates
+    ``u <- u - lr * grad``:
+    - Coarse losses (indices 0 to num_crude-1) should decrease over time, so
+      their gradients should be non-negative. Negative gradients are penalized.
+    - Detailed losses (indices num_crude to end) should increase over time, so
+      their gradients should be non-positive. Positive gradients are penalized.
 
     Parameters
     ----------
     u_grad : torch.Tensor
         Gradient of meta loss w.r.t. u, shape (num_sigma_levels,)
     num_crude : int
-        Number of crude (high-sigma) loss levels
+        Number of coarse (high-sigma) loss levels
     lambda_reg : float
         Regularization strength
 
@@ -151,13 +165,13 @@ def compute_monotonic_regularization(
     regularization : torch.Tensor
         Regularization term (scalar)
     stats : dict
-        Statistics for logging (crude_penalty, detailed_penalty)
+        Statistics for logging (coarse_penalty, detailed_penalty)
     """
-    # For crude losses: penalize positive gradients (g > 0 means weight would increase)
-    crude_penalty = torch.sum(torch.relu(u_grad[:num_crude]))
+    # For coarse losses: penalize negative gradients (g < 0 means u would increase).
+    crude_penalty = torch.sum(torch.relu(-u_grad[:num_crude]))
 
-    # For detailed losses: penalize negative gradients (g < 0 means weight would decrease)
-    detailed_penalty = torch.sum(torch.relu(-u_grad[num_crude:]))
+    # For detailed losses: penalize positive gradients (g > 0 means u would decrease).
+    detailed_penalty = torch.sum(torch.relu(u_grad[num_crude:]))
 
     regularization = lambda_reg * (crude_penalty + detailed_penalty)
 
@@ -252,26 +266,48 @@ def meta_train_epoch(
             step_metric_history.append(step_metrics)
         model_optimizer.step()
         inner_losses.append(loss.item())
-        last_train_batch = (X_batch, Y_batch_multi[:, -1:])
+        last_train_batch = (X_batch, Y_batch_multi)
 
     avg_inner_loss = np.mean(inner_losses)
 
-    # --- Outer Loop: Update weight parameters u ---
+    # --- Outer Loop: One-step lookahead update for weight parameters u ---
     model.eval()
     with torch.enable_grad():
-        weights = softmax_weights(u)
-        weighted_val_loss = compute_weighted_loss(model, X_val, Y_val_multi, weights)
-        val_predictions = model(X_val)
-        hard_val_loss = F.mse_loss(val_predictions, Y_val_multi[:, -1:])
+        if last_train_batch is None:
+            raise RuntimeError("Expected at least one inner step before meta update.")
 
-        # Compute gradient of validation loss w.r.t. u
-        u_grad = torch.autograd.grad(weighted_val_loss, u, create_graph=True)[0]
+        X_meta_train, Y_meta_train_multi = last_train_batch
+        weights = softmax_weights(u)
+
+        # Build a one-step differentiable lookahead so the hard validation loss
+        # depends on u through the training loss weighting.
+        inner_meta_loss = compute_weighted_loss(
+            model,
+            X_meta_train,
+            Y_meta_train_multi,
+            weights,
+        )
+        model_params = dict(model.named_parameters())
+        inner_grads = torch.autograd.grad(
+            inner_meta_loss,
+            tuple(model_params.values()),
+            create_graph=True,
+        )
+        lookahead_lr = float(model_optimizer.param_groups[0]["lr"])
+        lookahead_params = {
+            name: param - lookahead_lr * grad
+            for (name, param), grad in zip(model_params.items(), inner_grads)
+        }
+
+        val_predictions_lookahead = functional_call(model, lookahead_params, (X_val,))
+        hard_val_loss_lookahead = F.mse_loss(val_predictions_lookahead, Y_val_multi[:, -1:])
+        u_grad = torch.autograd.grad(hard_val_loss_lookahead, u, create_graph=True)[0]
 
         # Monotonic regularization
         reg, reg_stats = compute_monotonic_regularization(u_grad, num_crude, lambda_reg)
 
         # Total meta-objective
-        meta_loss = weighted_val_loss + reg
+        meta_loss = hard_val_loss_lookahead + reg
 
         # Update u
         meta_optimizer.zero_grad()
@@ -279,6 +315,13 @@ def meta_train_epoch(
         if grad_clip_norm is not None:
             torch.nn.utils.clip_grad_norm_([u], max_norm=grad_clip_norm)
         meta_optimizer.step()
+
+        # Recompute current-model validation metrics for logging after the meta update.
+        with torch.no_grad():
+            weights = softmax_weights(u)
+            weighted_val_loss = compute_weighted_loss(model, X_val, Y_val_multi, weights)
+            val_predictions = model(X_val)
+            hard_val_loss = F.mse_loss(val_predictions, Y_val_multi[:, -1:])
 
     if model_scheduler is not None:
         model_scheduler.step()
@@ -304,6 +347,7 @@ def meta_train_epoch(
         "hard_val_loss": hard_val_loss.item(),
         "weighted_val_loss": weighted_val_loss.item(),
         "meta_loss": meta_loss.item(),
+        "meta_hard_val_loss": hard_val_loss_lookahead.item(),
         "lr_model": float(model_optimizer.param_groups[0]["lr"]),
         "lr_meta": float(meta_optimizer.param_groups[0]["lr"]),
         "meta_grad_norm": float(u_grad.detach().norm().item()),
@@ -327,7 +371,8 @@ def meta_train_epoch(
 
     probe_batch = last_train_batch
     if probe_batch is not None:
-        x_probe, y_probe = probe_batch
+        x_probe, y_probe_multi = probe_batch
+        y_probe = y_probe_multi[:, -1:]
         criterion = nn.MSELoss()
         prev_mode = model.training
         model.eval()
@@ -394,12 +439,14 @@ def main(
     run_name: str | None = None,
 ) -> None:
     """
-    Train a model using meta-learning curriculum with weighted multi-loss.
+    Train a model using validation-guided adaptive weighting over multiple losses.
 
-    This implements the framework from docs/design/2026-01-15-proposal.md:
-    - Inner loop trains model on weighted combination of all sigma levels
-    - Outer loop updates loss weights via meta-gradient with monotonic regularization
-    - Curriculum schedule: crude weights decrease, detailed weights increase
+    This implements the framework from docs/design/2026-01-15-proposal.md with
+    a pragmatic outer objective:
+    - Inner loop trains model on a weighted combination of sigma levels
+    - Outer loop updates loss weights using the hardest-target validation loss
+      plus monotonic regularization
+    - Curriculum schedule: coarse weights decrease, detailed weights increase
 
     Examples
     --------
@@ -447,10 +494,10 @@ def main(
         .to(device)
     )
 
-    # Auto-detect number of crude levels
+    # Auto-detect number of coarse levels
     if num_crude is None:
         num_crude = num_sigma_levels // 2
-    logger.info(f"Crude levels: {num_crude}, Detailed levels: {num_sigma_levels - num_crude}")
+    logger.info(f"Coarse levels: {num_crude}, Detailed levels: {num_sigma_levels - num_crude}")
 
     # Train/val split
     n = X.shape[0]
