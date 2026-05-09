@@ -4,7 +4,9 @@
 Matrix:
 - functions: levy, ackley, eggholder
 - numbers of weighted partial losses: 1, 2, 3, 5
-- learning rates: 1e-3, 3e-3, 1e-2, 3e-2
+- model learning rates: 1e-2, 3e-2
+- meta learning rates: 3e-4, 1e-3, 3e-3
+- meta unroll steps: configurable, default 1
 - noise ratios:  0.0, 0.02, 0.05, 0.1, 0.2",
 
 Workflow:
@@ -18,7 +20,8 @@ Dataset sizing for this benchmark:
 All runs use ma_thesis.meta_train through the unified experiment CLI with:
 - Fourier model architecture
 - parameter budget around 0.1× training samples (min_train_per_param=10)
-- SGD for model and meta weights
+- SGD for model weights
+- Adam for meta weights
 - momentum=0.9
 - mild exponential LR decay
 - 250 epochs
@@ -29,9 +32,9 @@ All runs use ma_thesis.meta_train through the unified experiment CLI with:
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 import json
 import os
+from pathlib import Path
 import shlex
 import subprocess
 import time
@@ -179,6 +182,7 @@ def _build_train_command(
     num_losses: int,
     lr_model: float,
     lr_meta: float,
+    meta_unroll_steps: int,
     noise_ratio: float,
     experiment_name: str,
     run_name: str,
@@ -238,6 +242,8 @@ def _build_train_command(
         str(grad_clip_norm),
         "--inner-steps",
         str(inner_steps),
+        "--meta-unroll-steps",
+        str(meta_unroll_steps),
         "--meta-num-losses",
         str(num_losses),
         "--meta-val-samples",
@@ -259,15 +265,27 @@ def _iter_matrix(
     seeds: Iterable[int],
     functions: Iterable[str],
     num_losses_values: Iterable[int],
-    lrs: Iterable[float],
+    model_lrs: Iterable[float],
+    meta_lrs: Iterable[float],
+    meta_unroll_steps_values: Iterable[int],
     noise_ratios: Iterable[float],
-) -> Iterable[tuple[int, str, int, float, float]]:
+) -> Iterable[tuple[int, str, int, float, float, int, float]]:
     for seed in seeds:
         for function in functions:
             for num_losses in num_losses_values:
-                for lr in lrs:
-                    for noise_ratio in noise_ratios:
-                        yield seed, function, num_losses, lr, noise_ratio
+                for lr_model in model_lrs:
+                    for lr_meta in meta_lrs:
+                        for meta_unroll_steps in meta_unroll_steps_values:
+                            for noise_ratio in noise_ratios:
+                                yield (
+                                    seed,
+                                    function,
+                                    num_losses,
+                                    lr_model,
+                                    lr_meta,
+                                    meta_unroll_steps,
+                                    noise_ratio,
+                                )
 
 
 def _iter_dataset_jobs(
@@ -528,8 +546,19 @@ def main(
         help="Comma-separated numbers of weighted partial losses. Use 1 for the baseline final-loss-only run.",
     ),
     learning_rates: str = typer.Option(
-        "1e-3,3e-3,1e-2,3e-2",
-        help="Comma-separated SGD learning rates used for both model and meta updates.",
+        "1e-2,3e-2",
+        help=(
+            "Comma-separated SGD learning rates for model updates. "
+            "Defaults focus on the higher-LR regime because prior runs improved up to 1e-2, "
+            "while 3e-3 and below were clearly worse."
+        ),
+    ),
+    meta_learning_rates: str = typer.Option(
+        "3e-4,1e-3,3e-3",
+        help=(
+            "Comma-separated Adam learning rates for meta-weight updates. "
+            "Kept smaller than model SGD rates, but shifted upward relative to the previous grid."
+        ),
     ),
     noise_ratios: str = typer.Option(
         "0.0,0.02,0.05,0.1,0.2",
@@ -563,6 +592,10 @@ def main(
         help="Parameter budget as train-samples-per-parameter (10 => ~0.1 params per train sample).",
     ),
     inner_steps: int = typer.Option(10, help="Inner-loop updates per epoch."),
+    meta_unroll_steps_values: str = typer.Option(
+        "1",
+        help="Comma-separated differentiable lookahead lengths for the meta update.",
+    ),
     momentum: float = typer.Option(0.9, help="SGD momentum."),
     lr_decay_gamma: float = typer.Option(0.999, help="Mild exponential LR decay."),
     grad_clip_norm: float | None = typer.Option(1.0, help="Gradient clipping norm for model and meta updates."),
@@ -585,6 +618,8 @@ def main(
     function_values = _parse_csv_str(functions)
     num_loss_values = _parse_csv_int(num_losses_values)
     lr_values = _parse_csv_float(learning_rates)
+    meta_lr_values = _parse_csv_float(meta_learning_rates)
+    meta_unroll_values = _parse_csv_int(meta_unroll_steps_values)
     noise_ratio_values = _parse_csv_float(noise_ratios)
     seed_values = _parse_csv_int(seeds)
 
@@ -593,7 +628,13 @@ def main(
     if not num_loss_values:
         raise typer.BadParameter("At least one num_losses value is required.")
     if not lr_values:
-        raise typer.BadParameter("At least one learning rate is required.")
+        raise typer.BadParameter("At least one model learning rate is required.")
+    if not meta_lr_values:
+        raise typer.BadParameter("At least one meta learning rate is required.")
+    if not meta_unroll_values:
+        raise typer.BadParameter("At least one meta_unroll_steps value is required.")
+    if any(value < 1 for value in meta_unroll_values):
+        raise typer.BadParameter("All meta_unroll_steps values must be >= 1.")
     if not noise_ratio_values:
         raise typer.BadParameter("At least one noise ratio is required.")
     if not seed_values:
@@ -641,11 +682,27 @@ def main(
         )
     )
     matrix = list(
-        _iter_matrix(seed_values, function_values, num_loss_values, lr_values, noise_ratio_values)
+        _iter_matrix(
+            seed_values,
+            function_values,
+            num_loss_values,
+            lr_values,
+            meta_lr_values,
+            meta_unroll_values,
+            noise_ratio_values,
+        )
     )
 
     train_jobs: list[tuple[int, str, list[str], str]] = []
-    for idx, (seed, function, num_losses, lr, noise_ratio) in enumerate(matrix, start=1):
+    for idx, (
+        seed,
+        function,
+        num_losses,
+        lr_model,
+        lr_meta,
+        meta_unroll_steps,
+        noise_ratio,
+    ) in enumerate(matrix, start=1):
         dataset_path = PROCESSED_DATA_DIR / _dataset_train_filename(
             function=function,
             num_samples=num_samples,
@@ -656,15 +713,16 @@ def main(
         )
         run_name = (
             f"{benchmark_id}__seed{seed}__{function}__losses{num_losses}"
-            f"__lr{lr:g}__noise{noise_ratio:g}"
+            f"__lrm{lr_model:g}__lru{lr_meta:g}__unroll{meta_unroll_steps}__noise{noise_ratio:g}"
         )
         function_experiment_name = _function_experiment_name(experiment_name, function)
         cmd = _build_train_command(
             function=function,
             input_path=dataset_path,
             num_losses=num_losses,
-            lr_model=lr,
-            lr_meta=lr,
+            lr_model=lr_model,
+            lr_meta=lr_meta,
+            meta_unroll_steps=meta_unroll_steps,
             noise_ratio=noise_ratio,
             experiment_name=function_experiment_name,
             run_name=run_name,

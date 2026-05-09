@@ -1,36 +1,35 @@
 """Experimental meta-learning curriculum training with weighted multi-loss optimization.
 
-This module implements the curriculum learning framework from docs/design/2026-01-15-proposal.md:
+This module implements an experimental validation-guided multi-loss training setup:
 - Multi-loss weighted training (all sigma levels simultaneously)
 - Softmax-parameterized loss weights: w_i(u) = exp(u_i) / Σ exp(u_j)
 - Inner loop: gradient descent on model parameters θ
-- Outer loop: meta-update on weight parameters u with monotonic regularization
-- Validation-based meta-objective
-
-The curriculum schedule enforces:
-- Coarse losses (high sigma): weights should decrease over time
-- Detailed losses (low sigma / hard target): weights should increase over time
+- Outer loop: meta-update on weight parameters u using the hardest validation target
+- Optional multi-step differentiable lookahead (truncated unroll)
 
 Note:
-This implementation uses validation on the hardest target as the outer objective.
-It therefore behaves as validation-guided adaptive loss weighting rather than
-full bilevel meta-learning through the inner optimization trajectory.
+This implementation still optimizes validation on the hardest target as the outer
+objective. It therefore behaves as validation-guided adaptive loss weighting,
+not full bilevel meta-learning through the complete optimization trajectory.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import os
+from pathlib import Path
 import sys
 
 from loguru import logger
+import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
+import polars as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+
 try:
     from torch.func import functional_call
 except ImportError:  # pragma: no cover - compatibility for older torch
@@ -137,51 +136,56 @@ def compute_weighted_loss(
     return weighted_loss
 
 
-def compute_monotonic_regularization(
-    u_grad: torch.Tensor,
-    num_crude: int,
-    lambda_reg: float,
-) -> tuple[torch.Tensor, dict[str, float]]:
-    """Compute monotonic gradient regularization.
+def _lookahead_params_unroll(
+    model: nn.Module,
+    u: torch.Tensor,
+    train_batches: list[tuple[torch.Tensor, torch.Tensor]],
+    lookahead_lr: float,
+) -> dict[str, torch.Tensor]:
+    """Unroll differentiable inner updates over recent training batches."""
+    params = dict(model.named_parameters())
+    weights = softmax_weights(u)
+    for X_batch, Y_batch_multi in train_batches:
+        inner_meta_loss = compute_weighted_loss(
+            model,
+            X_batch,
+            Y_batch_multi,
+            weights,
+            params=params,
+        )
+        inner_grads = torch.autograd.grad(
+            inner_meta_loss,
+            tuple(params.values()),
+            create_graph=True,
+        )
+        params = {
+            name: param - lookahead_lr * grad
+            for (name, param), grad in zip(params.items(), inner_grads)
+        }
+    return params
 
-    Penalizes gradients that push weights in the wrong direction under SGD updates
-    ``u <- u - lr * grad``:
-    - Coarse losses (indices 0 to num_crude-1) should decrease over time, so
-      their gradients should be non-negative. Negative gradients are penalized.
-    - Detailed losses (indices num_crude to end) should increase over time, so
-      their gradients should be non-positive. Positive gradients are penalized.
 
-    Parameters
-    ----------
-    u_grad : torch.Tensor
-        Gradient of meta loss w.r.t. u, shape (num_sigma_levels,)
-    num_crude : int
-        Number of coarse (high-sigma) loss levels
-    lambda_reg : float
-        Regularization strength
+def _log_weight_plot(history: list[dict[str, float]], output_dir: Path, dataset_name: str) -> Path:
+    if not history:
+        raise ValueError("Cannot plot empty history.")
+    keys = [k for k in history[0].keys() if k.startswith("weight_")]
+    keys.sort(key=lambda k: int(k.split("_")[-1]))
+    epochs = [int(row["epoch"]) for row in history]
 
-    Returns
-    -------
-    regularization : torch.Tensor
-        Regularization term (scalar)
-    stats : dict
-        Statistics for logging (coarse_penalty, detailed_penalty)
-    """
-    # For coarse losses: penalize negative gradients (g < 0 means u would increase).
-    crude_penalty = torch.sum(torch.relu(-u_grad[:num_crude]))
-
-    # For detailed losses: penalize positive gradients (g > 0 means u would decrease).
-    detailed_penalty = torch.sum(torch.relu(u_grad[num_crude:]))
-
-    regularization = lambda_reg * (crude_penalty + detailed_penalty)
-
-    stats = {
-        "crude_penalty": crude_penalty.item(),
-        "detailed_penalty": detailed_penalty.item(),
-        "total_reg": regularization.item(),
-    }
-
-    return regularization, stats
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for key in keys:
+        values = [float(row[key]) for row in history]
+        ax.plot(epochs, values, label=key)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Weight")
+    ax.set_title(f"Meta weights over time ({dataset_name})")
+    ax.set_ylim(0.0, 1.0)
+    ax.grid(True)
+    ax.legend(loc="best")
+    plot_path = output_dir / f"{dataset_name}_weight_trajectory.png"
+    fig.savefig(plot_path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    return plot_path
 
 
 def meta_train_epoch(
@@ -198,8 +202,7 @@ def meta_train_epoch(
     meta_scheduler: optim.lr_scheduler.LRScheduler | None,
     batch_size: int,
     inner_steps: int,
-    num_crude: int,
-    lambda_reg: float,
+    meta_unroll_steps: int,
     sigma_cols: list[str],
     step_metrics_state: StepMetricsState,
     lr_ref: float,
@@ -226,10 +229,8 @@ def meta_train_epoch(
         Batch size for inner loop
     inner_steps : int
         Number of inner loop updates per meta-epoch
-    num_crude : int
-        Number of crude (high-sigma) levels
-    lambda_reg : float
-        Monotonic regularization strength
+    meta_unroll_steps : int
+        Number of differentiable inner updates used by the meta lookahead
     device : torch.device
         Device
 
@@ -244,7 +245,7 @@ def meta_train_epoch(
     # --- Inner Loop: Update model parameters θ ---
     inner_losses = []
     step_metric_history: list[dict[str, float]] = []
-    last_train_batch: tuple[torch.Tensor, torch.Tensor] | None = None
+    recent_train_batches: list[tuple[torch.Tensor, torch.Tensor]] = []
     for _ in range(inner_steps):
         # Sample batch
         indices = torch.randint(0, n_train, (batch_size,), device=device)
@@ -266,48 +267,31 @@ def meta_train_epoch(
             step_metric_history.append(step_metrics)
         model_optimizer.step()
         inner_losses.append(loss.item())
-        last_train_batch = (X_batch, Y_batch_multi)
+        recent_train_batches.append((X_batch, Y_batch_multi))
 
     avg_inner_loss = np.mean(inner_losses)
 
     # --- Outer Loop: One-step lookahead update for weight parameters u ---
     model.eval()
     with torch.enable_grad():
-        if last_train_batch is None:
+        if not recent_train_batches:
             raise RuntimeError("Expected at least one inner step before meta update.")
 
-        X_meta_train, Y_meta_train_multi = last_train_batch
-        weights = softmax_weights(u)
-
-        # Build a one-step differentiable lookahead so the hard validation loss
-        # depends on u through the training loss weighting.
-        inner_meta_loss = compute_weighted_loss(
-            model,
-            X_meta_train,
-            Y_meta_train_multi,
-            weights,
-        )
-        model_params = dict(model.named_parameters())
-        inner_grads = torch.autograd.grad(
-            inner_meta_loss,
-            tuple(model_params.values()),
-            create_graph=True,
-        )
+        effective_unroll_steps = max(1, min(meta_unroll_steps, len(recent_train_batches)))
         lookahead_lr = float(model_optimizer.param_groups[0]["lr"])
-        lookahead_params = {
-            name: param - lookahead_lr * grad
-            for (name, param), grad in zip(model_params.items(), inner_grads)
-        }
+        lookahead_params = _lookahead_params_unroll(
+            model,
+            u,
+            recent_train_batches[-effective_unroll_steps:],
+            lookahead_lr,
+        )
 
         val_predictions_lookahead = functional_call(model, lookahead_params, (X_val,))
         hard_val_loss_lookahead = F.mse_loss(val_predictions_lookahead, Y_val_multi[:, -1:])
         u_grad = torch.autograd.grad(hard_val_loss_lookahead, u, create_graph=True)[0]
 
-        # Monotonic regularization
-        reg, reg_stats = compute_monotonic_regularization(u_grad, num_crude, lambda_reg)
-
         # Total meta-objective
-        meta_loss = hard_val_loss_lookahead + reg
+        meta_loss = hard_val_loss_lookahead
 
         # Update u
         meta_optimizer.zero_grad()
@@ -355,9 +339,7 @@ def meta_train_epoch(
         "effective_num_losses": float(
             torch.exp(-(weights * torch.log(weights + 1e-12)).sum()).item()
         ),
-        "reg_crude_penalty": reg_stats["crude_penalty"],
-        "reg_detailed_penalty": reg_stats["detailed_penalty"],
-        "reg_total": reg_stats["total_reg"],
+        "meta_unroll_steps": float(meta_unroll_steps),
         **{f"weight_{sigma_cols[i]}": weights_np[i] for i in range(len(weights_np))},
     }
 
@@ -369,7 +351,7 @@ def meta_train_epoch(
         for idx, key in enumerate(sorted(step_metric_history[0])):
             stats[f"diag_{key}"] = float(np.nanmean(step_df[:, idx]))
 
-    probe_batch = last_train_batch
+    probe_batch = recent_train_batches[-1] if recent_train_batches else None
     if probe_batch is not None:
         x_probe, y_probe_multi = probe_batch
         y_probe = y_probe_multi[:, -1:]
@@ -404,11 +386,11 @@ def main(
     epochs: int = 200,
     batch_size: int = 128,
     lr_model: float = 3e-4,
-    lr_meta: float = 1e-3,
+    lr_meta: float = 3e-4,
     momentum: float = 0.9,
     lr_decay_gamma: float = 0.999,
     inner_steps: int = 10,
-    lambda_reg: float = 0.1,
+    meta_unroll_steps: int = 1,
     grad_clip_norm: float | None = 1.0,
     split_seed: int = 42,
     val_samples: int | None = None,
@@ -423,11 +405,7 @@ def main(
     fourier_sigma: float = 1.45,
     min_train_per_param: float = 10.0,
     log_dataset_artifact: bool = False,
-    # --- Curriculum settings ---
-    num_crude: int | None = typer.Option(
-        None,
-        help="Number of crude (high-sigma) levels. Auto-detected as N//2 if not provided.",
-    ),
+    # --- Loss selection settings ---
     num_losses: int | None = typer.Option(
         None,
         help="Use an evenly spaced subset of sigma levels, always including the final loss. Use 1 for the baseline final-loss-only run.",
@@ -441,22 +419,20 @@ def main(
     """
     Train a model using validation-guided adaptive weighting over multiple losses.
 
-    This implements the framework from docs/design/2026-01-15-proposal.md with
-    a pragmatic outer objective:
-    - Inner loop trains model on a weighted combination of sigma levels
+    This uses a pragmatic outer objective:
+    - Inner loop trains the model on a weighted combination of sigma levels
     - Outer loop updates loss weights using the hardest-target validation loss
-      plus monotonic regularization
-    - Curriculum schedule: coarse weights decrease, detailed weights increase
+    - The meta update can differentiate through multiple recent inner steps
 
     Examples
     --------
       # Train with best eggholder hyperparameters
       python -m ma_thesis.meta_train --input-path data/processed/eggholder.parquet
 
-      # Train on ackley with custom regularization
+      # Train on ackley with a 5-step differentiable lookahead
       python -m ma_thesis.meta_train \\
           --input-path data/processed/ackley.parquet \\
-          --lambda-reg 0.5 \\
+          --meta-unroll-steps 5 \\
           --epochs 300
     """
     status_path_env = os.getenv("MA_META_STATUS_PATH")
@@ -467,6 +443,8 @@ def main(
     logger.info(f"Using device: {device}")
     if min_train_per_param <= 0:
         raise typer.BadParameter("min_train_per_param must be > 0.")
+    if meta_unroll_steps < 1:
+        raise typer.BadParameter("meta_unroll_steps must be >= 1.")
 
     dataset_name = input_path.stem
     canonical_function = dataset_function or dataset_name.split("_n", 1)[0]
@@ -493,11 +471,6 @@ def main(
         .float()
         .to(device)
     )
-
-    # Auto-detect number of coarse levels
-    if num_crude is None:
-        num_crude = num_sigma_levels // 2
-    logger.info(f"Coarse levels: {num_crude}, Detailed levels: {num_sigma_levels - num_crude}")
 
     # Train/val split
     n = X.shape[0]
@@ -551,7 +524,8 @@ def main(
 
     # --- Optimizers ---
     model_optimizer = optim.SGD(model.parameters(), lr=lr_model, momentum=momentum)
-    meta_optimizer = optim.SGD([u], lr=lr_meta, momentum=momentum)
+    meta_optimizer = optim.Adam([u], lr=lr_meta)
+    logger.info("Meta optimizer: Adam")
     model_scheduler = optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=lr_decay_gamma)
     meta_scheduler = optim.lr_scheduler.ExponentialLR(meta_optimizer, gamma=lr_decay_gamma)
 
@@ -620,15 +594,14 @@ def main(
                 "n_val": n_val,
                 "num_sigma_levels": num_sigma_levels,
                 "available_num_sigma_levels": len(available_sigma_cols),
-                "num_crude": num_crude,
                 "selected_sigma_cols": ",".join(sigma_cols),
                 "epochs": epochs,
                 "batch_size": batch_size,
                 "lr_model": lr_model,
                 "lr_meta": lr_meta,
                 "inner_steps": inner_steps,
-                "lambda_reg": lambda_reg,
                 "momentum": momentum,
+                "meta_unroll_steps": meta_unroll_steps,
                 "lr_decay_gamma": lr_decay_gamma,
                 "noise_ratio": noise_ratio,
                 "device": str(device),
@@ -664,12 +637,11 @@ def main(
                     "lr_model": lr_model,
                     "lr_meta": lr_meta,
                     "inner_steps": inner_steps,
-                    "lambda_reg": lambda_reg,
                     "momentum": momentum,
                     "lr_decay_gamma": lr_decay_gamma,
+                    "meta_unroll_steps": meta_unroll_steps,
                     "noise_ratio": noise_ratio,
                     "grad_clip_norm": grad_clip_norm,
-                    "num_crude": num_crude,
                     "num_losses": num_sigma_levels,
                     "split_seed": split_seed,
                     "val_samples": n_val,
@@ -691,6 +663,7 @@ def main(
         step_metrics_state = StepMetricsState()
 
         # Training loop
+        weight_history: list[dict[str, float]] = []
         for epoch in range(epochs):
             stats = meta_train_epoch(
                 model=model,
@@ -705,8 +678,7 @@ def main(
                 meta_scheduler=meta_scheduler,
                 batch_size=batch_size,
                 inner_steps=inner_steps,
-                num_crude=num_crude,
-                lambda_reg=lambda_reg,
+                meta_unroll_steps=meta_unroll_steps,
                 sigma_cols=sigma_cols,
                 step_metrics_state=step_metrics_state,
                 lr_ref=lr_model,
@@ -716,6 +688,13 @@ def main(
 
             # Log to MLflow
             mlflow.log_metrics(stats, step=epoch)
+
+            weight_history.append(
+                {
+                    "epoch": float(epoch),
+                    **{f"weight_{sigma_col}": float(stats[f"weight_{sigma_col}"]) for sigma_col in sigma_cols},
+                }
+            )
 
             # Print progress
             weights_str = ", ".join(
@@ -764,6 +743,13 @@ def main(
                 )
                 mlflow.log_artifact(str(snap_path), artifact_path="snapshots")
                 logger.info(f"Saved snapshot → {snap_path.name}")
+
+        hist_df = pl.DataFrame(weight_history)
+        hist_path = output_dir / f"{dataset_name}_weight_trajectory.parquet"
+        hist_df.write_parquet(hist_path)
+        mlflow.log_artifact(str(hist_path), artifact_path="weights")
+        weight_plot_path = _log_weight_plot(weight_history, output_dir, dataset_name)
+        mlflow.log_artifact(str(weight_plot_path), artifact_path="weights")
 
         # Final surface plot
         final_surf_path = output_dir / f"{dataset_name}_meta_final.png"
