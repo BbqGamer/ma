@@ -23,17 +23,46 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def _add_if_exists(tar: tarfile.TarFile, path: Path, *, arcname: str) -> None:
-    if path.exists():
-        tar.add(path, arcname=arcname)
+def _should_include(path: Path, *, include_checkpoints: bool) -> bool:
+    if include_checkpoints:
+        return True
+    if any(part == "checkpoints" for part in path.parts):
+        return False
+    if path.suffix == ".ckpt":
+        return False
+    return True
+
+
+def _add_tree(
+    tar: tarfile.TarFile,
+    path: Path,
+    *,
+    arcname: str,
+    include_checkpoints: bool,
+) -> None:
+    if not path.exists():
+        return
+    if path.is_file():
+        if _should_include(path, include_checkpoints=include_checkpoints):
+            tar.add(path, arcname=arcname)
+        return
+    for child in sorted(path.rglob("*")):
+        if child.is_dir():
+            continue
+        if not _should_include(child, include_checkpoints=include_checkpoints):
+            continue
+        child_arcname = str(Path(arcname) / child.relative_to(path))
+        tar.add(child, arcname=child_arcname)
 
 
 @app.command()
 def main(
     bundle_name: str = typer.Option(f"cifar100_easy_hard_bundle_{_timestamp()}"),
     llm_study_name: str | None = typer.Option(None, help="Optional LLM study directory to include."),
-    optuna_study_name: str | None = typer.Option(None, help="Optional Optuna study directory to highlight."),
-    include_all_reports: bool = typer.Option(True, help="Include the entire reports/cifar100_easy_hard tree."),
+    optuna_study_name: str | None = typer.Option(None, help="Optional Optuna study directory to include."),
+    suite_name: str | None = typer.Option(None, help="Optional suite run directory to include."),
+    include_all_reports: bool = typer.Option(False, help="Include the entire reports/cifar100_easy_hard tree."),
+    include_checkpoints: bool = typer.Option(False, help="Include Lightning checkpoint files."),
 ) -> None:
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
     bundle_path = ARTIFACT_ROOT / f"{bundle_name}.tar.gz"
@@ -48,22 +77,67 @@ def main(
     }
 
     with tarfile.open(bundle_path, "w:gz") as tar:
-        _add_if_exists(tar, PROJ_ROOT / "pyproject.toml", arcname="pyproject.toml")
+        _add_tree(
+            tar,
+            PROJ_ROOT / "pyproject.toml",
+            arcname="pyproject.toml",
+            include_checkpoints=include_checkpoints,
+        )
         manifest["items"].append("pyproject.toml")
 
         if include_all_reports:
-            _add_if_exists(tar, CIFAR_ROOT, arcname="reports/cifar100_easy_hard")
+            print("Adding reports/cifar100_easy_hard ...", flush=True)
+            _add_tree(
+                tar,
+                CIFAR_ROOT,
+                arcname="reports/cifar100_easy_hard",
+                include_checkpoints=include_checkpoints,
+            )
             manifest["items"].append("reports/cifar100_easy_hard")
+        else:
+            if llm_study_name:
+                llm_report_dir = CIFAR_ROOT / "llm_search" / llm_study_name
+                print(f"Adding {llm_report_dir} ...", flush=True)
+                _add_tree(
+                    tar,
+                    llm_report_dir,
+                    arcname=f"reports/cifar100_easy_hard/llm_search/{llm_study_name}",
+                    include_checkpoints=include_checkpoints,
+                )
+                manifest["items"].append(f"reports/cifar100_easy_hard/llm_search/{llm_study_name}")
+
+            if optuna_study_name:
+                optuna_dir = CIFAR_ROOT / "optuna" / optuna_study_name
+                print(f"Adding {optuna_dir} ...", flush=True)
+                _add_tree(
+                    tar,
+                    optuna_dir,
+                    arcname=f"reports/cifar100_easy_hard/optuna/{optuna_study_name}",
+                    include_checkpoints=include_checkpoints,
+                )
+                manifest["items"].append(f"reports/cifar100_easy_hard/optuna/{optuna_study_name}")
+
+            if suite_name:
+                suite_dir = CIFAR_ROOT / "suite_runs" / suite_name
+                print(f"Adding {suite_dir} ...", flush=True)
+                _add_tree(
+                    tar,
+                    suite_dir,
+                    arcname=f"reports/cifar100_easy_hard/suite_runs/{suite_name}",
+                    include_checkpoints=include_checkpoints,
+                )
+                manifest["items"].append(f"reports/cifar100_easy_hard/suite_runs/{suite_name}")
 
         if llm_study_name:
             llm_gen_dir = GENERATED_ROOT / llm_study_name
-            _add_if_exists(tar, llm_gen_dir, arcname=f"llm_schedules/generated/{llm_study_name}")
+            print(f"Adding {llm_gen_dir} ...", flush=True)
+            _add_tree(
+                tar,
+                llm_gen_dir,
+                arcname=f"llm_schedules/generated/{llm_study_name}",
+                include_checkpoints=include_checkpoints,
+            )
             manifest["items"].append(f"llm_schedules/generated/{llm_study_name}")
-
-        if optuna_study_name:
-            optuna_dir = CIFAR_ROOT / "optuna" / optuna_study_name
-            _add_if_exists(tar, optuna_dir, arcname=f"reports/cifar100_easy_hard/optuna/{optuna_study_name}")
-            manifest["items"].append(f"reports/cifar100_easy_hard/optuna/{optuna_study_name}")
 
         manifest_path = ARTIFACT_ROOT / f"{bundle_name}_manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
