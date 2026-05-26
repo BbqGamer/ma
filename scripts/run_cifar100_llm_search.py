@@ -25,6 +25,7 @@ PYTHON_BIN = ROOT / ".venv" / "bin" / "python"
 BENCHMARK_SCRIPT = ROOT / "scripts" / "run_cifar100_policy_benchmark.py"
 GENERATED_ROOT = ROOT / "llm_schedules" / "generated"
 SEARCH_ROOT = REPORTS_DIR / "cifar100_easy_hard" / "llm_search"
+POLICY_ROOT = REPORTS_DIR / "cifar100_easy_hard" / "policy"
 
 app = typer.Typer(add_completion=False)
 
@@ -285,6 +286,13 @@ Output only the Python module.
 """
 
 
+def _load_benchmark_aggregate(benchmark_id: str) -> dict[str, Any]:
+    aggregate_path = POLICY_ROOT / benchmark_id / "aggregate.json"
+    if not aggregate_path.exists():
+        raise FileNotFoundError(f"Missing benchmark aggregate file: {aggregate_path}")
+    return json.loads(aggregate_path.read_text(encoding="utf-8"))
+
+
 def _preflight_candidate(module_path: str) -> None:
     module = importlib.import_module(module_path)
     importlib.reload(module)
@@ -377,6 +385,7 @@ def main(
 
     study_dir = SEARCH_ROOT / study_name
     prompts_dir = study_dir / "prompts"
+    results_dir = study_dir / "results"
     history_path = study_dir / "history.jsonl"
     module_dir = GENERATED_ROOT / study_name
     module_dir.mkdir(parents=True, exist_ok=True)
@@ -391,6 +400,8 @@ def main(
         module_path = f"llm_schedules.generated.{study_name}.{module_name}"
         prompt_path = prompts_dir / f"candidate_{candidate_id}.md"
         response_path = prompts_dir / f"candidate_{candidate_id}_response.json"
+        benchmark_stdout_path = results_dir / f"candidate_{candidate_id}_benchmark_stdout.txt"
+        benchmark_stderr_path = results_dir / f"candidate_{candidate_id}_benchmark_stderr.txt"
 
         prompt = _build_prompt(
             study_name=study_name,
@@ -411,6 +422,7 @@ def main(
             "status": "failed",
         }
         usage: dict[str, float] = {}
+        result: subprocess.CompletedProcess[str] | None = None
         try:
             raw, usage = _openai_generate_candidate(
                 prompt=prompt,
@@ -463,13 +475,20 @@ def main(
             ]
             cmd = [part for part in cmd if part != ""]
             result = subprocess.run(cmd, cwd=ROOT, check=True, capture_output=True, text=True)
-            aggregate = json.loads(result.stdout)
+            benchmark_stdout_path.parent.mkdir(parents=True, exist_ok=True)
+            benchmark_stdout_path.write_text(result.stdout, encoding="utf-8")
+            benchmark_stderr_path.write_text(result.stderr, encoding="utf-8")
+            aggregate = _load_benchmark_aggregate(benchmark_id)
             row.update(aggregate)
             row["benchmark_id"] = benchmark_id
             row["candidate_sha256"] = hashlib.sha256(candidate_path.read_bytes()).hexdigest()
             row["status"] = "ok"
         except Exception as exc:
             row["error"] = repr(exc)
+            if isinstance(result, subprocess.CompletedProcess):
+                benchmark_stdout_path.parent.mkdir(parents=True, exist_ok=True)
+                benchmark_stdout_path.write_text(result.stdout or "", encoding="utf-8")
+                benchmark_stderr_path.write_text(result.stderr or "", encoding="utf-8")
         row["openai_input_tokens"] = usage.get("input_tokens", 0.0)
         row["openai_output_tokens"] = usage.get("output_tokens", 0.0)
         row["openai_total_tokens"] = usage.get("total_tokens", 0.0)
