@@ -46,6 +46,18 @@ def _append_history(path: Path, row: dict[str, Any]) -> None:
         f.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def _write_token_summary(path: Path, history: list[dict[str, Any]]) -> None:
+    summary = {
+        "num_candidates": len(history),
+        "num_successful_candidates": sum(1 for row in history if row.get("status") == "ok"),
+        "num_failed_candidates": sum(1 for row in history if row.get("status") != "ok"),
+        "input_tokens": float(sum(float(row.get("openai_input_tokens", 0.0) or 0.0) for row in history)),
+        "output_tokens": float(sum(float(row.get("openai_output_tokens", 0.0) or 0.0) for row in history)),
+        "total_tokens": float(sum(float(row.get("openai_total_tokens", 0.0) or 0.0) for row in history)),
+    }
+    path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def _next_candidate_id(history: list[dict[str, Any]]) -> str:
     nums = [int(str(row["candidate_id"])) for row in history if row.get("candidate_id")]
     return f"{(max(nums) + 1) if nums else 1:04d}"
@@ -387,6 +399,7 @@ def main(
     prompts_dir = study_dir / "prompts"
     results_dir = study_dir / "results"
     history_path = study_dir / "history.jsonl"
+    token_summary_path = study_dir / "token_summary.json"
     module_dir = GENERATED_ROOT / study_name
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "__init__.py").write_text("", encoding="utf-8")
@@ -474,10 +487,15 @@ def main(
                 precision,
             ]
             cmd = [part for part in cmd if part != ""]
-            result = subprocess.run(cmd, cwd=ROOT, check=True, capture_output=True, text=True)
+            result = subprocess.run(cmd, cwd=ROOT, check=False, capture_output=True, text=True)
             benchmark_stdout_path.parent.mkdir(parents=True, exist_ok=True)
             benchmark_stdout_path.write_text(result.stdout, encoding="utf-8")
             benchmark_stderr_path.write_text(result.stderr, encoding="utf-8")
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Benchmark subprocess failed with code {result.returncode}. "
+                    f"See {benchmark_stderr_path}"
+                )
             aggregate = _load_benchmark_aggregate(benchmark_id)
             row.update(aggregate)
             row["benchmark_id"] = benchmark_id
@@ -493,6 +511,7 @@ def main(
         row["openai_output_tokens"] = usage.get("output_tokens", 0.0)
         row["openai_total_tokens"] = usage.get("total_tokens", 0.0)
         _append_history(history_path, row)
+        _write_token_summary(token_summary_path, _read_history(history_path))
         print(json.dumps(row, indent=2, sort_keys=True))
 
 
