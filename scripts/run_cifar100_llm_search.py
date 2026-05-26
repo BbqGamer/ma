@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import time
 from typing import Any
 from urllib import error, request
@@ -21,7 +22,7 @@ from ma_thesis.cifar100_schedule import TaskScheduleContext, TaskScheduleInitCon
 from ma_thesis.config import REPORTS_DIR
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON_BIN = ROOT / ".venv" / "bin" / "python"
+PYTHON_BIN = Path(sys.executable)
 BENCHMARK_SCRIPT = ROOT / "scripts" / "run_cifar100_policy_benchmark.py"
 GENERATED_ROOT = ROOT / "llm_schedules" / "generated"
 SEARCH_ROOT = REPORTS_DIR / "cifar100_easy_hard" / "llm_search"
