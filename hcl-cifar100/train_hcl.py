@@ -1,12 +1,19 @@
 """
-Hierarchical Class-Based Curriculum Loss (HCL) for CIFAR-100.
+Paper-inspired HCL adaptation for CIFAR-100.
 
-This script trains the same ResNet18 backbone in two modes:
-- baseline: standard multi-label BCE over all hierarchy nodes
-- hcl: hierarchical constrained loss + class-based curriculum selection
+Important: the original paper evaluates on hierarchical multi-label datasets with
+pre-extracted features and an MLP. CIFAR-100 is a different setting, so this file
+implements the closest clean adaptation for controlled ablations:
 
-The implementation follows the paper more closely by modeling CIFAR-100 as a
-small hierarchy of 20 coarse nodes + 100 fine nodes (120 total outputs).
+- baseline: fine-label cross entropy
+- hier: hierarchical max loss max(CE_fine, CE_coarse)
+- hcl: class-curriculum over the hierarchical max loss
+
+To avoid confounding variables:
+- same shared ResNet18 backbone in all modes
+- same optimizer, scheduler, data, augmentations, seed, and evaluation
+- same dual-head architecture in all modes
+- only the loss changes across modes
 """
 
 from __future__ import annotations
@@ -29,7 +36,6 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.models import resnet18
 
 
-# CIFAR-100 fine label -> coarse superclass mapping.
 FINE_TO_COARSE = np.array(
     [
         4, 1, 14, 8, 0, 6, 7, 7, 18, 3, 3, 14, 9, 18, 7, 11, 3, 9, 7, 11,
@@ -46,14 +52,6 @@ FINE_TO_COARSE = np.array(
 class HierarchySpec:
     num_coarse: int = 20
     num_fine: int = 100
-
-    @property
-    def num_nodes(self) -> int:
-        return self.num_coarse + self.num_fine
-
-    @property
-    def fine_offset(self) -> int:
-        return self.num_coarse
 
 
 HIERARCHY = HierarchySpec()
@@ -86,183 +84,102 @@ def setup_logger(mode: str, output_dir: Path) -> logging.Logger:
     return logger
 
 
-class HierarchicalCIFAR100(Dataset):
-    """Wrap CIFAR-100 and emit multi-hot targets for coarse + fine labels."""
-
+class CIFAR100WithHierarchy(Dataset):
     def __init__(self, base_dataset: torchvision.datasets.CIFAR100) -> None:
         self.base_dataset = base_dataset
 
     def __len__(self) -> int:
         return len(self.base_dataset)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         image, fine_label = self.base_dataset[idx]
         coarse_label = int(FINE_TO_COARSE[fine_label])
-
-        target = torch.zeros(HIERARCHY.num_nodes, dtype=torch.float32)
-        target[coarse_label] = 1.0
-        target[HIERARCHY.fine_offset + fine_label] = 1.0
-
         return (
             image,
-            target,
             torch.tensor(fine_label, dtype=torch.long),
             torch.tensor(coarse_label, dtype=torch.long),
         )
 
 
-class HierarchicalResNet18(nn.Module):
-    """ResNet18 with a CIFAR stem and one logit per hierarchy node."""
+class DualHeadResNet18(nn.Module):
+    """Shared CIFAR-style ResNet18 backbone with coarse and fine heads."""
 
-    def __init__(self, num_outputs: int) -> None:
+    def __init__(self, num_coarse: int, num_fine: int) -> None:
         super().__init__()
         base_model = resnet18(weights=None)
         base_model.conv1 = nn.Conv2d(
             3, 64, kernel_size=3, stride=1, padding=1, bias=False
         )
         base_model.maxpool = nn.Identity()
-        base_model.fc = nn.Linear(base_model.fc.in_features, num_outputs)
-        self.model = base_model
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+        self.features = nn.Sequential(*list(base_model.children())[:-1])
+        num_ftrs = base_model.fc.in_features
+        self.fc_coarse = nn.Linear(num_ftrs, num_coarse)
+        self.fc_fine = nn.Linear(num_ftrs, num_fine)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = self.features(x)
+        x = torch.flatten(x, 1)
+        return self.fc_coarse(x), self.fc_fine(x)
 
 
-class HierarchicalCurriculumLoss(nn.Module):
-    """Exact paper-style hierarchical constrained loss + curriculum selection."""
+class HierarchicalCurriculumHelper:
+    """Helper for the CIFAR adaptation of HCL.
 
-    def __init__(self, hierarchy: HierarchySpec, thresh: float = 50.0) -> None:
-        super().__init__()
-        self.hierarchy = hierarchy
-        self.thresh = thresh
-        self.base_loss = nn.BCEWithLogitsLoss(reduction="none")
+    For each sample i:
+      l_fine(i)   = CE(fine_logits_i, fine_target_i)
+      l_coarse(i) = CE(coarse_logits_i, coarse_target_i)
+      l_h(i)      = max(l_fine(i), l_coarse(i))
 
-        parent = torch.full((hierarchy.num_nodes,), -1, dtype=torch.long)
-        # Fine nodes are children of the corresponding coarse node.
-        for fine_idx in range(hierarchy.num_fine):
-            node_idx = hierarchy.fine_offset + fine_idx
-            parent[node_idx] = int(FINE_TO_COARSE[fine_idx])
-        self.register_buffer("parent", parent)
+    Curriculum is defined over fine classes by aggregating l_h over the training set.
+    """
 
-    def base_node_losses(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        return self.base_loss(logits, targets)
+    def __init__(self, num_fine: int, select_frac: float) -> None:
+        self.num_fine = num_fine
+        self.select_frac = float(max(0.05, min(1.0, select_frac)))
 
-    def hierarchical_node_losses(
+    def per_sample_losses(
         self,
-        logits: torch.Tensor,
-        targets: torch.Tensor,
-    ) -> torch.Tensor:
-        base = self.base_node_losses(logits, targets)
-        h_loss = base.clone()
-        fine_start = self.hierarchy.fine_offset
-
-        # For fine nodes, enforce the hierarchical constraint: loss(child) >= loss(parent)
-        for node_idx in range(fine_start, self.hierarchy.num_nodes):
-            parent_idx = int(self.parent[node_idx].item())
-            h_loss[:, node_idx] = torch.maximum(base[:, node_idx], base[:, parent_idx])
-
-        return h_loss
-
-    @torch.no_grad()
-    def estimate_class_losses(
-        self,
-        model: nn.Module,
-        trainloader: DataLoader,
-        device: torch.device,
-    ) -> torch.Tensor:
-        """Estimate mean hierarchical loss per class over a loader."""
-        model.eval()
-        class_loss_sums = torch.zeros(self.hierarchy.num_nodes, device=device)
-        total_examples = 0
-
-        for inputs, targets, _, _ in trainloader:
-            inputs = inputs.to(device, non_blocking=True)
-            targets = targets.to(device, non_blocking=True)
-            logits = model(inputs)
-            h_loss = self.hierarchical_node_losses(logits, targets)
-            class_loss_sums += h_loss.sum(dim=0)
-            total_examples += targets.size(0)
-
-        return class_loss_sums / max(total_examples, 1)
-
-    @torch.no_grad()
-    def calibrate_threshold(
-        self,
-        class_losses: torch.Tensor,
-        target_frac: float,
-    ) -> float:
-        """Choose a threshold that selects approximately target_frac classes."""
-        target_frac = float(max(0.05, min(0.95, target_frac)))
-        target_k = max(1, int(round(target_frac * self.hierarchy.num_nodes)))
-
-        def selected_count(threshold: float) -> int:
-            sorted_losses, _ = torch.sort(class_losses, descending=False)
-            cumulative_loss = torch.cumsum(sorted_losses, dim=0)
-            thresholds = threshold + 1 - torch.arange(
-                1,
-                self.hierarchy.num_nodes + 1,
-                device=class_losses.device,
-                dtype=sorted_losses.dtype,
-            )
-            cutoff = torch.nonzero(cumulative_loss > thresholds, as_tuple=False)
-            return int(cutoff[0].item()) + 1 if cutoff.numel() else self.hierarchy.num_nodes
-
-        low = 0.0
-        high = float(class_losses.sum().item() + self.hierarchy.num_nodes)
-        for _ in range(32):
-            mid = (low + high) / 2.0
-            k = selected_count(mid)
-            if k < target_k:
-                low = mid
-            else:
-                high = mid
-
-        return high
+        coarse_logits: torch.Tensor,
+        fine_logits: torch.Tensor,
+        coarse_targets: torch.Tensor,
+        fine_targets: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        loss_coarse = F.cross_entropy(coarse_logits, coarse_targets, reduction="none")
+        loss_fine = F.cross_entropy(fine_logits, fine_targets, reduction="none")
+        loss_hier = torch.maximum(loss_fine, loss_coarse)
+        return loss_coarse, loss_fine, loss_hier
 
     @torch.no_grad()
     def select_classes(
         self,
         model: nn.Module,
-        trainloader: DataLoader,
+        loader: DataLoader,
         device: torch.device,
     ) -> torch.Tensor:
-        """Select curriculum classes using the current model, as in Algorithm 1.
+        model.eval()
+        class_loss_sums = torch.zeros(self.num_fine, device=device)
+        class_counts = torch.zeros(self.num_fine, device=device)
 
-        The paper uses a threshold on class losses, but for CIFAR-100 we calibrate
-        the threshold once from the initial losses so the curriculum keeps most of
-        the fine-grained signal active.
-        """
-        class_losses = self.estimate_class_losses(model, trainloader, device)
-        sorted_losses, sorted_indices = torch.sort(class_losses, descending=False)
-        cumulative_loss = torch.cumsum(sorted_losses, dim=0)
-        thresholds = self.thresh + 1 - torch.arange(
-            1,
-            self.hierarchy.num_nodes + 1,
-            device=device,
-            dtype=sorted_losses.dtype,
-        )
-        cutoff = torch.nonzero(cumulative_loss > thresholds, as_tuple=False)
-        k = int(cutoff[0].item()) + 1 if cutoff.numel() else self.hierarchy.num_nodes
+        for inputs, fine_targets, coarse_targets in loader:
+            inputs = inputs.to(device, non_blocking=True)
+            fine_targets = fine_targets.to(device, non_blocking=True)
+            coarse_targets = coarse_targets.to(device, non_blocking=True)
 
-        class_mask = torch.zeros(self.hierarchy.num_nodes, device=device)
-        class_mask[sorted_indices[:k]] = 1.0
+            coarse_logits, fine_logits = model(inputs)
+            _, _, loss_hier = self.per_sample_losses(
+                coarse_logits, fine_logits, coarse_targets, fine_targets
+            )
+            class_loss_sums.scatter_add_(0, fine_targets, loss_hier)
+            class_counts.scatter_add_(0, fine_targets, torch.ones_like(loss_hier))
+
+        class_loss_means = class_loss_sums / class_counts.clamp_min(1.0)
+        k = max(1, int(round(self.select_frac * self.num_fine)))
+        easiest = torch.argsort(class_loss_means, descending=False)[:k]
+
+        class_mask = torch.zeros(self.num_fine, device=device)
+        class_mask[easiest] = 1.0
         return class_mask
-
-    def forward(
-        self,
-        logits: torch.Tensor,
-        targets: torch.Tensor,
-        class_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Compute the baseline or HCL objective for a mini-batch."""
-        if class_mask is None:
-            return self.base_node_losses(logits, targets).mean()
-
-        h_loss = self.hierarchical_node_losses(logits, targets)
-        selected = class_mask.bool()
-        if not torch.any(selected):
-            return h_loss.mean()
-        return h_loss[:, selected].mean()
 
 
 def build_transforms() -> tuple[transforms.Compose, transforms.Compose]:
@@ -292,79 +209,88 @@ def build_transforms() -> tuple[transforms.Compose, transforms.Compose]:
 @torch.inference_mode()
 def evaluate(
     model: nn.Module,
-    testloader: DataLoader,
+    loader: DataLoader,
+    helper: HierarchicalCurriculumHelper,
     device: torch.device,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float]:
     model.eval()
     val_loss = 0.0
-    total_correct = 0
+    total_correct_fine = 0
+    total_correct_coarse = 0
     total_hier_dist = 0
     total_samples = 0
 
-    for inputs, targets, fine_targets, coarse_targets in testloader:
+    for inputs, fine_targets, coarse_targets in loader:
         inputs = inputs.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
         fine_targets = fine_targets.to(device, non_blocking=True)
         coarse_targets = coarse_targets.to(device, non_blocking=True)
 
-        logits = model(inputs)
-        fine_logits = logits[:, HIERARCHY.fine_offset :]
+        coarse_logits, fine_logits = model(inputs)
         batch_loss = F.cross_entropy(fine_logits, fine_targets)
         val_loss += batch_loss.item()
 
         fine_preds = fine_logits.argmax(dim=1)
-        coarse_preds = torch.from_numpy(FINE_TO_COARSE[fine_preds.cpu().numpy()]).to(device)
+        coarse_preds = coarse_logits.argmax(dim=1)
 
-        total_correct += (fine_preds == fine_targets).sum().item()
+        total_correct_fine += (fine_preds == fine_targets).sum().item()
+        total_correct_coarse += (coarse_preds == coarse_targets).sum().item()
+
+        pred_coarse_from_fine = torch.from_numpy(FINE_TO_COARSE[fine_preds.cpu().numpy()]).to(device)
         hier_dist = torch.zeros_like(fine_targets)
         hier_dist[fine_preds != fine_targets] = 1
-        hier_dist[coarse_preds != coarse_targets] = 2
+        hier_dist[pred_coarse_from_fine != coarse_targets] = 2
         total_hier_dist += hier_dist.sum().item()
         total_samples += fine_targets.size(0)
 
     return (
-        val_loss / len(testloader),
-        total_correct / total_samples,
+        val_loss / len(loader),
+        total_correct_fine / total_samples,
         total_hier_dist / total_samples,
+        total_correct_coarse / total_samples,
     )
 
 
 def train_one_epoch(
     model: nn.Module,
-    trainloader: DataLoader,
+    loader: DataLoader,
     optimizer: optim.Optimizer,
-    criterion: HierarchicalCurriculumLoss,
+    helper: HierarchicalCurriculumHelper,
     device: torch.device,
     mode: str,
     scaler: torch.cuda.amp.GradScaler,
     use_amp: bool,
     class_mask: torch.Tensor | None,
-    epoch: int,
-    hcl_warmup_epochs: int,
-    hcl_alpha: float,
 ) -> float:
     model.train()
     running_loss = 0.0
     autocast_ctx = torch.cuda.amp.autocast if use_amp else nullcontext
 
-    for inputs, targets, fine_targets, _ in trainloader:
+    for inputs, fine_targets, coarse_targets in loader:
         inputs = inputs.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
         fine_targets = fine_targets.to(device, non_blocking=True)
+        coarse_targets = coarse_targets.to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
         with autocast_ctx():
-            logits = model(inputs)
-            fine_logits = logits[:, HIERARCHY.fine_offset :]
-            fine_ce = F.cross_entropy(fine_logits, fine_targets)
+            coarse_logits, fine_logits = model(inputs)
+            loss_coarse, loss_fine, loss_hier = helper.per_sample_losses(
+                coarse_logits, fine_logits, coarse_targets, fine_targets
+            )
 
             if mode == "baseline":
-                loss = fine_ce
+                loss = loss_fine.mean()
+            elif mode == "hier":
+                loss = loss_hier.mean()
             else:
-                loss = fine_ce
-                if epoch >= hcl_warmup_epochs and class_mask is not None:
-                    hcl_reg = criterion(logits, targets, class_mask=class_mask)
-                    loss = loss + hcl_alpha * hcl_reg
+                if class_mask is None:
+                    loss = loss_hier.mean()
+                else:
+                    sample_mask = class_mask[fine_targets]
+                    selected = sample_mask > 0
+                    if torch.any(selected):
+                        loss = loss_hier[selected].mean()
+                    else:
+                        loss = loss_hier.mean()
 
         if use_amp:
             scaler.scale(loss).backward()
@@ -376,7 +302,7 @@ def train_one_epoch(
 
         running_loss += loss.item()
 
-    return running_loss / len(trainloader)
+    return running_loss / len(loader)
 
 
 def save_checkpoint(
@@ -405,33 +331,15 @@ def save_checkpoint(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, choices=["baseline", "hcl"], required=True)
+    parser.add_argument("--mode", type=str, choices=["baseline", "hier", "hcl"], required=True)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=0.1)
     parser.add_argument(
-        "--thresh",
-        type=float,
-        default=50.0,
-        help="Threshold for class selection in HCL.",
-    )
-    parser.add_argument(
         "--select_frac",
         type=float,
-        default=0.95,
-        help="Target fraction of classes to keep active when calibrating HCL.",
-    )
-    parser.add_argument(
-        "--hcl_alpha",
-        type=float,
-        default=0.1,
-        help="Weight of the HCL regularizer when mode=hcl.",
-    )
-    parser.add_argument(
-        "--hcl_warmup_epochs",
-        type=int,
-        default=10,
-        help="Train like baseline for this many epochs before turning on HCL.",
+        default=0.8,
+        help="Fraction of easiest fine classes kept active for HCL.",
     )
     parser.add_argument("--data_dir", type=str, default="/workspace/data")
     parser.add_argument("--output_dir", type=str, default="/workspace/runs")
@@ -479,7 +387,7 @@ def main() -> None:
     )
 
     transform_train, transform_test = build_transforms()
-    trainset = HierarchicalCIFAR100(
+    trainset = CIFAR100WithHierarchy(
         torchvision.datasets.CIFAR100(
             root=args.data_dir,
             train=True,
@@ -487,7 +395,7 @@ def main() -> None:
             transform=transform_train,
         )
     )
-    curriculumset = HierarchicalCIFAR100(
+    curriculumset = CIFAR100WithHierarchy(
         torchvision.datasets.CIFAR100(
             root=args.data_dir,
             train=True,
@@ -495,7 +403,7 @@ def main() -> None:
             transform=transform_test,
         )
     )
-    testset = HierarchicalCIFAR100(
+    testset = CIFAR100WithHierarchy(
         torchvision.datasets.CIFAR100(
             root=args.data_dir,
             train=False,
@@ -519,7 +427,10 @@ def main() -> None:
     curriculumloader = DataLoader(curriculumset, shuffle=False, **loader_kwargs)
     testloader = DataLoader(testset, shuffle=False, **loader_kwargs)
 
-    model = HierarchicalResNet18(num_outputs=HIERARCHY.num_nodes).to(device)
+    model = DualHeadResNet18(
+        num_coarse=HIERARCHY.num_coarse,
+        num_fine=HIERARCHY.num_fine,
+    ).to(device)
     optimizer = optim.SGD(
         model.parameters(),
         lr=args.lr,
@@ -528,20 +439,13 @@ def main() -> None:
         weight_decay=5e-4,
     )
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-
-    criterion = HierarchicalCurriculumLoss(HIERARCHY, thresh=args.thresh).to(device)
     scaler = torch.cuda.amp.GradScaler(enabled=(use_amp := args.amp and device.type == "cuda"))
 
-    if args.mode == "hcl":
-        initial_class_losses = criterion.estimate_class_losses(model, curriculumloader, device)
-        criterion.thresh = criterion.calibrate_threshold(initial_class_losses, args.select_frac)
-        logger.info(
-            f"Calibrated HCL threshold to {criterion.thresh:.4f} "
-            f"for target select_frac={args.select_frac:.2f}"
-        )
-        logger.info(
-            f"HCL warmup epochs: {args.hcl_warmup_epochs}, alpha: {args.hcl_alpha:.3f}"
-        )
+    helper = HierarchicalCurriculumHelper(
+        num_fine=HIERARCHY.num_fine,
+        select_frac=args.select_frac,
+    )
+    logger.info(f"select_frac={args.select_frac:.2f}")
 
     best_acc = 0.0
     best_path = output_dir / f"best_{args.mode}.pt"
@@ -549,29 +453,27 @@ def main() -> None:
 
     for epoch in range(args.epochs):
         class_mask = None
-        if args.mode == "hcl" and epoch >= args.hcl_warmup_epochs:
-            class_mask = criterion.select_classes(model, curriculumloader, device)
+        if args.mode == "hcl":
+            class_mask = helper.select_classes(model, curriculumloader, device)
             logger.info(
-                f"Selected {int(class_mask.sum().item())}/{HIERARCHY.num_nodes} classes"
+                f"Selected {int(class_mask.sum().item())}/{HIERARCHY.num_fine} fine classes"
             )
 
         train_loss = train_one_epoch(
             model=model,
-            trainloader=trainloader,
+            loader=trainloader,
             optimizer=optimizer,
-            criterion=criterion,
+            helper=helper,
             device=device,
             mode=args.mode,
             scaler=scaler,
             use_amp=use_amp,
             class_mask=class_mask,
-            epoch=epoch,
-            hcl_warmup_epochs=args.hcl_warmup_epochs,
-            hcl_alpha=args.hcl_alpha,
         )
-        val_loss, val_acc, val_hier_dist = evaluate(
+        val_loss, val_acc, val_hier_dist, val_coarse_acc = evaluate(
             model=model,
-            testloader=testloader,
+            loader=testloader,
+            helper=helper,
             device=device,
         )
         scheduler.step()
@@ -579,8 +481,9 @@ def main() -> None:
         logger.info(
             f"Epoch [{epoch + 1}/{args.epochs}] | "
             f"Train Loss: {train_loss:.4f} | "
-            f"Val Loss: {val_loss:.4f} | "
-            f"Hit@1: {val_acc * 100:.2f}% | "
+            f"Val Fine-CE: {val_loss:.4f} | "
+            f"Fine Hit@1: {val_acc * 100:.2f}% | "
+            f"Coarse Hit@1: {val_coarse_acc * 100:.2f}% | "
             f"HierDist: {val_hier_dist:.4f} | "
             f"LR: {scheduler.get_last_lr()[0]:.6f}"
         )
@@ -611,7 +514,7 @@ def main() -> None:
                 args=vars(args),
             )
 
-    logger.info(f"Training complete. Best Hit@1: {best_acc * 100:.2f}%")
+    logger.info(f"Training complete. Best Fine Hit@1: {best_acc * 100:.2f}%")
 
 
 if __name__ == "__main__":

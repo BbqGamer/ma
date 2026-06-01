@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUN_MODES="${RUN_MODES:-baseline,hcl}"
+RUN_MODES="${RUN_MODES:-baseline,hier,hcl}"
 RUN_ID="${RUN_ID:-$(date +%Y-%m-%d_%H-%M-%S)}"
 EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-128}"
 LR="${LR:-0.1}"
-THRESH="${THRESH:-50.0}"
-SELECT_FRAC="${SELECT_FRAC:-0.9}"
+SELECT_FRAC="${SELECT_FRAC:-0.8}"
 DATA_DIR="${DATA_DIR:-/workspace/data}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/runs}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
@@ -21,7 +20,6 @@ common_args=(
   --epochs "$EPOCHS"
   --batch_size "$BATCH_SIZE"
   --lr "$LR"
-  --thresh "$THRESH"
   --select_frac "$SELECT_FRAC"
   --data_dir "$DATA_DIR"
   --output_dir "$OUTPUT_DIR"
