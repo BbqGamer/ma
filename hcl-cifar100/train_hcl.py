@@ -163,18 +163,13 @@ class HierarchicalCurriculumLoss(nn.Module):
         return h_loss
 
     @torch.no_grad()
-    def select_classes(
+    def estimate_class_losses(
         self,
         model: nn.Module,
         trainloader: DataLoader,
         device: torch.device,
     ) -> torch.Tensor:
-        """Select curriculum classes using the current model, as in Algorithm 1.
-
-        We aggregate per-class loss over the whole curriculum set and then normalize
-        by the number of examples. On CIFAR-100 this keeps the paper threshold on a
-        sensible scale and avoids collapsing to a single selected class.
-        """
+        """Estimate mean hierarchical loss per class over a loader."""
         model.eval()
         class_loss_sums = torch.zeros(self.hierarchy.num_nodes, device=device)
         total_examples = 0
@@ -187,7 +182,56 @@ class HierarchicalCurriculumLoss(nn.Module):
             class_loss_sums += h_loss.sum(dim=0)
             total_examples += targets.size(0)
 
-        class_losses = class_loss_sums / max(total_examples, 1)
+        return class_loss_sums / max(total_examples, 1)
+
+    @torch.no_grad()
+    def calibrate_threshold(
+        self,
+        class_losses: torch.Tensor,
+        target_frac: float,
+    ) -> float:
+        """Choose a threshold that selects approximately target_frac classes."""
+        target_frac = float(max(0.05, min(0.95, target_frac)))
+        target_k = max(1, int(round(target_frac * self.hierarchy.num_nodes)))
+
+        def selected_count(threshold: float) -> int:
+            sorted_losses, _ = torch.sort(class_losses, descending=False)
+            cumulative_loss = torch.cumsum(sorted_losses, dim=0)
+            thresholds = threshold + 1 - torch.arange(
+                1,
+                self.hierarchy.num_nodes + 1,
+                device=class_losses.device,
+                dtype=sorted_losses.dtype,
+            )
+            cutoff = torch.nonzero(cumulative_loss > thresholds, as_tuple=False)
+            return int(cutoff[0].item()) + 1 if cutoff.numel() else self.hierarchy.num_nodes
+
+        low = 0.0
+        high = float(class_losses.sum().item() + self.hierarchy.num_nodes)
+        for _ in range(32):
+            mid = (low + high) / 2.0
+            k = selected_count(mid)
+            if k < target_k:
+                low = mid
+            else:
+                high = mid
+
+        return high
+
+    @torch.no_grad()
+    def select_classes(
+        self,
+        model: nn.Module,
+        trainloader: DataLoader,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Select curriculum classes using the current model, as in Algorithm 1.
+
+        The paper uses a threshold on class losses, but for CIFAR-100 we calibrate
+        the threshold once from the initial losses so the curriculum keeps most of
+        the fine-grained signal active.
+        """
+        class_losses = self.estimate_class_losses(model, trainloader, device)
         sorted_losses, sorted_indices = torch.sort(class_losses, descending=False)
         cumulative_loss = torch.cumsum(sorted_losses, dim=0)
         thresholds = self.thresh + 1 - torch.arange(
@@ -361,6 +405,12 @@ def main() -> None:
         default=50.0,
         help="Threshold for class selection in HCL.",
     )
+    parser.add_argument(
+        "--select_frac",
+        type=float,
+        default=0.9,
+        help="Target fraction of classes to keep active when calibrating HCL.",
+    )
     parser.add_argument("--data_dir", type=str, default="/workspace/data")
     parser.add_argument("--output_dir", type=str, default="/workspace/runs")
     parser.add_argument(
@@ -459,6 +509,14 @@ def main() -> None:
 
     criterion = HierarchicalCurriculumLoss(HIERARCHY, thresh=args.thresh).to(device)
     scaler = torch.cuda.amp.GradScaler(enabled=(use_amp := args.amp and device.type == "cuda"))
+
+    if args.mode == "hcl":
+        initial_class_losses = criterion.estimate_class_losses(model, curriculumloader, device)
+        criterion.thresh = criterion.calibrate_threshold(initial_class_losses, args.select_frac)
+        logger.info(
+            f"Calibrated HCL threshold to {criterion.thresh:.4f} "
+            f"for target select_frac={args.select_frac:.2f}"
+        )
 
     best_acc = 0.0
     best_path = output_dir / f"best_{args.mode}.pt"
