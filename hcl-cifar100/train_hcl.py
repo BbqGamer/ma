@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
@@ -292,7 +293,6 @@ def build_transforms() -> tuple[transforms.Compose, transforms.Compose]:
 def evaluate(
     model: nn.Module,
     testloader: DataLoader,
-    criterion: HierarchicalCurriculumLoss,
     device: torch.device,
 ) -> tuple[float, float, float]:
     model.eval()
@@ -308,10 +308,10 @@ def evaluate(
         coarse_targets = coarse_targets.to(device, non_blocking=True)
 
         logits = model(inputs)
-        batch_loss = criterion(logits, targets)
+        fine_logits = logits[:, HIERARCHY.fine_offset :]
+        batch_loss = F.cross_entropy(fine_logits, fine_targets)
         val_loss += batch_loss.item()
 
-        fine_logits = logits[:, HIERARCHY.fine_offset :]
         fine_preds = fine_logits.argmax(dim=1)
         coarse_preds = torch.from_numpy(FINE_TO_COARSE[fine_preds.cpu().numpy()]).to(device)
 
@@ -339,22 +339,32 @@ def train_one_epoch(
     scaler: torch.cuda.amp.GradScaler,
     use_amp: bool,
     class_mask: torch.Tensor | None,
+    epoch: int,
+    hcl_warmup_epochs: int,
+    hcl_alpha: float,
 ) -> float:
     model.train()
     running_loss = 0.0
     autocast_ctx = torch.cuda.amp.autocast if use_amp else nullcontext
 
-    for inputs, targets, _, _ in trainloader:
+    for inputs, targets, fine_targets, _ in trainloader:
         inputs = inputs.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
+        fine_targets = fine_targets.to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
         with autocast_ctx():
             logits = model(inputs)
+            fine_logits = logits[:, HIERARCHY.fine_offset :]
+            fine_ce = F.cross_entropy(fine_logits, fine_targets)
+
             if mode == "baseline":
-                loss = criterion(logits, targets, class_mask=None)
+                loss = fine_ce
             else:
-                loss = criterion(logits, targets, class_mask=class_mask)
+                loss = fine_ce
+                if epoch >= hcl_warmup_epochs and class_mask is not None:
+                    hcl_reg = criterion(logits, targets, class_mask=class_mask)
+                    loss = loss + hcl_alpha * hcl_reg
 
         if use_amp:
             scaler.scale(loss).backward()
@@ -408,8 +418,20 @@ def main() -> None:
     parser.add_argument(
         "--select_frac",
         type=float,
-        default=0.9,
+        default=0.95,
         help="Target fraction of classes to keep active when calibrating HCL.",
+    )
+    parser.add_argument(
+        "--hcl_alpha",
+        type=float,
+        default=0.1,
+        help="Weight of the HCL regularizer when mode=hcl.",
+    )
+    parser.add_argument(
+        "--hcl_warmup_epochs",
+        type=int,
+        default=10,
+        help="Train like baseline for this many epochs before turning on HCL.",
     )
     parser.add_argument("--data_dir", type=str, default="/workspace/data")
     parser.add_argument("--output_dir", type=str, default="/workspace/runs")
@@ -517,6 +539,9 @@ def main() -> None:
             f"Calibrated HCL threshold to {criterion.thresh:.4f} "
             f"for target select_frac={args.select_frac:.2f}"
         )
+        logger.info(
+            f"HCL warmup epochs: {args.hcl_warmup_epochs}, alpha: {args.hcl_alpha:.3f}"
+        )
 
     best_acc = 0.0
     best_path = output_dir / f"best_{args.mode}.pt"
@@ -524,9 +549,11 @@ def main() -> None:
 
     for epoch in range(args.epochs):
         class_mask = None
-        if args.mode == "hcl":
+        if args.mode == "hcl" and epoch >= args.hcl_warmup_epochs:
             class_mask = criterion.select_classes(model, curriculumloader, device)
-            logger.info(f"Selected {int(class_mask.sum().item())}/{HIERARCHY.num_nodes} classes")
+            logger.info(
+                f"Selected {int(class_mask.sum().item())}/{HIERARCHY.num_nodes} classes"
+            )
 
         train_loss = train_one_epoch(
             model=model,
@@ -538,11 +565,13 @@ def main() -> None:
             scaler=scaler,
             use_amp=use_amp,
             class_mask=class_mask,
+            epoch=epoch,
+            hcl_warmup_epochs=args.hcl_warmup_epochs,
+            hcl_alpha=args.hcl_alpha,
         )
         val_loss, val_acc, val_hier_dist = evaluate(
             model=model,
             testloader=testloader,
-            criterion=criterion,
             device=device,
         )
         scheduler.step()
