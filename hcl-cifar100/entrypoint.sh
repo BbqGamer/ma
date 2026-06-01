@@ -14,6 +14,7 @@ NUM_WORKERS="${NUM_WORKERS:-4}"
 SEED="${SEED:-42}"
 AMP="${AMP:-1}"
 DOWNLOAD="${DOWNLOAD:-1}"
+AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
 
 common_args=(
   --run_id "$RUN_ID"
@@ -45,3 +46,12 @@ for mode in "${modes[@]}"; do
   echo "[entrypoint] Running mode: $mode"
   python train_hcl.py --mode "$mode" "${common_args[@]}"
 done
+
+if [[ "$AUTO_STOP_POD" == "1" && -n "${RUNPOD_POD_ID:-}" ]]; then
+  echo "[entrypoint] Training finished; stopping Runpod pod ${RUNPOD_POD_ID}"
+  if command -v runpodctl >/dev/null 2>&1; then
+    runpodctl pod stop "$RUNPOD_POD_ID" || runpodctl remove pod "$RUNPOD_POD_ID" || true
+  else
+    echo "[entrypoint] runpodctl not found; cannot auto-stop pod"
+  fi
+fi
