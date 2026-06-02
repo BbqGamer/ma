@@ -202,6 +202,16 @@ reports/runs/*_sweep.json
 reports/runs/*_meta.json
 reports/status/
 reports/analysis/
+reports/cifar100_easy_hard/
+reports/llm_schedule_search/
 mlruns
 mlflow.db
 models/
+
+# Generated archives / manifests
+*.tar.gz
+*_bundle_manifest.json
+
+# Generated LLM schedules / run outputs
+llm_schedules/generated/*/
+!llm_schedules/generated/__init__.py

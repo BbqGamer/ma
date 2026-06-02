@@ -94,6 +94,31 @@ def softmax_weights(u: torch.Tensor) -> torch.Tensor:
     return F.softmax(u, dim=0)
 
 
+def _one_hot_easiest_weights(num_sigma_levels: int, device: torch.device) -> torch.Tensor:
+    weights = torch.zeros(num_sigma_levels, device=device)
+    weights[0] = 1.0
+    return weights
+
+
+def initialize_meta_weight_params(
+    num_sigma_levels: int,
+    device: torch.device,
+    *,
+    initial_weight_mode: str,
+) -> torch.Tensor:
+    if initial_weight_mode == "uniform":
+        return torch.zeros(num_sigma_levels, device=device, requires_grad=True)
+    if initial_weight_mode == "easiest_only":
+        # Exact [1, 0, ..., 0] is enforced only during the bootstrap epoch.
+        # The learnable state starts from a soft easy-biased distribution so it can move.
+        easy_prob = 0.7
+        other_prob = (1.0 - easy_prob) / max(1, num_sigma_levels - 1)
+        probs = torch.full((num_sigma_levels,), other_prob, device=device)
+        probs[0] = easy_prob
+        return torch.log(probs).requires_grad_()
+    raise ValueError(f"Unknown initial_weight_mode: {initial_weight_mode}")
+
+
 def compute_weighted_loss(
     model: nn.Module,
     X: torch.Tensor,
@@ -171,17 +196,31 @@ def _log_weight_plot(history: list[dict[str, float]], output_dir: Path, dataset_
     keys = [k for k in history[0].keys() if k.startswith("weight_")]
     keys.sort(key=lambda k: int(k.split("_")[-1]))
     epochs = [int(row["epoch"]) for row in history]
+    series = {key: [float(row[key]) for row in history] for key in keys}
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for key in keys:
-        values = [float(row[key]) for row in history]
-        ax.plot(epochs, values, label=key)
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Weight")
-    ax.set_title(f"Meta weights over time ({dataset_name})")
-    ax.set_ylim(0.0, 1.0)
-    ax.grid(True)
-    ax.legend(loc="best")
+    fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
+    ax_full, ax_zoom = axes
+    for key, values in series.items():
+        ax_full.plot(epochs, values, label=key)
+        ax_zoom.plot(epochs, values, label=key)
+
+    ax_full.set_ylabel("Weight")
+    ax_full.set_title(f"Meta weights over time ({dataset_name})")
+    ax_full.set_ylim(0.0, 1.0)
+    ax_full.grid(True)
+    ax_full.legend(loc="best")
+
+    non_dominant_max = max(
+        [max(values) for key, values in series.items() if key != keys[0]],
+        default=0.0,
+    )
+    zoom_max = max(1e-6, non_dominant_max * 1.1)
+    ax_zoom.set_xlabel("Epoch")
+    ax_zoom.set_ylabel("Weight")
+    ax_zoom.set_ylim(0.0, zoom_max)
+    ax_zoom.set_title("Zoomed subtask weights")
+    ax_zoom.grid(True)
+
     plot_path = output_dir / f"{dataset_name}_weight_trajectory.png"
     fig.savefig(plot_path, dpi=140, bbox_inches="tight")
     plt.close(fig)
@@ -207,6 +246,8 @@ def meta_train_epoch(
     step_metrics_state: StepMetricsState,
     lr_ref: float,
     grad_clip_norm: float | None,
+    current_epoch: int,
+    initial_weight_mode: str,
     device: torch.device,
 ) -> dict[str, float]:
     """Perform one meta-training epoch (inner + outer loop).
@@ -246,6 +287,7 @@ def meta_train_epoch(
     inner_losses = []
     step_metric_history: list[dict[str, float]] = []
     recent_train_batches: list[tuple[torch.Tensor, torch.Tensor]] = []
+    bootstrap_easiest_only = initial_weight_mode == "easiest_only" and current_epoch == 0
     for _ in range(inner_steps):
         # Sample batch
         indices = torch.randint(0, n_train, (batch_size,), device=device)
@@ -254,7 +296,11 @@ def meta_train_epoch(
 
         # Compute current weights
         with torch.no_grad():
-            weights = softmax_weights(u)
+            weights = (
+                _one_hot_easiest_weights(Y_train_multi.shape[1], device)
+                if bootstrap_easiest_only
+                else softmax_weights(u)
+            )
 
         # Inner loss and update
         model_optimizer.zero_grad()
@@ -324,7 +370,12 @@ def meta_train_epoch(
         raise RuntimeError("Non-finite model parameters encountered; likely optimizer divergence.")
 
     # Gather stats
-    weights_np = weights.detach().cpu().numpy()
+    weights_for_logging = (
+        _one_hot_easiest_weights(len(sigma_cols), device)
+        if bootstrap_easiest_only
+        else weights
+    )
+    weights_np = weights_for_logging.detach().cpu().numpy()
     stats = {
         "train_loss": avg_inner_loss,
         "val_loss": hard_val_loss.item(),
@@ -387,6 +438,7 @@ def main(
     batch_size: int = 128,
     lr_model: float = 3e-4,
     lr_meta: float = 3e-4,
+    initial_weight_mode: str = "uniform",
     momentum: float = 0.9,
     lr_decay_gamma: float = 0.999,
     inner_steps: int = 10,
@@ -445,6 +497,8 @@ def main(
         raise typer.BadParameter("min_train_per_param must be > 0.")
     if meta_unroll_steps < 1:
         raise typer.BadParameter("meta_unroll_steps must be >= 1.")
+    if initial_weight_mode not in {"uniform", "easiest_only"}:
+        raise typer.BadParameter("initial_weight_mode must be 'uniform' or 'easiest_only'.")
 
     dataset_name = input_path.stem
     canonical_function = dataset_function or dataset_name.split("_n", 1)[0]
@@ -518,9 +572,25 @@ def main(
         )
     logger.info(f"Model: {model_arch} ({n_params:,} params)")
 
-    # --- Initialize weight parameters u (uniform initialization) ---
-    u = torch.zeros(num_sigma_levels, device=device, requires_grad=True)
+    # --- Initialize weight parameters u ---
+    u = initialize_meta_weight_params(
+        num_sigma_levels,
+        device,
+        initial_weight_mode=initial_weight_mode,
+    )
     logger.info(f"Initialized weight parameters u: {u.detach().cpu().numpy()}")
+    if initial_weight_mode == "easiest_only":
+        logger.info("Initial meta weights bootstrap: [1, 0, ..., 0] for epoch 0.")
+        logger.info(
+            "Learnable meta weights after bootstrap start from a soft easy-biased state: "
+            f"{softmax_weights(u).detach().cpu().numpy()}"
+        )
+    else:
+        logger.info(
+            "Initial meta weights: "
+            f"{softmax_weights(u).detach().cpu().numpy()} "
+            f"(mode={initial_weight_mode})"
+        )
 
     # --- Optimizers ---
     model_optimizer = optim.SGD(model.parameters(), lr=lr_model, momentum=momentum)
@@ -600,6 +670,7 @@ def main(
                 "lr_model": lr_model,
                 "lr_meta": lr_meta,
                 "inner_steps": inner_steps,
+                "initial_weight_mode": initial_weight_mode,
                 "momentum": momentum,
                 "meta_unroll_steps": meta_unroll_steps,
                 "lr_decay_gamma": lr_decay_gamma,
@@ -637,6 +708,7 @@ def main(
                     "lr_model": lr_model,
                     "lr_meta": lr_meta,
                     "inner_steps": inner_steps,
+                    "initial_weight_mode": initial_weight_mode,
                     "momentum": momentum,
                     "lr_decay_gamma": lr_decay_gamma,
                     "meta_unroll_steps": meta_unroll_steps,
@@ -683,6 +755,8 @@ def main(
                 step_metrics_state=step_metrics_state,
                 lr_ref=lr_model,
                 grad_clip_norm=grad_clip_norm,
+                current_epoch=epoch,
+                initial_weight_mode=initial_weight_mode,
                 device=device,
             )
 

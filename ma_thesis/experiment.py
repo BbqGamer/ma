@@ -24,6 +24,7 @@ from ma_thesis.config import PROCESSED_DATA_DIR, REPORTS_DIR
 from ma_thesis.dataset import FUNCTIONS
 from ma_thesis.dataset import main as dataset_main
 from ma_thesis.meta_train import main as meta_main
+from ma_thesis.policy_train import main as policy_main
 from ma_thesis.schedule_sweep import main as schedule_sweep_main
 from ma_thesis.sweep import main as sweep_main
 from ma_thesis.train import main as train_main
@@ -137,7 +138,7 @@ def prepare_data(
 def run(
     method: str = typer.Option(
         "curriculum",
-        help="Experiment method: single, curriculum, meta, sweep, or schedule_sweep.",
+        help="Experiment method: single, curriculum, meta, policy, sweep, or schedule_sweep.",
     ),
     function: str = typer.Option(
         "ackley",
@@ -189,6 +190,7 @@ def run(
     # meta options
     lr_model: float = 3e-4,
     lr_meta: float = 3e-4,
+    meta_initial_weight_mode: str = "uniform",
     momentum: float = 0.9,
     lr_decay_gamma: float = 0.999,
     inner_steps: int = 10,
@@ -205,6 +207,14 @@ def run(
     max_train_per_param: float = 20.0,
     step_metrics_interval: int = 50,
     log_dataset_artifact: bool = False,
+    # policy options
+    policy_schedule_module: str = "llm_schedules.baselines",
+    policy_schedule_object: str | None = None,
+    policy_schedule_fn: str | None = None,
+    policy_num_losses: int = 4,
+    policy_history_window: int = 5,
+    policy_ema_alpha: float = 0.3,
+    policy_note: str = "Pluggable schedule policy over multiple sigma losses.",
     # schedule-sweep options
     schedule_num_losses: int = 4,
     study_note: str = (
@@ -222,9 +232,9 @@ def run(
         raise typer.BadParameter(
             f"Unknown function '{function}'. Allowed: {', '.join(sorted(FUNCTIONS))}."
         )
-    if method not in {"single", "curriculum", "meta", "sweep", "schedule_sweep"}:
+    if method not in {"single", "curriculum", "meta", "policy", "sweep", "schedule_sweep"}:
         raise typer.BadParameter(
-            "method must be one of: single, curriculum, meta, sweep, schedule_sweep"
+            "method must be one of: single, curriculum, meta, policy, sweep, schedule_sweep"
         )
     if method == "single" and sigma_level is None:
         sigma_level = -1
@@ -289,6 +299,7 @@ def run(
             "study_name": study_name,
             "lr_model": lr_model,
             "lr_meta": lr_meta,
+            "meta_initial_weight_mode": meta_initial_weight_mode,
             "inner_steps": inner_steps,
             "meta_unroll_steps": meta_unroll_steps,
             "grad_clip_norm": grad_clip_norm,
@@ -300,6 +311,13 @@ def run(
             "report_interval": report_interval,
             "model_archs": model_archs,
             "sweep_storage": sweep_storage,
+            "policy_schedule_module": policy_schedule_module,
+            "policy_schedule_object": policy_schedule_object,
+            "policy_schedule_fn": policy_schedule_fn,
+            "policy_num_losses": policy_num_losses,
+            "policy_history_window": policy_history_window,
+            "policy_ema_alpha": policy_ema_alpha,
+            "policy_note": policy_note,
             "schedule_num_losses": schedule_num_losses,
             "study_note": study_note,
             "min_train_per_param": min_train_per_param,
@@ -358,6 +376,7 @@ def run(
             batch_size=batch_size,
             lr_model=lr_model,
             lr_meta=lr_meta,
+            initial_weight_mode=meta_initial_weight_mode,
             momentum=momentum,
             lr_decay_gamma=lr_decay_gamma,
             inner_steps=inner_steps,
@@ -378,6 +397,38 @@ def run(
             snapshot_interval=snapshot_interval,
             experiment_name=experiment_name or "meta-curriculum",
             run_name=run_name or run_id,
+            min_train_per_param=min_train_per_param,
+            log_dataset_artifact=log_dataset_artifact,
+        )
+        return
+
+    if method == "policy":
+        policy_main(
+            input_path=resolved_input,
+            output_dir=run_output_dir,
+            experiment_name=experiment_name or "curriculum-policy",
+            run_name=run_name or run_id,
+            schedule_module=policy_schedule_module,
+            schedule_object=policy_schedule_object,
+            schedule_fn=policy_schedule_fn,
+            schedule_note=policy_note,
+            num_losses=policy_num_losses,
+            history_window=policy_history_window,
+            ema_alpha=policy_ema_alpha,
+            seed=seed,
+            model_arch=model_arch,
+            hidden_dim=hidden_dim,
+            num_blocks=num_blocks,
+            activation=activation,
+            num_layers=num_layers,
+            omega_0=omega_0,
+            num_fourier=num_fourier,
+            fourier_sigma=fourier_sigma,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            patience=patience,
+            min_delta=min_delta,
             min_train_per_param=min_train_per_param,
             log_dataset_artifact=log_dataset_artifact,
         )
