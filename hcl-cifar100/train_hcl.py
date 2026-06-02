@@ -1,18 +1,16 @@
 """
-Paper-inspired HCL adaptation for CIFAR-100.
+Paper-inspired HCL adaptation for CIFAR-100 with a single fine-class head.
 
-Important: the original paper evaluates on hierarchical multi-label datasets with
-pre-extracted features and an MLP. CIFAR-100 is a different setting, so this file
-implements the closest clean adaptation for controlled ablations:
-
+This version avoids the extra coarse head to minimize confounds:
 - baseline: fine-label cross entropy
-- hier: hierarchical max loss max(CE_fine, CE_coarse)
+- hier: hierarchical max loss max(CE_fine, CE_coarse-from-fine)
 - hcl: class-curriculum over the hierarchical max loss
 
-To avoid confounding variables:
-- same shared ResNet18 backbone in all modes
-- same optimizer, scheduler, data, augmentations, seed, and evaluation
-- same dual-head architecture in all modes
+For CIFAR-100, the coarse superclass is a deterministic function of the predicted
+fine class, so a second output head is unnecessary. All modes therefore share:
+- the same ResNet18 backbone
+- the same 100-way output head
+- the same optimizer, scheduler, data, augmentations, seed, and evaluation
 - only the loss changes across modes
 """
 
@@ -101,52 +99,68 @@ class CIFAR100WithHierarchy(Dataset):
         )
 
 
-class DualHeadResNet18(nn.Module):
-    """Shared CIFAR-style ResNet18 backbone with coarse and fine heads."""
+class FineResNet18(nn.Module):
+    """CIFAR-style ResNet18 with a single 100-way fine-class head."""
 
-    def __init__(self, num_coarse: int, num_fine: int) -> None:
+    def __init__(self, num_fine: int) -> None:
         super().__init__()
         base_model = resnet18(weights=None)
         base_model.conv1 = nn.Conv2d(
             3, 64, kernel_size=3, stride=1, padding=1, bias=False
         )
         base_model.maxpool = nn.Identity()
+        base_model.fc = nn.Linear(base_model.fc.in_features, num_fine)
+        self.model = base_model
 
-        self.features = nn.Sequential(*list(base_model.children())[:-1])
-        num_ftrs = base_model.fc.in_features
-        self.fc_coarse = nn.Linear(num_ftrs, num_coarse)
-        self.fc_fine = nn.Linear(num_ftrs, num_fine)
-
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = self.features(x)
-        x = torch.flatten(x, 1)
-        return self.fc_coarse(x), self.fc_fine(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)
 
 
 class HierarchicalCurriculumHelper:
-    """Helper for the CIFAR adaptation of HCL.
+    """Helper for the single-head CIFAR adaptation of HCL.
 
     For each sample i:
-      l_fine(i)   = CE(fine_logits_i, fine_target_i)
-      l_coarse(i) = CE(coarse_logits_i, coarse_target_i)
+      l_fine(i)   = -log p(y_i)
+      l_coarse(i) = -log sum_{j in C(y_i)} p(j)
       l_h(i)      = max(l_fine(i), l_coarse(i))
 
+    where C(y_i) is the set of fine classes inside the true coarse superclass.
     Curriculum is defined over fine classes by aggregating l_h over the training set.
     """
 
-    def __init__(self, num_fine: int, select_frac: float) -> None:
+    def __init__(self, num_coarse: int, num_fine: int, select_frac: float, device: torch.device) -> None:
+        self.num_coarse = num_coarse
         self.num_fine = num_fine
         self.select_frac = float(max(0.05, min(1.0, select_frac)))
+        self.device = device
+
+        fine_to_coarse = torch.tensor(FINE_TO_COARSE, dtype=torch.long, device=device)
+        coarse_to_fine_mask = torch.zeros(
+            num_coarse,
+            num_fine,
+            dtype=torch.bool,
+            device=device,
+        )
+        coarse_to_fine_mask[fine_to_coarse, torch.arange(num_fine, device=device)] = True
+
+        self.fine_to_coarse = fine_to_coarse
+        self.coarse_to_fine_mask = coarse_to_fine_mask
 
     def per_sample_losses(
         self,
-        coarse_logits: torch.Tensor,
         fine_logits: torch.Tensor,
         coarse_targets: torch.Tensor,
         fine_targets: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        loss_coarse = F.cross_entropy(coarse_logits, coarse_targets, reduction="none")
-        loss_fine = F.cross_entropy(fine_logits, fine_targets, reduction="none")
+        log_probs = F.log_softmax(fine_logits, dim=1)
+        loss_fine = F.nll_loss(log_probs, fine_targets, reduction="none")
+
+        valid_fine_mask = self.coarse_to_fine_mask[coarse_targets]
+        coarse_log_prob = torch.logsumexp(
+            log_probs.masked_fill(~valid_fine_mask, float("-inf")),
+            dim=1,
+        )
+        loss_coarse = -coarse_log_prob
         loss_hier = torch.maximum(loss_fine, loss_coarse)
         return loss_coarse, loss_fine, loss_hier
 
@@ -166,9 +180,11 @@ class HierarchicalCurriculumHelper:
             fine_targets = fine_targets.to(device, non_blocking=True)
             coarse_targets = coarse_targets.to(device, non_blocking=True)
 
-            coarse_logits, fine_logits = model(inputs)
+            fine_logits = model(inputs)
             _, _, loss_hier = self.per_sample_losses(
-                coarse_logits, fine_logits, coarse_targets, fine_targets
+                fine_logits,
+                coarse_targets,
+                fine_targets,
             )
             class_loss_sums.scatter_add_(0, fine_targets, loss_hier)
             class_counts.scatter_add_(0, fine_targets, torch.ones_like(loss_hier))
@@ -210,8 +226,8 @@ def build_transforms() -> tuple[transforms.Compose, transforms.Compose]:
 def evaluate(
     model: nn.Module,
     loader: DataLoader,
-    helper: HierarchicalCurriculumHelper,
     device: torch.device,
+    helper: HierarchicalCurriculumHelper,
 ) -> tuple[float, float, float, float]:
     model.eval()
     val_loss = 0.0
@@ -225,20 +241,19 @@ def evaluate(
         fine_targets = fine_targets.to(device, non_blocking=True)
         coarse_targets = coarse_targets.to(device, non_blocking=True)
 
-        coarse_logits, fine_logits = model(inputs)
+        fine_logits = model(inputs)
         batch_loss = F.cross_entropy(fine_logits, fine_targets)
         val_loss += batch_loss.item()
 
         fine_preds = fine_logits.argmax(dim=1)
-        coarse_preds = coarse_logits.argmax(dim=1)
+        coarse_preds = helper.fine_to_coarse[fine_preds]
 
         total_correct_fine += (fine_preds == fine_targets).sum().item()
         total_correct_coarse += (coarse_preds == coarse_targets).sum().item()
 
-        pred_coarse_from_fine = torch.from_numpy(FINE_TO_COARSE[fine_preds.cpu().numpy()]).to(device)
         hier_dist = torch.zeros_like(fine_targets)
         hier_dist[fine_preds != fine_targets] = 1
-        hier_dist[pred_coarse_from_fine != coarse_targets] = 2
+        hier_dist[coarse_preds != coarse_targets] = 2
         total_hier_dist += hier_dist.sum().item()
         total_samples += fine_targets.size(0)
 
@@ -272,9 +287,11 @@ def train_one_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         with autocast_ctx():
-            coarse_logits, fine_logits = model(inputs)
-            loss_coarse, loss_fine, loss_hier = helper.per_sample_losses(
-                coarse_logits, fine_logits, coarse_targets, fine_targets
+            fine_logits = model(inputs)
+            _, loss_fine, loss_hier = helper.per_sample_losses(
+                fine_logits,
+                coarse_targets,
+                fine_targets,
             )
 
             if mode == "baseline":
@@ -427,10 +444,7 @@ def main() -> None:
     curriculumloader = DataLoader(curriculumset, shuffle=False, **loader_kwargs)
     testloader = DataLoader(testset, shuffle=False, **loader_kwargs)
 
-    model = DualHeadResNet18(
-        num_coarse=HIERARCHY.num_coarse,
-        num_fine=HIERARCHY.num_fine,
-    ).to(device)
+    model = FineResNet18(num_fine=HIERARCHY.num_fine).to(device)
     optimizer = optim.SGD(
         model.parameters(),
         lr=args.lr,
@@ -442,10 +456,13 @@ def main() -> None:
     scaler = torch.cuda.amp.GradScaler(enabled=(use_amp := args.amp and device.type == "cuda"))
 
     helper = HierarchicalCurriculumHelper(
+        num_coarse=HIERARCHY.num_coarse,
         num_fine=HIERARCHY.num_fine,
         select_frac=args.select_frac,
+        device=device,
     )
     logger.info(f"select_frac={args.select_frac:.2f}")
+    logger.info("Coarse Hit@1 is derived from the predicted fine class, not a separate head")
 
     best_acc = 0.0
     best_path = output_dir / f"best_{args.mode}.pt"
@@ -473,8 +490,8 @@ def main() -> None:
         val_loss, val_acc, val_hier_dist, val_coarse_acc = evaluate(
             model=model,
             loader=testloader,
-            helper=helper,
             device=device,
+            helper=helper,
         )
         scheduler.step()
 
