@@ -259,6 +259,26 @@ In our curriculum context, the dilemma is inverted: the model must be
 
 \cite{banayeeanzade2025theoretical} provides theoretical insights into overparameterized models in such multi-task setups, suggesting that without explicit regularization, the interplay between model capacity and task similarity determines the success of transfer. Pure meta-learning of loss weights can be unstable; without constraints, a meta-learner might exploit the easy smoothed loss to achieve artificially low training error without ever transitioning to the hard target function. This necessitates the monotonic regularization strategies explored in this thesis.
 
+\section{Additional papers - TO SORT}
+\subsection{Learning to Reweight Examples for Robust Deep Learning}
+In \cite{renLearningReweightExamples2018a} authors showcase the denoising
+capability of reweighting training examples in the deep learning. Their method
+assumes two datasets, one that is high in volume and noisy, and another one
+that is assumed to be unbiased and clean. Their method doesn't require any
+additional hyperparameters. The method inspects the descent direction of some
+training examples locally on the training loss surface and reweight them
+according to their similarity to the descent direction of the validation loss
+surface. Their datasets were obtained by perturbin original CIFAR-10 and
+CIFAR-100, in one method just by randomly flipping classes to each other, and
+other one where labels flip to some specific new "background" class. In the
+first setting a lot of noise is added but the distribution of classes stays
+largely uniform in the second one we end up with heavily imabalanced dataset
+which is more realistic. It turns out that the method they proposed didn't seem
+to provide any benefits over different regularization techniques, like adding
+random noise to labels, but on the second (imabalanced) setting, using the
+clean and balanced validation set and their novel method, resulted in
+significantly better results.
+
 \section{Synthesis}
 
 The literature reveals a convergence of these three ideas. Continuation methods
