@@ -279,6 +279,23 @@ random noise to labels, but on the second (imabalanced) setting, using the
 clean and balanced validation set and their novel method, resulted in
 significantly better results.
 
+\subsection{Coarse-to-Fine Curriculum Learning}
+Authors of the paper \cite{stretcuCoarsetoFineCurriculumLearning2021}
+distinguish between curriculum learning in input space and in output space and
+attempt to explore the latter one. They proposed method of decomposing the
+original classification task into a sequence of coarse-to-fine problems. They
+did this by clustering the original labels into a hierarchy of similiar
+classes, the similiarity was obtained by taking the class embedding, being
+parameters of the model trained for couple of epochs in the last layer, just
+before each class. They used hierarchical clustering algorithm to create a tree
+of similiar labels of arbitrary depth. Their method introduces only one
+additional parameter which is number of epochs that the curriculum should take
+before the task is trained on the original loss. The time spent on each coarse
+task is uniform. Their method consistenly outperformed the baseline in terms of
+final validation accuracy. It turned out that there is a sweet spot for when to
+stop the curriculum at around 0.9 number of epochs that it would normally take
+the network to converge.
+
 \section{Synthesis}
 
 The literature reveals a convergence of these three ideas. Continuation methods
