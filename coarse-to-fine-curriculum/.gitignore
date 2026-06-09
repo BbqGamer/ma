@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+
+runs/
+run/
+ls/
+analysis/
+20*/
+
+*.pt
+*.npy
+history.csv

@@ -1,0 +1,257 @@
+# Reproduction: Coarse-to-Fine Curriculum Learning
+
+PyTorch rewrite of the code for the paper:
+- Otilia Stretcu et al., *Coarse-to-Fine Curriculum Learning* (2021)
+
+## What is included
+
+- paper-faithful **continuous** curriculum training by default
+- hierarchy generation from either:
+  - `classifier_weights` (default, closer to the 2021 paper), or
+  - `confusion` (closer to the released TensorFlow code)
+- datasets from the original repo scope:
+  - `cifar10`
+  - `cifar100`
+  - `shapes`
+  - `tiny-imagenet`
+- models:
+  - `cnn`
+  - `resnet18`
+  - `resnet50`
+- Runpod-ready containerization modeled after `hcl-cifar100/`
+
+## Important note
+
+The released TensorFlow code in original codebase is closer to the **staged**
+variant (reset classifier per hierarchy level, hierarchy from confusion), while
+the main 2021 paper focuses on the **continuous** variant with label
+marginalization and a fixed fine-class head.
+
+This rewrite implements the **continuous variant** as the main reproduction target.
+
+## Files
+
+- `train_coarse_to_fine.py` — main training CLI
+- `ctf/data.py` — dataset loading
+- `ctf/hierarchy.py` — affinity clustering hierarchy builder
+- `ctf/models.py` — CNN / ResNet models
+- `Dockerfile`, `entrypoint.sh` — container workflow
+
+## Local usage
+
+From this folder:
+
+```bash
+python train_coarse_to_fine.py \
+  --mode baseline \
+  --dataset cifar100 \
+  --model cnn \
+  --output_dir ./runs \
+  --run_id local-baseline
+```
+
+```bash
+python train_coarse_to_fine.py \
+  --mode curriculum \
+  --dataset cifar100 \
+  --model cnn \
+  --output_dir ./runs \
+  --run_id local-curriculum
+```
+
+If you already trained a baseline and want to reuse it for hierarchy construction:
+
+```bash
+python train_coarse_to_fine.py \
+  --mode curriculum \
+  --dataset cifar100 \
+  --model cnn \
+  --reference_run_dir ./runs/local-baseline/cifar100_cnn_baseline \
+  --output_dir ./runs \
+  --run_id local-curriculum
+```
+
+## Shapes dataset
+
+The original shapes data already exists in this repository under:
+
+```bash
+coarse-to-fine-curriculum/data/shapes
+```
+
+Run with:
+
+```bash
+python train_coarse_to_fine.py \
+  --mode curriculum \
+  --dataset shapes \
+  --model cnn \
+  --shapes_path ../../coarse-to-fine-curriculum/data/shapes \
+  --output_dir ./runs \
+  --run_id shapes-curriculum
+```
+
+## Main CLI options
+
+```bash
+--mode baseline|curriculum
+--dataset cifar10|cifar100|shapes|tiny-imagenet
+--model cnn|resnet18|resnet50
+--epochs INT
+--curriculum_epochs INT
+--distance_source classifier_weights|confusion
+--batch_size INT
+--lr FLOAT
+--weight_decay FLOAT
+--val_ratio FLOAT
+--patience INT
+--download / --no-download
+--amp
+```
+
+## Default behavior
+
+- `cnn`
+  - epochs: `400`
+  - optimizer: Adam
+  - lr: `1e-3`
+  - batch size: `512`
+  - no augmentation by default
+- `resnet18` / `resnet50`
+  - epochs: `200`
+  - optimizer: SGD with momentum `0.9`
+  - lr: `0.1`
+  - weight decay: `5e-4`
+  - batch size: `128`
+  - basic image augmentation enabled by default
+
+If `--curriculum_epochs` is omitted, it is chosen automatically as the **first baseline epoch reaching
+`curriculum_target_fraction * best_val_acc`**, with default target fraction `0.9`.
+
+## Outputs
+
+Each run writes to:
+
+```bash
+<output_dir>/<run_id>/<dataset>_<model>_<mode>/
+```
+
+Artifacts include:
+
+- `config.json`
+- `history.json`
+- `history.csv`
+- `results.json`
+- `summary.csv`
+- `best_model.pt`
+- `last_model.pt`
+- `training_log_*.txt`
+- `distance_matrix.npy` (curriculum)
+- `hierarchy.json` (curriculum)
+- `schedule.json` (curriculum)
+
+`history.csv` is a tidy per-epoch table for plotting, and `summary.csv` is a one-row run summary
+for easy aggregation across runs.
+
+## Analysis
+
+Analyze one downloaded run directory:
+
+```bash
+python analyze_run.py 2026-06-09_15-20-54
+```
+
+Or use the aggregate script on one run or a directory of many runs:
+
+```bash
+python scripts/analyze_results.py 2026-06-09_15-20-54
+python scripts/analyze_results.py runs/
+```
+
+Per-run analysis writes:
+
+- `analysis/comparison_summary.csv`
+- `analysis/accuracy_curves.png`
+- `analysis/loss_curves.png`
+- `analysis/report.md`
+
+Aggregate analysis writes:
+
+- `analysis/aggregate_summary.csv`
+- `analysis/aggregate_best_test_accuracy.png`
+- `analysis/aggregate_gain.png`
+- `analysis/aggregate_report.md`
+
+## Docker / Runpod
+
+Build locally:
+
+```bash
+docker build -t coarse-to-fine-curriculum .
+```
+
+Run baseline + curriculum in one container:
+
+```bash
+docker run --gpus all --rm \
+  -e RUN_MODES=baseline,curriculum \
+  -e DATASET=cifar100 \
+  -e MODEL=cnn \
+  -e RUN_ID=demo-cifar100 \
+  -e DATA_DIR=/workspace/data \
+  -e OUTPUT_DIR=/workspace/runs \
+  -v $PWD/data:/workspace/data \
+  -v $PWD/runs:/workspace/runs \
+  coarse-to-fine-curriculum
+```
+
+### Runpod-style env vars
+
+- `RUN_MODES=baseline,curriculum`
+- `DATASET=cifar100`
+- `MODEL=cnn`
+- `EPOCHS=400`
+- `CURRICULUM_EPOCHS=40` (optional)
+- `DISTANCE_SOURCE=classifier_weights`
+- `DATA_DIR=/workspace/data`
+- `OUTPUT_DIR=/workspace/runs`
+- `AMP=1`
+- `AUTO_STOP_POD=1`
+
+For shapes:
+
+- mount or copy the dataset
+- set `DATASET=shapes`
+- set `SHAPES_PATH=/workspace/data/shapes`
+
+For Tiny ImageNet:
+
+- set `DATASET=tiny-imagenet`
+- optionally set `TINY_IMAGENET_PATH=/workspace/data/tiny-imagenet-200`
+
+## Release workflow
+
+Same pattern as `hcl-cifar100/`:
+
+```bash
+make release
+```
+
+Optional:
+
+```bash
+IMAGE=yourdockerhubuser/coarse-to-fine-curriculum make release
+PLATFORM=linux/amd64 make release
+```
+
+## Current limits
+
+This is a practical reproduction scaffold, not yet a full reimplementation of every table in the
+paper. In particular:
+
+- no WideResNet-28-10 yet
+- no automatic full paper sweep scripts yet
+- no direct comparison scripts against NBDT / SPL / multitask baselines yet
+
+But the core coarse-to-fine curriculum algorithm, hierarchy construction, PyTorch training, and
+Runpod container workflow are in place.
