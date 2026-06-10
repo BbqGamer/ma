@@ -26,6 +26,8 @@ class DatasetBundle:
     num_classes: int
     class_names: list[str] | None
     input_shape: tuple[int, int, int]
+    class_group_ids: list[int] | None = None
+    class_group_names: list[str] | None = None
 
 
 class ImageArrayDataset(Dataset):
@@ -190,6 +192,38 @@ CIFAR100_CLASS_NAMES = [
 ]
 
 
+CIFAR100_COARSE_CLASS_NAMES = [
+    "aquatic_mammals",
+    "fish",
+    "flowers",
+    "food_containers",
+    "fruit_and_vegetables",
+    "household_electrical_devices",
+    "household_furniture",
+    "insects",
+    "large_carnivores",
+    "large_man-made_outdoor_things",
+    "large_natural_outdoor_scenes",
+    "large_omnivores_and_herbivores",
+    "medium_mammals",
+    "non-insect_invertebrates",
+    "people",
+    "reptiles",
+    "small_mammals",
+    "trees",
+    "vehicles_1",
+    "vehicles_2",
+]
+
+CIFAR100_FINE_TO_COARSE = [
+    4, 1, 14, 8, 0, 6, 7, 7, 18, 3, 3, 14, 9, 18, 7, 11, 3, 9, 7, 11,
+    6, 11, 5, 10, 7, 6, 13, 15, 3, 15, 0, 11, 1, 10, 12, 14, 16, 9, 11, 5,
+    5, 19, 8, 8, 15, 13, 14, 17, 18, 10, 16, 4, 17, 4, 2, 0, 17, 4, 18, 17,
+    10, 3, 2, 12, 12, 16, 12, 1, 9, 19, 2, 10, 0, 1, 16, 12, 9, 13, 15, 13,
+    16, 19, 2, 4, 6, 19, 5, 5, 8, 19, 18, 1, 2, 15, 6, 0, 17, 8, 14, 13,
+]
+
+
 def split_indices(num_samples: int, ratio: float, seed: int) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
     perm = rng.permutation(num_samples)
@@ -317,6 +351,8 @@ def load_cifar100(
         num_classes=100,
         class_names=CIFAR100_CLASS_NAMES,
         input_shape=(3, 32, 32),
+        class_group_ids=CIFAR100_FINE_TO_COARSE,
+        class_group_names=CIFAR100_COARSE_CLASS_NAMES,
     )
 
 

@@ -52,10 +52,21 @@ def summarize_run(run_dir: Path) -> dict[str, object]:
     if set(df["run"]) != {"baseline", "curriculum"}:
         raise ValueError(f"Unexpected run labels in {analysis_path}")
 
+    baseline_dir = next(path for path in run_dir.iterdir() if path.is_dir() and path.name.endswith("_baseline"))
+    curriculum_dir = next(path for path in run_dir.iterdir() if path.is_dir() and path.name.endswith("_curriculum"))
+    curriculum_config = pd.read_json(curriculum_dir / "config.json", typ="series")
+    curriculum_result = pd.read_json(curriculum_dir / "results.json", typ="series")
+
     baseline = df[df["run"] == "baseline"].iloc[0]
     curriculum = df[df["run"] == "curriculum"].iloc[0]
     return {
         "run_dir": run_dir.name,
+        "dataset": curriculum_config.get("dataset"),
+        "model": curriculum_config.get("model"),
+        "seed": curriculum_config.get("seed"),
+        "distance_source": curriculum_config.get("distance_source"),
+        "epochs": curriculum_config.get("epochs"),
+        "curriculum_epochs": curriculum_result.get("curriculum_epochs"),
         "baseline_best_test_acc": float(baseline["best_test_acc"]),
         "baseline_best_val_acc": float(baseline["best_val_acc"]),
         "baseline_best_test_epoch": int(baseline["best_test_epoch"]),
@@ -110,6 +121,36 @@ def plot_gain(summary: pd.DataFrame, output_path: Path) -> None:
     plt.close(fig)
 
 
+def plot_gain_vs_curriculum_epochs(summary: pd.DataFrame, output_path: Path) -> bool:
+    required = {"model", "curriculum_epochs", "gain_best_test_acc"}
+    if not required.issubset(summary.columns):
+        return False
+    subset = summary.dropna(subset=["curriculum_epochs", "model"])
+    if subset.empty:
+        return False
+
+    grouped = (
+        subset.groupby(["model", "curriculum_epochs"], as_index=False)["gain_best_test_acc"]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+    )
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    for model, frame in grouped.groupby("model"):
+        frame = frame.sort_values("curriculum_epochs")
+        ax.plot(frame["curriculum_epochs"], frame["mean"], marker="o", label=str(model))
+    ax.axhline(0.0, color="black", linewidth=1)
+    ax.set_xlabel("Curriculum epochs")
+    ax.set_ylabel("Mean best-test gain")
+    ax.set_title("Mean curriculum gain vs curriculum length")
+    ax.legend()
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    grouped.to_csv(output_path.with_suffix(".csv"), index=False)
+    return True
+
+
 def write_overview(summary: pd.DataFrame, output_path: Path) -> None:
     mean_gain = summary["gain_best_test_acc"].mean()
     lines = [
@@ -118,9 +159,22 @@ def write_overview(summary: pd.DataFrame, output_path: Path) -> None:
         f"- Number of analyzed runs: **{len(summary)}**",
         f"- Mean best-test gain (curriculum - baseline): **{mean_gain:.4f}** ({mean_gain * 100:.2f} pp)",
         "",
-        "## Runs",
-        "",
     ]
+    if {"model", "curriculum_epochs", "gain_best_test_acc"}.issubset(summary.columns):
+        lines.extend(["## Mean gain by model and curriculum length", ""])
+        grouped = (
+            summary.groupby(["model", "curriculum_epochs"], as_index=False)["gain_best_test_acc"]
+            .agg(["mean", "std", "count"])
+            .reset_index()
+        )
+        for _, row in grouped.iterrows():
+            lines.append(
+                f"- model={row['model']}, curriculum_epochs={int(row['curriculum_epochs'])}: "
+                f"mean_gain={row['mean']:.4f}, std={0.0 if pd.isna(row['std']) else row['std']:.4f}, n={int(row['count'])}"
+            )
+        lines.extend(["", "## Runs", ""])
+    else:
+        lines.extend(["## Runs", ""])
     for _, row in summary.iterrows():
         lines.append(
             f"- {row['run_dir']}: baseline={row['baseline_best_test_acc']:.4f}, "
@@ -150,6 +204,7 @@ def main() -> None:
     summary.to_csv(output_dir / "aggregate_summary.csv", index=False)
     plot_best_test_accuracy(summary, output_dir / "aggregate_best_test_accuracy.png")
     plot_gain(summary, output_dir / "aggregate_gain.png")
+    plot_gain_vs_curriculum_epochs(summary, output_dir / "gain_vs_curriculum_epochs.png")
     write_overview(summary, output_dir / "aggregate_report.md")
     print(f"Wrote aggregate analysis to {output_dir}")
 

@@ -213,6 +213,43 @@ def evaluate(
 
 
 @torch.inference_mode()
+def collect_predictions(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+) -> dict[str, np.ndarray]:
+    model.eval()
+    probabilities: list[np.ndarray] = []
+    labels_all: list[np.ndarray] = []
+    preds_all: list[np.ndarray] = []
+    true_probs_all: list[np.ndarray] = []
+    margins_all: list[np.ndarray] = []
+
+    for inputs, labels in loader:
+        inputs = inputs.to(device, non_blocking=True)
+        logits = model(inputs)
+        probs = torch.softmax(logits, dim=1)
+        preds = probs.argmax(dim=1)
+        sorted_probs, _ = probs.sort(dim=1, descending=True)
+        margins = sorted_probs[:, 0] - sorted_probs[:, 1]
+        true_probs = probs.gather(1, labels.to(device, non_blocking=True).unsqueeze(1)).squeeze(1)
+
+        probabilities.append(probs.cpu().numpy())
+        labels_all.append(labels.numpy())
+        preds_all.append(preds.cpu().numpy())
+        true_probs_all.append(true_probs.cpu().numpy())
+        margins_all.append(margins.cpu().numpy())
+
+    return {
+        "probabilities": np.concatenate(probabilities, axis=0),
+        "labels": np.concatenate(labels_all, axis=0),
+        "predictions": np.concatenate(preds_all, axis=0),
+        "true_probabilities": np.concatenate(true_probs_all, axis=0),
+        "top1_margins": np.concatenate(margins_all, axis=0),
+    }
+
+
+@torch.inference_mode()
 def collect_probabilities(
     model: nn.Module,
     loader: DataLoader,
@@ -291,11 +328,12 @@ def build_curriculum_schedule(
     total_epochs: int,
 ) -> list[dict[str, Any]]:
     schedule: list[dict[str, Any]] = []
-    num_levels = len(hierarchy_levels)
+    effective_levels = [clusters for clusters in hierarchy_levels if len(clusters) < num_classes]
+    num_levels = len(effective_levels)
     if num_levels > 0 and curriculum_epochs > 0:
         base_epochs = curriculum_epochs // num_levels
         remainder = curriculum_epochs % num_levels
-        for level_idx, clusters in enumerate(hierarchy_levels):
+        for level_idx, clusters in enumerate(effective_levels):
             epochs_this_level = base_epochs + (1 if level_idx < remainder else 0)
             if epochs_this_level <= 0:
                 continue
@@ -327,6 +365,186 @@ def epoch_to_stage(schedule: list[dict[str, Any]], epoch: int) -> dict[str, Any]
             return stage
         cursor = next_cursor
     return schedule[-1]
+
+
+def compute_confusion_counts(
+    labels: np.ndarray,
+    predictions: np.ndarray,
+    num_classes: int,
+) -> np.ndarray:
+    confusion = np.zeros((num_classes, num_classes), dtype=np.int64)
+    for label, pred in zip(labels, predictions, strict=False):
+        confusion[int(label), int(pred)] += 1
+    return confusion
+
+
+def normalize_confusion(confusion: np.ndarray) -> np.ndarray:
+    row_sums = confusion.sum(axis=1, keepdims=True)
+    return confusion / np.clip(row_sums, 1, None)
+
+
+def gini(values: np.ndarray) -> float:
+    values = np.asarray(values, dtype=np.float64)
+    if values.size == 0 or np.allclose(values.sum(), 0.0):
+        return 0.0
+    values = np.sort(values)
+    n = values.size
+    cumulative = np.cumsum(values)
+    return float((n + 1 - 2 * (cumulative.sum() / cumulative[-1])) / n)
+
+
+def one_way_anova(values: np.ndarray, group_ids: list[int]) -> dict[str, float]:
+    groups: dict[int, list[float]] = {}
+    for value, group_id in zip(values.tolist(), group_ids, strict=False):
+        groups.setdefault(int(group_id), []).append(float(value))
+
+    non_empty = [np.asarray(group, dtype=np.float64) for group in groups.values() if group]
+    if len(non_empty) < 2:
+        return {"f": 0.0, "eta2": 0.0}
+
+    grand = np.concatenate(non_empty)
+    grand_mean = grand.mean()
+    ss_between = sum(group.size * float((group.mean() - grand_mean) ** 2) for group in non_empty)
+    ss_within = sum(float(((group - group.mean()) ** 2).sum()) for group in non_empty)
+    df_between = len(non_empty) - 1
+    df_within = grand.size - len(non_empty)
+    if df_between <= 0 or df_within <= 0 or ss_within <= 0:
+        return {"f": 0.0, "eta2": 0.0}
+    ms_between = ss_between / df_between
+    ms_within = ss_within / df_within
+    f_stat = ms_between / ms_within if ms_within > 0 else 0.0
+    eta2 = ss_between / (ss_between + ss_within) if (ss_between + ss_within) > 0 else 0.0
+    return {"f": float(f_stat), "eta2": float(eta2)}
+
+
+def build_class_metrics(
+    confusion: np.ndarray,
+    class_names: list[str] | None,
+    class_group_ids: list[int] | None,
+    class_group_names: list[str] | None,
+) -> list[dict[str, Any]]:
+    row_sums = confusion.sum(axis=1)
+    class_acc = np.divide(
+        np.diag(confusion),
+        np.clip(row_sums, 1, None),
+        dtype=np.float64,
+    )
+    rows: list[dict[str, Any]] = []
+    for class_idx in range(confusion.shape[0]):
+        row = confusion[class_idx].copy()
+        row[class_idx] = 0
+        hardest_confuser = int(np.argmax(row)) if row.sum() > 0 else class_idx
+        hardest_confuser_rate = float(row[hardest_confuser] / max(row_sums[class_idx], 1))
+        rows.append(
+            {
+                "class_idx": class_idx,
+                "class_name": class_names[class_idx] if class_names is not None else str(class_idx),
+                "group_idx": class_group_ids[class_idx] if class_group_ids is not None else None,
+                "group_name": class_group_names[class_group_ids[class_idx]]
+                if class_group_ids is not None and class_group_names is not None
+                else None,
+                "support": int(row_sums[class_idx]),
+                "accuracy": float(class_acc[class_idx]),
+                "error_rate": float(1.0 - class_acc[class_idx]),
+                "hardest_confuser_idx": hardest_confuser,
+                "hardest_confuser_name": class_names[hardest_confuser]
+                if class_names is not None
+                else str(hardest_confuser),
+                "hardest_confuser_rate": hardest_confuser_rate,
+            }
+        )
+    return rows
+
+
+def build_difficulty_metrics(
+    predictions: dict[str, np.ndarray],
+    confusion: np.ndarray,
+    bundle: DatasetBundle,
+) -> dict[str, Any]:
+    labels = predictions["labels"]
+    preds = predictions["predictions"]
+    true_probs = predictions["true_probabilities"]
+    margins = predictions["top1_margins"]
+    correct = preds == labels
+    row_sums = confusion.sum(axis=1)
+    class_acc = np.divide(np.diag(confusion), np.clip(row_sums, 1, None), dtype=np.float64)
+    confusion_norm = normalize_confusion(confusion)
+    entropy_rows = []
+    offdiag_mass = []
+    for idx in range(confusion.shape[0]):
+        row = confusion_norm[idx].copy()
+        row[idx] = 0.0
+        row_sum = row.sum()
+        offdiag_mass.append(float(row_sum))
+        if row_sum > 0:
+            row = row / row_sum
+            entropy = -np.sum(np.where(row > 0, row * np.log(row + 1e-12), 0.0))
+            entropy_rows.append(float(entropy / np.log(max(confusion.shape[0] - 1, 2))))
+        else:
+            entropy_rows.append(0.0)
+
+    metrics = {
+        "overall_accuracy": float(correct.mean()),
+        "class_accuracy_mean": float(class_acc.mean()),
+        "class_accuracy_std": float(class_acc.std()),
+        "class_accuracy_variance": float(class_acc.var()),
+        "class_accuracy_min": float(class_acc.min()),
+        "class_accuracy_max": float(class_acc.max()),
+        "class_accuracy_gini": gini(1.0 - class_acc),
+        "true_class_probability_mean": float(true_probs.mean()),
+        "true_class_probability_std": float(true_probs.std()),
+        "top1_margin_mean": float(margins.mean()),
+        "top1_margin_std": float(margins.std()),
+        "top1_margin_correct_mean": float(margins[correct].mean()) if correct.any() else 0.0,
+        "top1_margin_error_mean": float(margins[~correct].mean()) if (~correct).any() else 0.0,
+        "confusion_entropy_mean": float(np.mean(entropy_rows)),
+        "offdiag_confusion_mass_mean": float(np.mean(offdiag_mass)),
+    }
+
+    if bundle.class_group_ids is not None:
+        anova = one_way_anova(class_acc, bundle.class_group_ids)
+        metrics["group_accuracy_anova_f"] = anova["f"]
+        metrics["group_accuracy_anova_eta2"] = anova["eta2"]
+
+    return metrics
+
+
+def save_evaluation_artifacts(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    bundle: DatasetBundle,
+    output_dir: Path,
+    split_name: str,
+) -> dict[str, Any]:
+    predictions = collect_predictions(model, loader, device)
+    confusion = compute_confusion_counts(predictions["labels"], predictions["predictions"], bundle.num_classes)
+    confusion_norm = normalize_confusion(confusion)
+    class_metrics = build_class_metrics(
+        confusion,
+        class_names=bundle.class_names,
+        class_group_ids=bundle.class_group_ids,
+        class_group_names=bundle.class_group_names,
+    )
+    difficulty_metrics = build_difficulty_metrics(predictions, confusion, bundle)
+
+    np.savetxt(output_dir / f"confusion_{split_name}_counts.csv", confusion, delimiter=",", fmt="%d")
+    np.savetxt(
+        output_dir / f"confusion_{split_name}_normalized.csv",
+        confusion_norm,
+        delimiter=",",
+        fmt="%.8f",
+    )
+    save_rows_csv(output_dir / f"class_metrics_{split_name}.csv", class_metrics)
+    save_json(output_dir / f"difficulty_metrics_{split_name}.json", difficulty_metrics)
+    save_single_row_csv(output_dir / f"difficulty_metrics_{split_name}.csv", difficulty_metrics)
+    return {
+        "confusion_counts_path": str(output_dir / f"confusion_{split_name}_counts.csv"),
+        "confusion_normalized_path": str(output_dir / f"confusion_{split_name}_normalized.csv"),
+        "class_metrics_path": str(output_dir / f"class_metrics_{split_name}.csv"),
+        "difficulty_metrics_path": str(output_dir / f"difficulty_metrics_{split_name}.json"),
+        **difficulty_metrics,
+    }
 
 
 def save_checkpoint(
@@ -387,7 +605,7 @@ def train_loop(
 ) -> tuple[nn.Module, list[dict[str, Any]], dict[str, float]]:
     optimizer, scheduler = create_optimizer_and_scheduler(model, args)
     use_amp = bool(args.amp and device.type == "cuda")
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     history: list[dict[str, Any]] = []
     best_val_acc = -float("inf")
@@ -408,11 +626,12 @@ def train_loop(
         model.train()
         total_train_loss = 0.0
         total_train_samples = 0
+        total_train_correct = 0
         for inputs, labels in train_loader:
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
-            autocast_ctx = torch.cuda.amp.autocast if use_amp else nullcontext
+            autocast_ctx = (lambda: torch.amp.autocast("cuda")) if use_amp else nullcontext
             with autocast_ctx():
                 logits = model(inputs)
                 if membership is None:
@@ -428,6 +647,7 @@ def train_loop(
                 optimizer.step()
             total_train_loss += loss.item() * labels.size(0)
             total_train_samples += labels.size(0)
+            total_train_correct += (logits.argmax(dim=1) == labels).sum().item()
 
         if scheduler is not None:
             scheduler.step()
@@ -439,6 +659,7 @@ def train_loop(
             "epoch": epoch + 1,
             "stage": current_stage_name or "baseline",
             "train_loss": train_loss,
+            "train_acc": total_train_correct / max(total_train_samples, 1),
             "val_loss": val_metrics["loss"],
             "val_acc": val_metrics["acc"],
             "test_loss": test_metrics["loss"],
@@ -447,11 +668,12 @@ def train_loop(
         }
         history.append(record)
         logger.info(
-            "Epoch [%d/%d] | stage=%s | train_loss=%.4f | val_acc=%.4f | test_acc=%.4f | lr=%.6f",
+            "Epoch [%d/%d] | stage=%s | train_loss=%.4f | train_acc=%.4f | val_acc=%.4f | test_acc=%.4f | lr=%.6f",
             epoch + 1,
             args.epochs,
             record["stage"],
             train_loss,
+            record["train_acc"],
             val_metrics["acc"],
             test_metrics["acc"],
             record["lr"],
@@ -511,6 +733,8 @@ def baseline_run(
         run_dir=run_dir,
         schedule=None,
     )
+    val_artifacts = save_evaluation_artifacts(model, loaders[1], device, bundle, run_dir, "val")
+    test_artifacts = save_evaluation_artifacts(model, loaders[2], device, bundle, run_dir, "test")
     result = {
         "mode": "baseline",
         "dataset": bundle.name,
@@ -520,6 +744,9 @@ def baseline_run(
         "best_val_acc": max(float(entry["val_acc"]) for entry in history),
         "best_test_acc": max(float(entry["test_acc"]) for entry in history),
         "final_test_acc": float(test_metrics["acc"]),
+        "val_difficulty_class_accuracy_variance": float(val_artifacts["class_accuracy_variance"]),
+        "test_difficulty_class_accuracy_variance": float(test_artifacts["class_accuracy_variance"]),
+        "test_difficulty_confusion_entropy_mean": float(test_artifacts["confusion_entropy_mean"]),
     }
     save_json(run_dir / "results.json", result)
     save_single_row_csv(run_dir / "summary.csv", result)
@@ -563,6 +790,8 @@ def curriculum_run(
             run_dir=reference_dir,
             schedule=None,
         )
+        save_evaluation_artifacts(reference_model, val_loader, device, bundle, reference_dir, "val")
+        save_evaluation_artifacts(reference_model, test_loader, device, bundle, reference_dir, "test")
 
     if args.distance_source == "classifier_weights":
         dist_matrix = classifier_weight_distance(reference_model)
@@ -618,6 +847,8 @@ def curriculum_run(
         run_dir=run_dir,
         schedule=schedule,
     )
+    val_artifacts = save_evaluation_artifacts(model, val_loader, device, bundle, run_dir, "val")
+    test_artifacts = save_evaluation_artifacts(model, test_loader, device, bundle, run_dir, "test")
     result = {
         "mode": "curriculum",
         "dataset": bundle.name,
@@ -631,6 +862,9 @@ def curriculum_run(
         "final_test_acc": float(test_metrics["acc"]),
         "distance_source": args.distance_source,
         "reference_run_dir": str(reference_dir),
+        "val_difficulty_class_accuracy_variance": float(val_artifacts["class_accuracy_variance"]),
+        "test_difficulty_class_accuracy_variance": float(test_artifacts["class_accuracy_variance"]),
+        "test_difficulty_confusion_entropy_mean": float(test_artifacts["confusion_entropy_mean"]),
     }
     save_json(run_dir / "results.json", result)
     save_single_row_csv(run_dir / "summary.csv", result)

@@ -7,6 +7,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -66,13 +67,17 @@ def plot_accuracy_curves(
     fig, ax = plt.subplots(figsize=(12, 5.5))
     max_epoch = max(int(baseline["epoch"].max()), int(curriculum["epoch"].max()))
 
+    if "train_acc" in baseline.columns:
+        ax.plot(baseline["epoch"], baseline["train_acc"], label="baseline train", color="#9ecae1")
     ax.plot(baseline["epoch"], baseline["val_acc"], label="baseline val", color="#1f77b4")
     ax.plot(baseline["epoch"], baseline["test_acc"], label="baseline test", color="#1f77b4", linestyle="--")
+    if "train_acc" in curriculum.columns:
+        ax.plot(curriculum["epoch"], curriculum["train_acc"], label="curriculum train", color="#fcbba1")
     ax.plot(curriculum["epoch"], curriculum["val_acc"], label="curriculum val", color="#d62728")
     ax.plot(curriculum["epoch"], curriculum["test_acc"], label="curriculum test", color="#d62728", linestyle="--")
     add_stage_boundaries(ax, schedule, max_epoch)
     ax.set_xlim(1, max_epoch)
-    ax.set_title("Validation and test accuracy per observed epoch")
+    ax.set_title("Accuracy per observed epoch")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Accuracy")
     ax.legend(loc="lower right")
@@ -98,7 +103,7 @@ def plot_loss_curves(
     ax.plot(curriculum["epoch"], curriculum["val_loss"], label="curriculum val loss", color="#d62728", linestyle="--")
     add_stage_boundaries(ax, schedule, max_epoch)
     ax.set_xlim(1, max_epoch)
-    ax.set_title("Training and validation loss per observed epoch")
+    ax.set_title("Loss per observed epoch")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
     ax.legend(loc="upper right")
@@ -107,6 +112,99 @@ def plot_loss_curves(
     fig.tight_layout()
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
+
+
+def plot_confusion_matrices(
+    baseline_dir: Path,
+    curriculum_dir: Path,
+    output_path: Path,
+) -> bool:
+    baseline_path = baseline_dir / "confusion_test_normalized.csv"
+    curriculum_path = curriculum_dir / "confusion_test_normalized.csv"
+    if not baseline_path.exists() or not curriculum_path.exists():
+        return False
+
+    baseline_conf = np.loadtxt(baseline_path, delimiter=",")
+    curriculum_conf = np.loadtxt(curriculum_path, delimiter=",")
+    vmax = max(float(baseline_conf.max()), float(curriculum_conf.max()), 1e-8)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    for ax, matrix, title in [
+        (axes[0], baseline_conf, "Baseline test confusion"),
+        (axes[1], curriculum_conf, "Curriculum test confusion"),
+    ]:
+        im = ax.imshow(matrix, cmap="magma", vmin=0.0, vmax=vmax, aspect="auto")
+        ax.set_title(title)
+        ax.set_xlabel("Predicted class")
+        ax.set_ylabel("True class")
+    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.9)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return True
+
+
+def plot_class_accuracy_gain(
+    baseline_dir: Path,
+    curriculum_dir: Path,
+    output_path: Path,
+) -> bool:
+    baseline_path = baseline_dir / "class_metrics_test.csv"
+    curriculum_path = curriculum_dir / "class_metrics_test.csv"
+    if not baseline_path.exists() or not curriculum_path.exists():
+        return False
+
+    baseline = pd.read_csv(baseline_path)
+    curriculum = pd.read_csv(curriculum_path)
+    merged = baseline[["class_idx", "class_name", "accuracy"]].merge(
+        curriculum[["class_idx", "accuracy"]],
+        on="class_idx",
+        suffixes=("_baseline", "_curriculum"),
+    )
+    merged["gain"] = merged["accuracy_curriculum"] - merged["accuracy_baseline"]
+    merged = merged.sort_values("gain", ascending=False)
+
+    fig, ax = plt.subplots(figsize=(13, 5.5))
+    colors = ["#2ca02c" if gain >= 0 else "#d62728" for gain in merged["gain"]]
+    ax.bar(range(len(merged)), merged["gain"], color=colors)
+    ax.axhline(0.0, color="black", linewidth=1)
+    ax.set_title("Per-class test accuracy gain (curriculum - baseline)")
+    ax.set_xlabel("Classes sorted by gain")
+    ax.set_ylabel("Accuracy gain")
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    return True
+
+
+def build_difficulty_summary(baseline_dir: Path, curriculum_dir: Path, output_dir: Path) -> bool:
+    baseline_path = baseline_dir / "difficulty_metrics_test.csv"
+    curriculum_path = curriculum_dir / "difficulty_metrics_test.csv"
+    if not baseline_path.exists() or not curriculum_path.exists():
+        return False
+
+    baseline = pd.read_csv(baseline_path).iloc[0].to_dict()
+    curriculum = pd.read_csv(curriculum_path).iloc[0].to_dict()
+    rows = []
+    for key in baseline:
+        if key not in curriculum:
+            continue
+        try:
+            baseline_val = float(baseline[key])
+            curriculum_val = float(curriculum[key])
+        except (TypeError, ValueError):
+            continue
+        rows.append(
+            {
+                "metric": key,
+                "baseline": baseline_val,
+                "curriculum": curriculum_val,
+                "difference": curriculum_val - baseline_val,
+            }
+        )
+    pd.DataFrame(rows).to_csv(output_dir / "difficulty_summary_test.csv", index=False)
+    return True
 
 
 def summarize_history(name: str, df: pd.DataFrame) -> dict[str, float | int | str]:
@@ -211,8 +309,9 @@ def analyze_run(run_dir: Path) -> Path:
     analysis_dir = run_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
-    baseline, curriculum = load_histories(run_dir)
+    baseline_dir = find_mode_dir(run_dir, "_baseline")
     curriculum_dir = find_mode_dir(run_dir, "_curriculum")
+    baseline, curriculum = load_histories(run_dir)
     schedule = json.loads((curriculum_dir / "schedule.json").read_text())
     hierarchy = json.loads((curriculum_dir / "hierarchy.json").read_text())
 
@@ -241,6 +340,21 @@ def analyze_run(run_dir: Path) -> Path:
         curriculum,
         schedule,
         analysis_dir / "loss_curves.png",
+    )
+    plot_confusion_matrices(
+        baseline_dir,
+        curriculum_dir,
+        analysis_dir / "confusion_matrices_test.png",
+    )
+    plot_class_accuracy_gain(
+        baseline_dir,
+        curriculum_dir,
+        analysis_dir / "per_class_accuracy_gain_test.png",
+    )
+    build_difficulty_summary(
+        baseline_dir,
+        curriculum_dir,
+        analysis_dir,
     )
     write_report(
         analysis_dir / "report.md",

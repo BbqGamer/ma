@@ -149,6 +149,16 @@ Artifacts include:
 - `distance_matrix.npy` (curriculum)
 - `hierarchy.json` (curriculum)
 - `schedule.json` (curriculum)
+- `confusion_val_counts.csv`
+- `confusion_val_normalized.csv`
+- `confusion_test_counts.csv`
+- `confusion_test_normalized.csv`
+- `class_metrics_val.csv`
+- `class_metrics_test.csv`
+- `difficulty_metrics_val.json`
+- `difficulty_metrics_val.csv`
+- `difficulty_metrics_test.json`
+- `difficulty_metrics_test.csv`
 
 `history.csv` is a tidy per-epoch table for plotting, and `summary.csv` is a one-row run summary
 for easy aggregation across runs.
@@ -173,6 +183,9 @@ Per-run analysis writes:
 - `analysis/comparison_summary.csv`
 - `analysis/accuracy_curves.png`
 - `analysis/loss_curves.png`
+- `analysis/confusion_matrices_test.png`
+- `analysis/per_class_accuracy_gain_test.png`
+- `analysis/difficulty_summary_test.csv`
 - `analysis/report.md`
 
 Aggregate analysis writes:
@@ -180,7 +193,14 @@ Aggregate analysis writes:
 - `analysis/aggregate_summary.csv`
 - `analysis/aggregate_best_test_accuracy.png`
 - `analysis/aggregate_gain.png`
+- `analysis/gain_vs_curriculum_epochs.png`
+- `analysis/gain_vs_curriculum_epochs.csv`
 - `analysis/aggregate_report.md`
+
+See also:
+
+- `EXPERIMENTS.md` for the recommended reproduction suite
+- `FIGURE11_RESNET18.md` for the Figure-11-style CIFAR-100 ResNet-18 sweep
 
 ## Docker / Runpod
 
@@ -204,6 +224,35 @@ docker run --gpus all --rm \
   -v $PWD/runs:/workspace/runs \
   coarse-to-fine-curriculum
 ```
+
+### Automated Figure-11-style Runpod sweep
+
+To run the ResNet-18 CIFAR-100 curriculum-length sweep automatically inside the container,
+set:
+
+```bash
+EXPERIMENT=figure11_resnet18
+DATA_DIR=/runpod-volume/data
+OUTPUT_DIR=/runpod-volume/runs
+SEED=42
+EPOCHS=200
+VAL_RATIO=0.1
+FIG11_METRIC=test_acc
+AUTO_STOP_POD=1
+```
+
+You can either:
+
+- use the default entrypoint with `EXPERIMENT=figure11_resnet18`, or
+- run `scripts/run_figure11_resnet18.sh` directly
+
+This will:
+
+1. generate the sweep commands
+2. run the baseline + curriculum-length sweep
+3. plot the Figure-11-style curves
+4. run aggregate analysis
+5. stop the pod automatically
 
 ### Runpod-style env vars
 

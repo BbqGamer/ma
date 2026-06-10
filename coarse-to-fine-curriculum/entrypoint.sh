@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+EXPERIMENT="${EXPERIMENT:-single}"
 RUN_MODES="${RUN_MODES:-baseline,curriculum}"
 RUN_ID="${RUN_ID:-$(date +%Y-%m-%d_%H-%M-%S)}"
 DATASET="${DATASET:-cifar100}"
@@ -26,6 +27,7 @@ AMP="${AMP:-1}"
 DOWNLOAD="${DOWNLOAD:-1}"
 AUGMENTATION="${AUGMENTATION:-auto}"
 AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
+FIG11_METRIC="${FIG11_METRIC:-test_acc}"
 
 common_args=(
   --dataset "$DATASET"
@@ -76,21 +78,55 @@ elif [[ "$AUGMENTATION" == "0" || "$AUGMENTATION" == "false" ]]; then
   common_args+=(--no-augmentation)
 fi
 
-reference_run_dir=""
-IFS=',' read -r -a modes <<< "$RUN_MODES"
-for mode in "${modes[@]}"; do
-  mode="$(echo "$mode" | xargs)"
-  [[ -z "$mode" ]] && continue
-  echo "[entrypoint] Running mode: $mode"
-  mode_args=(--mode "$mode" "${common_args[@]}")
-  if [[ "$mode" == "curriculum" && -n "$reference_run_dir" ]]; then
-    mode_args+=(--reference_run_dir "$reference_run_dir")
-  fi
-  python train_coarse_to_fine.py "${mode_args[@]}"
-  if [[ "$mode" == "baseline" ]]; then
-    reference_run_dir="$OUTPUT_DIR/$RUN_ID/${DATASET}_${MODEL}_baseline"
-  fi
-done
+run_single_experiment() {
+  local reference_run_dir=""
+  IFS=',' read -r -a modes <<< "$RUN_MODES"
+  for mode in "${modes[@]}"; do
+    mode="$(echo "$mode" | xargs)"
+    [[ -z "$mode" ]] && continue
+    echo "[entrypoint] Running mode: $mode"
+    mode_args=(--mode "$mode" "${common_args[@]}")
+    if [[ "$mode" == "curriculum" && -n "$reference_run_dir" ]]; then
+      mode_args+=(--reference_run_dir "$reference_run_dir")
+    fi
+    python train_coarse_to_fine.py "${mode_args[@]}"
+    if [[ "$mode" == "baseline" ]]; then
+      reference_run_dir="$OUTPUT_DIR/$RUN_ID/${DATASET}_${MODEL}_baseline"
+    fi
+  done
+}
+
+run_figure11_resnet18() {
+  echo "[entrypoint] Running Figure-11-style ResNet-18 sweep"
+  python scripts/plan_figure11_resnet18.py \
+    --seed "$SEED" \
+    --epochs "${EPOCHS:-200}" \
+    --val-ratio "${VAL_RATIO:-0.1}" \
+    --data-dir "$DATA_DIR" \
+    --output-dir "$OUTPUT_DIR"
+
+  bash figure11_resnet18_commands.sh
+
+  python scripts/plot_figure11_resnet18.py \
+    "$OUTPUT_DIR" \
+    --seed "$SEED" \
+    --metric "$FIG11_METRIC"
+
+  python scripts/analyze_results.py "$OUTPUT_DIR"
+}
+
+case "$EXPERIMENT" in
+  single)
+    run_single_experiment
+    ;;
+  figure11_resnet18)
+    run_figure11_resnet18
+    ;;
+  *)
+    echo "[entrypoint] Unknown EXPERIMENT=$EXPERIMENT"
+    exit 1
+    ;;
+esac
 
 if [[ "$AUTO_STOP_POD" == "1" && -n "${RUNPOD_POD_ID:-}" ]]; then
   echo "[entrypoint] Training finished; stopping Runpod pod ${RUNPOD_POD_ID}"
