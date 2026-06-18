@@ -4,6 +4,9 @@ set -euo pipefail
 SEED="${SEED:-42}"
 EPOCHS="${EPOCHS:-200}"
 VAL_RATIO="${VAL_RATIO:-0.1}"
+OPTIMIZER="${OPTIMIZER:-adam}"
+SCHEDULER="${SCHEDULER:-none}"
+LR="${LR:-0.001}"
 DATA_DIR="${DATA_DIR:-/workspace/data}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/runs}"
 FIG11_METRIC="${FIG11_METRIC:-test_acc}"
@@ -15,6 +18,9 @@ python scripts/plan_figure11_resnet18.py \
   --seed "$SEED" \
   --epochs "$EPOCHS" \
   --val-ratio "$VAL_RATIO" \
+  --optimizer "$OPTIMIZER" \
+  --scheduler "$SCHEDULER" \
+  --lr "$LR" \
   --data-dir "$DATA_DIR" \
   --output-dir "$OUTPUT_DIR"
 

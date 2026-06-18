@@ -28,6 +28,8 @@ DOWNLOAD="${DOWNLOAD:-1}"
 AUGMENTATION="${AUGMENTATION:-auto}"
 AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
 FIG11_METRIC="${FIG11_METRIC:-test_acc}"
+OPTIMIZER="${OPTIMIZER:-}"
+SCHEDULER="${SCHEDULER:-}"
 
 common_args=(
   --dataset "$DATASET"
@@ -98,10 +100,26 @@ run_single_experiment() {
 
 run_figure11_resnet18() {
   echo "[entrypoint] Running Figure-11-style ResNet-18 sweep"
+  local optimizer_arg=()
+  local scheduler_arg=()
+  local lr_arg=()
+  if [[ -n "$OPTIMIZER" ]]; then
+    optimizer_arg=(--optimizer "$OPTIMIZER")
+  fi
+  if [[ -n "$SCHEDULER" ]]; then
+    scheduler_arg=(--scheduler "$SCHEDULER")
+  fi
+  if [[ -n "$LR" ]]; then
+    lr_arg=(--lr "$LR")
+  fi
+
   python scripts/plan_figure11_resnet18.py \
     --seed "$SEED" \
     --epochs "${EPOCHS:-200}" \
     --val-ratio "${VAL_RATIO:-0.1}" \
+    "${optimizer_arg[@]}" \
+    "${scheduler_arg[@]}" \
+    "${lr_arg[@]}" \
     --data-dir "$DATA_DIR" \
     --output-dir "$OUTPUT_DIR"
 

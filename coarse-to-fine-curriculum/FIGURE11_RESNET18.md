@@ -26,12 +26,25 @@ against a single baseline.
 - still cheap enough to sweep on Runpod
 - good compromise before adding WideResNet-28-10
 
+## Optimizer choice
+
+This sweep now defaults to:
+
+- optimizer: `adam`
+- scheduler: `none`
+- learning rate: `1e-3`
+
+The reason is to avoid the large synchronized jump caused by the step learning-rate schedule in the SGD setup, which made curriculum-length effects harder to interpret.
+
 ## Recommended settings
 
-Use the larger-model setting from the paper-style setup:
+Use this cleaner analysis-oriented setting:
 
 - dataset: `cifar100`
 - model: `resnet18`
+- optimizer: `adam`
+- scheduler: `none`
+- learning rate: `1e-3`
 - epochs: `200`
 - validation split: `0.1`
 - seed: at least `42`

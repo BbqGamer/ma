@@ -7,6 +7,9 @@ from pathlib import Path
 
 
 CURRICULUM_LENGTHS = [5, 10, 20, 30, 40, 50]
+DEFAULT_OPTIMIZER = "adam"
+DEFAULT_SCHEDULER = "none"
+DEFAULT_LR = 1e-3
 
 
 def parse_args() -> argparse.Namespace:
@@ -16,6 +19,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument("--optimizer", default=DEFAULT_OPTIMIZER)
+    parser.add_argument("--scheduler", default=DEFAULT_SCHEDULER)
+    parser.add_argument("--lr", type=float, default=DEFAULT_LR)
     parser.add_argument("--data-dir", default="/workspace/data")
     parser.add_argument("--output-dir", default="/workspace/runs")
     parser.add_argument("--python", default="python train_coarse_to_fine.py")
@@ -39,6 +45,9 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "--model", "resnet18",
         "--epochs", str(args.epochs),
         "--val_ratio", str(args.val_ratio),
+        "--optimizer", args.optimizer,
+        "--scheduler", args.scheduler,
+        "--lr", str(args.lr),
         "--data_dir", args.data_dir,
         "--output_dir", args.output_dir,
         "--run_id", run_id,
@@ -60,6 +69,9 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "seed": args.seed,
         "epochs": args.epochs,
         "val_ratio": args.val_ratio,
+        "optimizer": args.optimizer,
+        "scheduler": args.scheduler,
+        "lr": args.lr,
         "mode": mode,
         "curriculum_epochs": curriculum_epochs if curriculum_epochs is not None else "",
         "run_id": run_id,

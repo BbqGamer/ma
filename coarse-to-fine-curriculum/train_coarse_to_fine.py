@@ -34,6 +34,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--curriculum_epochs", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--optimizer", choices=["adam", "sgd"], default=None)
+    parser.add_argument("--scheduler", choices=["none", "step", "cosine"], default=None)
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--weight_decay", type=float, default=None)
     parser.add_argument("--dropout", type=float, default=0.0)
@@ -73,10 +75,23 @@ def resolve_defaults(args: argparse.Namespace) -> argparse.Namespace:
         args.epochs = 200 if args.model != "cnn" else 400
     if args.batch_size is None:
         args.batch_size = 128 if args.model != "cnn" else 512
+    if args.optimizer is None:
+        args.optimizer = "sgd" if args.model != "cnn" else "adam"
+    if args.scheduler is None:
+        if args.optimizer == "sgd" and args.model != "cnn":
+            args.scheduler = "step"
+        else:
+            args.scheduler = "none"
     if args.lr is None:
-        args.lr = 0.1 if args.model != "cnn" else 1e-3
+        if args.optimizer == "sgd":
+            args.lr = 0.1
+        else:
+            args.lr = 1e-3
     if args.weight_decay is None:
-        args.weight_decay = 5e-4 if args.model != "cnn" else 0.0
+        if args.optimizer == "sgd":
+            args.weight_decay = 5e-4 if args.model != "cnn" else 0.0
+        else:
+            args.weight_decay = 0.0
     if args.augmentation is None:
         args.augmentation = args.model != "cnn" and args.dataset != "shapes"
     return args
@@ -163,25 +178,30 @@ def create_optimizer_and_scheduler(
     model: nn.Module,
     args: argparse.Namespace,
 ) -> tuple[optim.Optimizer, optim.lr_scheduler._LRScheduler | None]:
-    if args.model == "cnn":
+    if args.optimizer == "adam":
         optimizer = optim.Adam(
             model.parameters(),
             lr=args.lr,
             weight_decay=args.weight_decay,
         )
-        return optimizer, None
+    else:
+        optimizer = optim.SGD(
+            model.parameters(),
+            lr=args.lr,
+            momentum=0.9,
+            weight_decay=args.weight_decay,
+        )
 
-    optimizer = optim.SGD(
-        model.parameters(),
-        lr=args.lr,
-        momentum=0.9,
-        weight_decay=args.weight_decay,
-    )
-    scheduler = optim.lr_scheduler.MultiStepLR(
-        optimizer,
-        milestones=[round(args.epochs * 0.37), round(args.epochs * 0.75)],
-        gamma=0.1,
-    )
+    if args.scheduler == "none":
+        scheduler = None
+    elif args.scheduler == "cosine":
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    else:
+        scheduler = optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=[round(args.epochs * 0.37), round(args.epochs * 0.75)],
+            gamma=0.1,
+        )
     return optimizer, scheduler
 
 
@@ -906,10 +926,12 @@ def main() -> None:
         run_dir,
     )
     logger.info(
-        "num_classes=%d | batch_size=%d | epochs=%d | lr=%.6f | augmentation=%s",
+        "num_classes=%d | batch_size=%d | epochs=%d | optimizer=%s | scheduler=%s | lr=%.6f | augmentation=%s",
         bundle.num_classes,
         args.batch_size,
         args.epochs,
+        args.optimizer,
+        args.scheduler,
         args.lr,
         args.augmentation,
     )
