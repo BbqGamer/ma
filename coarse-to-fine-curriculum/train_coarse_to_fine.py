@@ -56,6 +56,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data_dir", type=str, default="/workspace/data")
     parser.add_argument("--output_dir", type=str, default="/workspace/runs")
     parser.add_argument("--run_id", type=str, default="run")
+    parser.add_argument("--save-checkpoints", action="store_true")
+    parser.add_argument("--no-save-checkpoints", action="store_false", dest="save_checkpoints")
     parser.add_argument("--reference_run_dir", type=str, default=None)
     parser.add_argument("--shapes_path", type=str, default=None)
     parser.add_argument("--tiny_imagenet_path", type=str, default=None)
@@ -67,6 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--amp", action="store_true")
     parser.add_argument("--augmentation", action="store_true", default=None)
     parser.add_argument("--no-augmentation", action="store_false", dest="augmentation")
+    parser.set_defaults(save_checkpoints=False)
     return parser.parse_args()
 
 
@@ -702,9 +705,11 @@ def train_loop(
         if val_metrics["acc"] > best_val_acc:
             best_val_acc = val_metrics["acc"]
             best_epoch = epoch
-            save_checkpoint(best_path, model, optimizer, scheduler, epoch + 1, best_val_acc, args)
+            if args.save_checkpoints:
+                save_checkpoint(best_path, model, optimizer, scheduler, epoch + 1, best_val_acc, args)
 
-        save_checkpoint(last_path, model, optimizer, scheduler, epoch + 1, best_val_acc, args)
+        if args.save_checkpoints:
+            save_checkpoint(last_path, model, optimizer, scheduler, epoch + 1, best_val_acc, args)
         save_json(run_dir / "history.json", history)
         save_rows_csv(run_dir / "history.csv", history)
 
@@ -712,8 +717,9 @@ def train_loop(
             logger.info("Early stopping triggered after %d epochs without val improvement", args.patience)
             break
 
-    best_checkpoint = torch.load(best_path, map_location=device)
-    model.load_state_dict(best_checkpoint["model_state_dict"])
+    if args.save_checkpoints and best_path.exists():
+        best_checkpoint = torch.load(best_path, map_location=device)
+        model.load_state_dict(best_checkpoint["model_state_dict"])
     final_test_metrics = evaluate(model, test_loader, device)
     return model, history, final_test_metrics
 

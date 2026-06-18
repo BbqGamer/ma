@@ -30,6 +30,8 @@ AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
 FIG11_METRIC="${FIG11_METRIC:-test_acc}"
 OPTIMIZER="${OPTIMIZER:-}"
 SCHEDULER="${SCHEDULER:-}"
+SAVE_CHECKPOINTS="${SAVE_CHECKPOINTS:-0}"
+ARCHIVE_OUTPUTS="${ARCHIVE_OUTPUTS:-1}"
 
 common_args=(
   --dataset "$DATASET"
@@ -68,6 +70,12 @@ if [[ -n "$TINY_IMAGENET_PATH" ]]; then
 fi
 if [[ "$AMP" == "1" ]]; then
   common_args+=(--amp)
+fi
+
+if [[ "$SAVE_CHECKPOINTS" == "1" ]]; then
+  common_args+=(--save-checkpoints)
+else
+  common_args+=(--no-save-checkpoints)
 fi
 if [[ "$DOWNLOAD" == "1" ]]; then
   common_args+=(--download)
@@ -145,6 +153,33 @@ case "$EXPERIMENT" in
     exit 1
     ;;
 esac
+
+if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
+  archive_base="${RUN_ID}"
+  archive_members=()
+  if [[ "$EXPERIMENT" == "figure11_resnet18" ]]; then
+    archive_base="figure11_resnet18-seed${SEED}"
+    archive_members+=("fig11-resnet18-cifar100-seed${SEED}-baseline")
+    for n in 5 10 20 30 40 50; do
+      archive_members+=("fig11-resnet18-cifar100-seed${SEED}-curr${n}")
+    done
+    archive_members+=("fig11-resnet18-cifar100-seed${SEED}-figure11-analysis")
+    [[ -d "$OUTPUT_DIR/analysis" ]] && archive_members+=("analysis")
+  else
+    archive_members+=("$RUN_ID")
+  fi
+  archive_path="$OUTPUT_DIR/${archive_base}.tar.gz"
+  echo "[entrypoint] Creating archive: $archive_path"
+  existing_members=()
+  for member in "${archive_members[@]}"; do
+    [[ -e "$OUTPUT_DIR/$member" ]] && existing_members+=("$member")
+  done
+  if [[ ${#existing_members[@]} -gt 0 ]]; then
+    tar -czf "$archive_path" -C "$OUTPUT_DIR" "${existing_members[@]}"
+  else
+    echo "[entrypoint] No matching output directories found to archive"
+  fi
+fi
 
 if [[ "$AUTO_STOP_POD" == "1" && -n "${RUNPOD_POD_ID:-}" ]]; then
   echo "[entrypoint] Training finished; stopping Runpod pod ${RUNPOD_POD_ID}"
