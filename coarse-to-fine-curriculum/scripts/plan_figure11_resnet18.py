@@ -22,6 +22,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--optimizer", default=DEFAULT_OPTIMIZER)
     parser.add_argument("--scheduler", default=DEFAULT_SCHEDULER)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
+    parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--wandb-project", default="coarse-to-fine-curriculum")
+    parser.add_argument("--wandb-entity", default="")
+    parser.add_argument("--wandb-group", default="")
+    parser.add_argument("--wandb-tags", default="runpod,figure11")
     parser.add_argument("--data-dir", default="/workspace/data")
     parser.add_argument("--output-dir", default="/workspace/runs")
     parser.add_argument("--python", default="python train_coarse_to_fine.py")
@@ -53,6 +58,13 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "--run_id", run_id,
         "--seed", str(args.seed),
     ]
+    if args.wandb:
+        group = args.wandb_group or f"fig11-resnet18-cifar100-seed{args.seed}"
+        parts.extend(["--wandb", "--wandb-project", args.wandb_project, "--wandb-group", group])
+        parts.extend(["--wandb-tags", args.wandb_tags])
+        if args.wandb_entity:
+            parts.extend(["--wandb-entity", args.wandb_entity])
+
     reference_run_dir = ""
     if mode == "curriculum":
         reference_run_id = f"{args.run_prefix}-seed{args.seed}-baseline"

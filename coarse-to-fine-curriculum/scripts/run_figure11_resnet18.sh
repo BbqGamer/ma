@@ -13,8 +13,20 @@ FIG11_METRIC="${FIG11_METRIC:-test_acc}"
 AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
 SAVE_CHECKPOINTS="${SAVE_CHECKPOINTS:-0}"
 ARCHIVE_OUTPUTS="${ARCHIVE_OUTPUTS:-1}"
+WANDB="${WANDB:-0}"
+WANDB_PROJECT="${WANDB_PROJECT:-coarse-to-fine-curriculum}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_GROUP="${WANDB_GROUP:-fig11-resnet18-cifar100-seed${SEED}}"
+WANDB_TAGS="${WANDB_TAGS:-runpod,figure11}"
 
 cd /workspace
+
+wandb_args=()
+if [[ "$WANDB" == "1" ]]; then
+  wandb_args+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-group "$WANDB_GROUP")
+  wandb_args+=(--wandb-tags "$WANDB_TAGS")
+  [[ -n "$WANDB_ENTITY" ]] && wandb_args+=(--wandb-entity "$WANDB_ENTITY")
+fi
 
 python scripts/plan_figure11_resnet18.py \
   --seed "$SEED" \
@@ -23,6 +35,7 @@ python scripts/plan_figure11_resnet18.py \
   --optimizer "$OPTIMIZER" \
   --scheduler "$SCHEDULER" \
   --lr "$LR" \
+  "${wandb_args[@]}" \
   --data-dir "$DATA_DIR" \
   --output-dir "$OUTPUT_DIR"
 

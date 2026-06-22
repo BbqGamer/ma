@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import csv
 import json
 import logging
+import os
 import random
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run_id", type=str, default="run")
     parser.add_argument("--save-checkpoints", action="store_true")
     parser.add_argument("--no-save-checkpoints", action="store_false", dest="save_checkpoints")
+    parser.add_argument("--wandb", action="store_true", help="Log metrics and artifacts to Weights & Biases.")
+    parser.add_argument("--no-wandb", action="store_false", dest="wandb")
+    parser.add_argument("--wandb-project", type=str, default=None)
+    parser.add_argument("--wandb-entity", type=str, default=None)
+    parser.add_argument("--wandb-group", type=str, default=None)
+    parser.add_argument("--wandb-tags", type=str, default="")
     parser.add_argument("--reference_run_dir", type=str, default=None)
     parser.add_argument("--shapes_path", type=str, default=None)
     parser.add_argument("--tiny_imagenet_path", type=str, default=None)
@@ -69,7 +76,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--amp", action="store_true")
     parser.add_argument("--augmentation", action="store_true", default=None)
     parser.add_argument("--no-augmentation", action="store_false", dest="augmentation")
-    parser.set_defaults(save_checkpoints=False)
+    parser.set_defaults(save_checkpoints=False, wandb=False)
     return parser.parse_args()
 
 
@@ -148,6 +155,49 @@ def save_rows_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def save_single_row_csv(path: Path, row: dict[str, Any]) -> None:
     save_rows_csv(path, [row])
+
+
+def setup_wandb(args: argparse.Namespace, run_dir: Path) -> Any | None:
+    if not args.wandb:
+        return None
+    try:
+        import wandb
+    except ImportError as exc:
+        raise RuntimeError("W&B logging requested but wandb is not installed") from exc
+
+    project = args.wandb_project or os.environ.get("WANDB_PROJECT") or "coarse-to-fine-curriculum"
+    entity = args.wandb_entity or os.environ.get("WANDB_ENTITY") or None
+    group = args.wandb_group or os.environ.get("WANDB_GROUP") or args.run_id
+    tags = [tag.strip() for tag in args.wandb_tags.split(",") if tag.strip()]
+    run_name = f"{args.run_id}/{args.dataset}_{args.model}_{args.mode}"
+    return wandb.init(
+        project=project,
+        entity=entity,
+        group=group,
+        name=run_name,
+        tags=tags,
+        config=vars(args),
+        dir=str(run_dir),
+    )
+
+
+def log_wandb_artifacts(run_dir: Path, name: str) -> None:
+    try:
+        import wandb
+    except ImportError:
+        return
+    if wandb.run is None:
+        return
+    artifact = wandb.Artifact(name=name, type="run_outputs")
+    patterns = ["*.json", "*.csv", "training_log_*.txt", "schedule.json", "hierarchy.json"]
+    added = False
+    for pattern in patterns:
+        for path in run_dir.glob(pattern):
+            if path.is_file():
+                artifact.add_file(str(path), name=path.name)
+                added = True
+    if added:
+        wandb.log_artifact(artifact)
 
 
 def build_loaders(
@@ -690,6 +740,13 @@ def train_loop(
             "lr": optimizer.param_groups[0]["lr"],
         }
         history.append(record)
+        if args.wandb:
+            try:
+                import wandb
+                if wandb.run is not None:
+                    wandb.log(record, step=epoch + 1)
+            except ImportError:
+                pass
         logger.info(
             "Epoch [%d/%d] | stage=%s | train_loss=%.4f | train_acc=%.4f | val_acc=%.4f | test_acc=%.4f | lr=%.6f",
             epoch + 1,
@@ -759,6 +816,7 @@ def baseline_run(
         run_dir=run_dir,
         schedule=None,
     )
+    np.save(run_dir / "distance_matrix_classifier_weights.npy", classifier_weight_distance(model))
     val_artifacts = save_evaluation_artifacts(model, loaders[1], device, bundle, run_dir, "val")
     test_artifacts = save_evaluation_artifacts(model, loaders[2], device, bundle, run_dir, "test")
     result = {
@@ -776,6 +834,14 @@ def baseline_run(
     }
     save_json(run_dir / "results.json", result)
     save_single_row_csv(run_dir / "summary.csv", result)
+    if args.wandb:
+        try:
+            import wandb
+            if wandb.run is not None:
+                wandb.run.summary.update(result)
+                log_wandb_artifacts(run_dir, f"{args.run_id}-{bundle.name}-{args.model}-baseline")
+        except ImportError:
+            pass
     return result
 
 
@@ -789,10 +855,15 @@ def curriculum_run(
 ) -> dict[str, Any]:
     train_loader, val_loader, test_loader = loaders
 
+    reference_model: nn.Module | None
     if args.reference_run_dir is not None:
         reference_dir = Path(args.reference_run_dir)
         logger.info("Loading reference baseline from %s", reference_dir)
-        reference_model, reference_history = load_reference_model(reference_dir, args, bundle, device)
+        if (reference_dir / "best_model.pt").exists():
+            reference_model, reference_history = load_reference_model(reference_dir, args, bundle, device)
+        else:
+            reference_model = None
+            reference_history = json.loads((reference_dir / "history.json").read_text())
     else:
         reference_dir = run_dir / "reference_baseline"
         reference_dir.mkdir(parents=True, exist_ok=True)
@@ -816,12 +887,21 @@ def curriculum_run(
             run_dir=reference_dir,
             schedule=None,
         )
+        np.save(reference_dir / "distance_matrix_classifier_weights.npy", classifier_weight_distance(reference_model))
         save_evaluation_artifacts(reference_model, val_loader, device, bundle, reference_dir, "val")
         save_evaluation_artifacts(reference_model, test_loader, device, bundle, reference_dir, "test")
 
     if args.distance_source == "classifier_weights":
-        dist_matrix = classifier_weight_distance(reference_model)
+        if reference_model is not None:
+            dist_matrix = classifier_weight_distance(reference_model)
+        else:
+            dist_path = reference_dir / "distance_matrix_classifier_weights.npy"
+            if not dist_path.exists():
+                raise FileNotFoundError(f"Missing reference distance matrix: {dist_path}")
+            dist_matrix = np.load(dist_path)
     else:
+        if reference_model is None:
+            raise RuntimeError("confusion distance requires a reference checkpoint/model")
         dist_matrix = confusion_distance(reference_model, val_loader, bundle.num_classes, device)
     np.save(run_dir / "distance_matrix.npy", dist_matrix)
 
@@ -894,6 +974,14 @@ def curriculum_run(
     }
     save_json(run_dir / "results.json", result)
     save_single_row_csv(run_dir / "summary.csv", result)
+    if args.wandb:
+        try:
+            import wandb
+            if wandb.run is not None:
+                wandb.run.summary.update(result)
+                log_wandb_artifacts(run_dir, f"{args.run_id}-{bundle.name}-{args.model}-curriculum")
+        except ImportError:
+            pass
     return result
 
 
@@ -909,6 +997,7 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logger(run_dir, f"training_log_{args.mode}.txt")
     save_json(run_dir / "config.json", vars(args))
+    wandb_run = setup_wandb(args, run_dir)
 
     bundle = load_dataset(
         dataset_name=args.dataset,
@@ -948,6 +1037,8 @@ def main() -> None:
         result = curriculum_run(args, bundle, loaders, device, logger, run_dir)
 
     logger.info("Run complete: %s", json.dumps(result, indent=2))
+    if wandb_run is not None:
+        wandb_run.finish()
 
 
 if __name__ == "__main__":

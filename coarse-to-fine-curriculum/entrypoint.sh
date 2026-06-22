@@ -32,6 +32,11 @@ OPTIMIZER="${OPTIMIZER:-}"
 SCHEDULER="${SCHEDULER:-}"
 SAVE_CHECKPOINTS="${SAVE_CHECKPOINTS:-0}"
 ARCHIVE_OUTPUTS="${ARCHIVE_OUTPUTS:-1}"
+WANDB="${WANDB:-0}"
+WANDB_PROJECT="${WANDB_PROJECT:-coarse-to-fine-curriculum}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_GROUP="${WANDB_GROUP:-}"
+WANDB_TAGS="${WANDB_TAGS:-runpod,figure11}"
 
 common_args=(
   --dataset "$DATASET"
@@ -77,6 +82,12 @@ if [[ "$SAVE_CHECKPOINTS" == "1" ]]; then
 else
   common_args+=(--no-save-checkpoints)
 fi
+
+if [[ "$WANDB" == "1" ]]; then
+  common_args+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-tags "$WANDB_TAGS")
+  [[ -n "$WANDB_ENTITY" ]] && common_args+=(--wandb-entity "$WANDB_ENTITY")
+  [[ -n "$WANDB_GROUP" ]] && common_args+=(--wandb-group "$WANDB_GROUP")
+fi
 if [[ "$DOWNLOAD" == "1" ]]; then
   common_args+=(--download)
 else
@@ -121,6 +132,17 @@ run_figure11_resnet18() {
     lr_arg=(--lr "$LR")
   fi
 
+  local wandb_arg=()
+  if [[ "$WANDB" == "1" ]]; then
+    wandb_arg+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-tags "$WANDB_TAGS")
+    [[ -n "$WANDB_ENTITY" ]] && wandb_arg+=(--wandb-entity "$WANDB_ENTITY")
+    if [[ -n "$WANDB_GROUP" ]]; then
+      wandb_arg+=(--wandb-group "$WANDB_GROUP")
+    else
+      wandb_arg+=(--wandb-group "fig11-resnet18-cifar100-seed${SEED}")
+    fi
+  fi
+
   python scripts/plan_figure11_resnet18.py \
     --seed "$SEED" \
     --epochs "${EPOCHS:-200}" \
@@ -128,6 +150,7 @@ run_figure11_resnet18() {
     "${optimizer_arg[@]}" \
     "${scheduler_arg[@]}" \
     "${lr_arg[@]}" \
+    "${wandb_arg[@]}" \
     --data-dir "$DATA_DIR" \
     --output-dir "$OUTPUT_DIR"
 
