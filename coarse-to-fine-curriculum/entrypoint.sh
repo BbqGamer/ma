@@ -32,11 +32,31 @@ OPTIMIZER="${OPTIMIZER:-}"
 SCHEDULER="${SCHEDULER:-}"
 SAVE_CHECKPOINTS="${SAVE_CHECKPOINTS:-0}"
 ARCHIVE_OUTPUTS="${ARCHIVE_OUTPUTS:-1}"
-WANDB="${WANDB:-0}"
+WANDB="${WANDB:-auto}"
 WANDB_PROJECT="${WANDB_PROJECT:-coarse-to-fine-curriculum}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 WANDB_GROUP="${WANDB_GROUP:-}"
 WANDB_TAGS="${WANDB_TAGS:-runpod,figure11}"
+
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|y|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+wandb_enabled() {
+  if is_truthy "$WANDB"; then
+    return 0
+  fi
+  if [[ "${WANDB,,}" == "auto" && -n "${WANDB_API_KEY:-}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+echo "[entrypoint] image=bbqdocker/coarse-to-fine-curriculum:v0.3.x"
+echo "[entrypoint] EXPERIMENT=$EXPERIMENT WANDB=$WANDB WANDB_PROJECT=$WANDB_PROJECT WANDB_GROUP=${WANDB_GROUP:-<auto>} WANDB_API_KEY_SET=$([[ -n "${WANDB_API_KEY:-}" ]] && echo yes || echo no)"
 
 common_args=(
   --dataset "$DATASET"
@@ -83,7 +103,7 @@ else
   common_args+=(--no-save-checkpoints)
 fi
 
-if [[ "$WANDB" == "1" ]]; then
+if wandb_enabled; then
   common_args+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-tags "$WANDB_TAGS")
   [[ -n "$WANDB_ENTITY" ]] && common_args+=(--wandb-entity "$WANDB_ENTITY")
   [[ -n "$WANDB_GROUP" ]] && common_args+=(--wandb-group "$WANDB_GROUP")
@@ -133,7 +153,7 @@ run_figure11_resnet18() {
   fi
 
   local wandb_arg=()
-  if [[ "$WANDB" == "1" ]]; then
+  if wandb_enabled; then
     wandb_arg+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-tags "$WANDB_TAGS")
     [[ -n "$WANDB_ENTITY" ]] && wandb_arg+=(--wandb-entity "$WANDB_ENTITY")
     if [[ -n "$WANDB_GROUP" ]]; then

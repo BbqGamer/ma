@@ -13,16 +13,35 @@ FIG11_METRIC="${FIG11_METRIC:-test_acc}"
 AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
 SAVE_CHECKPOINTS="${SAVE_CHECKPOINTS:-0}"
 ARCHIVE_OUTPUTS="${ARCHIVE_OUTPUTS:-1}"
-WANDB="${WANDB:-0}"
+WANDB="${WANDB:-auto}"
 WANDB_PROJECT="${WANDB_PROJECT:-coarse-to-fine-curriculum}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 WANDB_GROUP="${WANDB_GROUP:-fig11-resnet18-cifar100-seed${SEED}}"
 WANDB_TAGS="${WANDB_TAGS:-runpod,figure11}"
 
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|y|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+wandb_enabled() {
+  if is_truthy "$WANDB"; then
+    return 0
+  fi
+  if [[ "${WANDB,,}" == "auto" && -n "${WANDB_API_KEY:-}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+echo "[run_figure11_resnet18] WANDB=$WANDB WANDB_PROJECT=$WANDB_PROJECT WANDB_GROUP=$WANDB_GROUP WANDB_API_KEY_SET=$([[ -n "${WANDB_API_KEY:-}" ]] && echo yes || echo no)"
+
 cd /workspace
 
 wandb_args=()
-if [[ "$WANDB" == "1" ]]; then
+if wandb_enabled; then
   wandb_args+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-group "$WANDB_GROUP")
   wandb_args+=(--wandb-tags "$WANDB_TAGS")
   [[ -n "$WANDB_ENTITY" ]] && wandb_args+=(--wandb-entity "$WANDB_ENTITY")
