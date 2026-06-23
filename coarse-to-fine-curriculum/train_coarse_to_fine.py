@@ -281,6 +281,21 @@ def create_optimizer_and_scheduler(
     return optimizer, scheduler
 
 
+def hierarchy_distance_matrix_from_levels(
+    hierarchy_levels: list[list[list[int]]],
+    num_classes: int,
+) -> np.ndarray:
+    effective_levels = [clusters for clusters in hierarchy_levels if len(clusters) < num_classes]
+    max_distance = len(effective_levels) + 1
+    distances = np.full((num_classes, num_classes), max_distance, dtype=np.float32)
+    np.fill_diagonal(distances, 0.0)
+    for level_from_fine, clusters in enumerate(reversed(effective_levels), start=1):
+        for cluster in clusters:
+            idx = np.asarray(cluster, dtype=np.int64)
+            distances[np.ix_(idx, idx)] = np.minimum(distances[np.ix_(idx, idx)], level_from_fine)
+    return distances / max_distance
+
+
 def classification_metrics_from_confusion(confusion: torch.Tensor) -> dict[str, float]:
     confusion_f = confusion.to(dtype=torch.float64)
     tp = confusion_f.diag()
@@ -306,6 +321,8 @@ def evaluate(
     model: nn.Module,
     loader: DataLoader,
     device: torch.device,
+    class_group_ids: list[int] | None = None,
+    learned_hierdist_matrix: np.ndarray | None = None,
 ) -> dict[str, float]:
     model.eval()
     total_loss = 0.0
@@ -318,6 +335,15 @@ def evaluate(
     ece_acc_sum = torch.zeros(ece_bins, dtype=torch.float64)
     ece_count = torch.zeros(ece_bins, dtype=torch.float64)
     confusion: torch.Tensor | None = None
+    official_same_group_correct = 0
+    official_hierdist_sum = 0.0
+    group_ids_tensor = torch.tensor(class_group_ids, dtype=torch.long) if class_group_ids is not None else None
+    learned_hierdist_sum = 0.0
+    learned_hierdist_tensor = (
+        torch.tensor(learned_hierdist_matrix, dtype=torch.float32)
+        if learned_hierdist_matrix is not None
+        else None
+    )
 
     for inputs, labels in loader:
         inputs = inputs.to(device, non_blocking=True)
@@ -340,6 +366,15 @@ def evaluate(
 
         labels_cpu = labels.cpu()
         preds_cpu = preds.cpu()
+        if group_ids_tensor is not None:
+            true_groups = group_ids_tensor[labels_cpu]
+            pred_groups = group_ids_tensor[preds_cpu]
+            same_group = true_groups == pred_groups
+            official_same_group_correct += same_group.sum().item()
+            official_dist = torch.where(correct.cpu(), 0.0, torch.where(same_group, 0.5, 1.0))
+            official_hierdist_sum += official_dist.sum().item()
+        if learned_hierdist_tensor is not None:
+            learned_hierdist_sum += learned_hierdist_tensor[labels_cpu, preds_cpu].sum().item()
         indices = labels_cpu * confusion.shape[1] + preds_cpu
         confusion += torch.bincount(indices, minlength=confusion.numel()).reshape_as(confusion)
 
@@ -367,6 +402,23 @@ def evaluate(
             "ece": float(ece.item()),
         }
     )
+    if group_ids_tensor is not None:
+        official_hierdist = official_hierdist_sum / max(total_samples, 1)
+        metrics.update(
+            {
+                "same_superclass_acc_official": official_same_group_correct / max(total_samples, 1),
+                "hierdist_official": official_hierdist,
+                "hier_score_official": 1.0 - official_hierdist,
+            }
+        )
+    if learned_hierdist_tensor is not None:
+        learned_hierdist = learned_hierdist_sum / max(total_samples, 1)
+        metrics.update(
+            {
+                "hierdist_learned": learned_hierdist,
+                "hier_score_learned": 1.0 - learned_hierdist,
+            }
+        )
     return metrics
 
 
@@ -793,6 +845,8 @@ def train_loop(
     run_dir: Path,
     schedule: list[dict[str, Any]] | None = None,
     multiloss_memberships: list[tuple[str, torch.Tensor]] | None = None,
+    class_group_ids: list[int] | None = None,
+    learned_hierdist_matrix: np.ndarray | None = None,
 ) -> tuple[nn.Module, list[dict[str, Any]], dict[str, float]]:
     multiloss_names = ["fine"] + [name for name, _ in (multiloss_memberships or [])]
     adaptive_log_weights: nn.Parameter | None = None
@@ -932,8 +986,20 @@ def train_loop(
         if scheduler is not None:
             scheduler.step()
 
-        val_metrics = evaluate(model, val_loader, device)
-        test_metrics = evaluate(model, test_loader, device)
+        val_metrics = evaluate(
+            model,
+            val_loader,
+            device,
+            class_group_ids=class_group_ids,
+            learned_hierdist_matrix=learned_hierdist_matrix,
+        )
+        test_metrics = evaluate(
+            model,
+            test_loader,
+            device,
+            class_group_ids=class_group_ids,
+            learned_hierdist_matrix=learned_hierdist_matrix,
+        )
         train_loss = total_train_loss / max(total_train_samples, 1)
         record = {
             "epoch": epoch + 1,
@@ -996,7 +1062,13 @@ def train_loop(
     if args.save_checkpoints and best_path.exists():
         best_checkpoint = torch.load(best_path, map_location=device)
         model.load_state_dict(best_checkpoint["model_state_dict"])
-    final_test_metrics = evaluate(model, test_loader, device)
+    final_test_metrics = evaluate(
+        model,
+        test_loader,
+        device,
+        class_group_ids=class_group_ids,
+        learned_hierdist_matrix=learned_hierdist_matrix,
+    )
     return model, history, final_test_metrics
 
 
@@ -1034,8 +1106,22 @@ def baseline_run(
         logger=logger,
         run_dir=run_dir,
         schedule=None,
+        class_group_ids=bundle.class_group_ids,
     )
-    np.save(run_dir / "distance_matrix_classifier_weights.npy", classifier_weight_distance(model))
+    baseline_dist_matrix = classifier_weight_distance(model)
+    np.save(run_dir / "distance_matrix_classifier_weights.npy", baseline_dist_matrix)
+    baseline_hierarchy = compute_hierarchy(baseline_dist_matrix)
+    baseline_learned_hierdist_matrix = hierarchy_distance_matrix_from_levels(
+        baseline_hierarchy,
+        bundle.num_classes,
+    )
+    final_learned_hier_metrics = evaluate(
+        model,
+        loaders[2],
+        device,
+        class_group_ids=bundle.class_group_ids,
+        learned_hierdist_matrix=baseline_learned_hierdist_matrix,
+    )
     val_artifacts = save_evaluation_artifacts(model, loaders[1], device, bundle, run_dir, "val")
     test_artifacts = save_evaluation_artifacts(model, loaders[2], device, bundle, run_dir, "test")
     result = {
@@ -1053,6 +1139,13 @@ def baseline_run(
         "final_test_recall_macro": float(test_metrics["recall_macro"]),
         "final_test_top5_acc": float(test_metrics["top5_acc"]),
         "final_test_ece": float(test_metrics["ece"]),
+        "final_test_hierdist_official": float(test_metrics.get("hierdist_official", 0.0)),
+        "final_test_hier_score_official": float(test_metrics.get("hier_score_official", 0.0)),
+        "final_test_same_superclass_acc_official": float(
+            test_metrics.get("same_superclass_acc_official", 0.0)
+        ),
+        "final_test_hierdist_learned": float(final_learned_hier_metrics["hierdist_learned"]),
+        "final_test_hier_score_learned": float(final_learned_hier_metrics["hier_score_learned"]),
         "val_difficulty_class_accuracy_variance": float(val_artifacts["class_accuracy_variance"]),
         "test_difficulty_class_accuracy_variance": float(test_artifacts["class_accuracy_variance"]),
         "test_difficulty_confusion_entropy_mean": float(test_artifacts["confusion_entropy_mean"]),
@@ -1110,6 +1203,7 @@ def load_or_train_reference(
         logger=reference_logger,
         run_dir=reference_dir,
         schedule=None,
+        class_group_ids=bundle.class_group_ids,
     )
     np.save(reference_dir / "distance_matrix_classifier_weights.npy", classifier_weight_distance(reference_model))
     save_evaluation_artifacts(reference_model, val_loader, device, bundle, reference_dir, "val")
@@ -1243,6 +1337,7 @@ def curriculum_run(
         total_epochs=args.epochs,
     )
     save_json(run_dir / "schedule.json", schedule)
+    learned_hierdist_matrix = hierarchy_distance_matrix_from_levels(hierarchy_levels, bundle.num_classes)
 
     model = build_model(
         model_name=args.model,
@@ -1261,6 +1356,8 @@ def curriculum_run(
         logger=logger,
         run_dir=run_dir,
         schedule=schedule,
+        class_group_ids=bundle.class_group_ids,
+        learned_hierdist_matrix=learned_hierdist_matrix,
     )
     val_artifacts = save_evaluation_artifacts(model, val_loader, device, bundle, run_dir, "val")
     test_artifacts = save_evaluation_artifacts(model, test_loader, device, bundle, run_dir, "test")
@@ -1281,6 +1378,13 @@ def curriculum_run(
         "final_test_recall_macro": float(test_metrics["recall_macro"]),
         "final_test_top5_acc": float(test_metrics["top5_acc"]),
         "final_test_ece": float(test_metrics["ece"]),
+        "final_test_hierdist_official": float(test_metrics.get("hierdist_official", 0.0)),
+        "final_test_hier_score_official": float(test_metrics.get("hier_score_official", 0.0)),
+        "final_test_same_superclass_acc_official": float(
+            test_metrics.get("same_superclass_acc_official", 0.0)
+        ),
+        "final_test_hierdist_learned": float(test_metrics["hierdist_learned"]),
+        "final_test_hier_score_learned": float(test_metrics["hier_score_learned"]),
         "distance_source": args.distance_source,
         "reference_run_dir": str(reference_dir),
         "val_difficulty_class_accuracy_variance": float(val_artifacts["class_accuracy_variance"]),
@@ -1328,6 +1432,7 @@ def multiloss_run(
         reference_model,
     )
     memberships = build_multiloss_memberships(hierarchy_levels, bundle.num_classes, device)
+    learned_hierdist_matrix = hierarchy_distance_matrix_from_levels(hierarchy_levels, bundle.num_classes)
     save_json(
         run_dir / "multiloss_config.json",
         {
@@ -1358,6 +1463,8 @@ def multiloss_run(
         run_dir=run_dir,
         schedule=None,
         multiloss_memberships=memberships,
+        class_group_ids=bundle.class_group_ids,
+        learned_hierdist_matrix=learned_hierdist_matrix,
     )
     val_artifacts = save_evaluation_artifacts(model, val_loader, device, bundle, run_dir, "val")
     test_artifacts = save_evaluation_artifacts(model, test_loader, device, bundle, run_dir, "test")
@@ -1378,6 +1485,13 @@ def multiloss_run(
         "final_test_recall_macro": float(test_metrics["recall_macro"]),
         "final_test_top5_acc": float(test_metrics["top5_acc"]),
         "final_test_ece": float(test_metrics["ece"]),
+        "final_test_hierdist_official": float(test_metrics.get("hierdist_official", 0.0)),
+        "final_test_hier_score_official": float(test_metrics.get("hier_score_official", 0.0)),
+        "final_test_same_superclass_acc_official": float(
+            test_metrics.get("same_superclass_acc_official", 0.0)
+        ),
+        "final_test_hierdist_learned": float(test_metrics["hierdist_learned"]),
+        "final_test_hier_score_learned": float(test_metrics["hier_score_learned"]),
         "distance_source": args.distance_source,
         "reference_run_dir": str(reference_dir),
         "reference_best_val_acc": max(float(entry["val_acc"]) for entry in reference_history),
