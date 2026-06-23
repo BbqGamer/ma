@@ -73,6 +73,21 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gradnorm-alpha", type=float, default=0.5)
     parser.add_argument(
+        "--roughness-probes",
+        action="store_true",
+        help="Log optimization roughness probes: sharpness, Hessian estimates, gradient noise/skew.",
+    )
+    parser.add_argument(
+        "--roughness-epochs",
+        type=str,
+        default="1,5,10,11,20,50,100",
+        help="Comma-separated 1-indexed epochs for roughness probes.",
+    )
+    parser.add_argument("--roughness-batches", type=int, default=2)
+    parser.add_argument("--sharpness-rho", type=float, default=0.05)
+    parser.add_argument("--hessian-iters", type=int, default=10)
+    parser.add_argument("--hessian-samples", type=int, default=2)
+    parser.add_argument(
         "--multi-static-weights",
         type=str,
         default="1,1,1,1",
@@ -551,6 +566,213 @@ def normalized_gradnorm_weights(log_weights: torch.Tensor) -> torch.Tensor:
     return torch.softmax(log_weights, dim=0) * log_weights.numel()
 
 
+def parse_epoch_set(value: str) -> set[int]:
+    return {int(item.strip()) for item in value.split(",") if item.strip()}
+
+
+def flatten_tensors(tensors: list[torch.Tensor | None], parameters: list[nn.Parameter]) -> torch.Tensor:
+    chunks = []
+    for tensor, parameter in zip(tensors, parameters, strict=True):
+        if tensor is None:
+            chunks.append(torch.zeros_like(parameter).reshape(-1))
+        else:
+            chunks.append(tensor.reshape(-1))
+    return torch.cat(chunks)
+
+
+def parameter_norm(parameters: list[nn.Parameter]) -> torch.Tensor:
+    return torch.sqrt(sum(torch.sum(parameter.detach() ** 2) for parameter in parameters)).clamp_min(1e-12)
+
+
+def assign_parameter_vector(parameters: list[nn.Parameter], vector: torch.Tensor, scale: float) -> None:
+    cursor = 0
+    with torch.no_grad():
+        for parameter in parameters:
+            numel = parameter.numel()
+            parameter.add_(vector[cursor : cursor + numel].view_as(parameter), alpha=scale)
+            cursor += numel
+
+
+def fixed_probe_batches(loader: DataLoader, device: torch.device, max_batches: int) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    batches = []
+    for batch_idx, (inputs, labels) in enumerate(loader):
+        if batch_idx >= max_batches:
+            break
+        batches.append((inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)))
+    return batches
+
+
+def build_probe_objective(
+    model: nn.Module,
+    probe_batches: list[tuple[torch.Tensor, torch.Tensor]],
+    membership: torch.Tensor | None,
+    multiloss_memberships: list[tuple[str, torch.Tensor]] | None,
+    args: argparse.Namespace,
+    adaptive_log_weights: nn.Parameter | None,
+) -> torch.Tensor:
+    losses = []
+    for inputs, labels in probe_batches:
+        logits = model(inputs)
+        if multiloss_memberships is None:
+            losses.append(
+                F.cross_entropy(logits, labels)
+                if membership is None
+                else marginalized_loss(logits, labels, membership)
+            )
+        else:
+            component_losses = [F.cross_entropy(logits, labels)]
+            for _, coarse_membership in multiloss_memberships:
+                component_losses.append(marginalized_loss(logits, labels, coarse_membership))
+            if args.multi_weighting == "static":
+                weights = parse_weight_list(args.multi_static_weights, len(component_losses))
+                losses.append(
+                    sum(weight * component for weight, component in zip(weights, component_losses, strict=True))
+                )
+            elif args.multi_weighting == "uncertainty":
+                assert adaptive_log_weights is not None
+                precisions = torch.exp(-adaptive_log_weights.detach())
+                losses.append(
+                    sum(
+                        precision * component
+                        for precision, component in zip(precisions, component_losses, strict=True)
+                    )
+                )
+            else:
+                assert adaptive_log_weights is not None
+                weights_tensor = normalized_gradnorm_weights(adaptive_log_weights.detach())
+                losses.append(
+                    sum(
+                        weight * component
+                        for weight, component in zip(weights_tensor, component_losses, strict=True)
+                    )
+                )
+    return torch.stack(losses).mean()
+
+
+def estimate_roughness_metrics(
+    model: nn.Module,
+    probe_batches: list[tuple[torch.Tensor, torch.Tensor]],
+    membership: torch.Tensor | None,
+    multiloss_memberships: list[tuple[str, torch.Tensor]] | None,
+    args: argparse.Namespace,
+    adaptive_log_weights: nn.Parameter | None,
+) -> dict[str, float]:
+    if not probe_batches:
+        return {}
+    was_training = model.training
+    model.eval()
+    parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
+    metrics: dict[str, float] = {}
+
+    per_batch_grads = []
+    per_batch_norms = []
+    for inputs, labels in probe_batches:
+        model.zero_grad(set_to_none=True)
+        loss = build_probe_objective(
+            model,
+            [(inputs, labels)],
+            membership,
+            multiloss_memberships,
+            args,
+            adaptive_log_weights,
+        )
+        grads = torch.autograd.grad(loss, parameters, retain_graph=False, create_graph=False, allow_unused=True)
+        flat = flatten_tensors(list(grads), parameters).detach()
+        per_batch_grads.append(flat)
+        per_batch_norms.append(torch.norm(flat, p=2))
+
+    grad_stack = torch.stack(per_batch_grads)
+    grad_norms = torch.stack(per_batch_norms)
+    grad_norm_mean = grad_norms.mean()
+    grad_norm_std = grad_norms.std(unbiased=False) if grad_norms.numel() > 1 else torch.tensor(0.0, device=grad_norms.device)
+    centered = grad_norms - grad_norm_mean
+    grad_norm_skew = torch.mean(centered**3) / grad_norm_std.clamp_min(1e-12) ** 3
+    mean_grad = grad_stack.mean(dim=0)
+    mean_grad_norm_sq = torch.sum(mean_grad**2).clamp_min(1e-12)
+    mean_sq_grad_norm = torch.mean(torch.sum(grad_stack**2, dim=1))
+    grad_noise_scale = (mean_sq_grad_norm - mean_grad_norm_sq).clamp_min(0.0) / mean_grad_norm_sq
+    metrics.update(
+        {
+            "rough_grad_norm_mean": float(grad_norm_mean.item()),
+            "rough_grad_norm_std": float(grad_norm_std.item()),
+            "rough_grad_norm_cv": float((grad_norm_std / grad_norm_mean.clamp_min(1e-12)).item()),
+            "rough_grad_norm_skew": float(grad_norm_skew.item()),
+            "rough_gradient_noise_scale": float(grad_noise_scale.item()),
+        }
+    )
+
+    model.zero_grad(set_to_none=True)
+    base_loss = build_probe_objective(
+        model,
+        probe_batches,
+        membership,
+        multiloss_memberships,
+        args,
+        adaptive_log_weights,
+    )
+    grads = torch.autograd.grad(base_loss, parameters, create_graph=True, allow_unused=True)
+    flat_grad = flatten_tensors(list(grads), parameters)
+    grad_norm = torch.norm(flat_grad.detach(), p=2).clamp_min(1e-12)
+    rho = args.sharpness_rho * float(parameter_norm(parameters).item())
+    direction = flat_grad.detach() / grad_norm
+    assign_parameter_vector(parameters, direction, rho)
+    with torch.no_grad():
+        perturbed_loss = build_probe_objective(
+            model,
+            probe_batches,
+            membership,
+            multiloss_memberships,
+            args,
+            adaptive_log_weights,
+        )
+    assign_parameter_vector(parameters, direction, -rho)
+    metrics["rough_critical_sharpness"] = float((perturbed_loss - base_loss.detach()).item())
+    metrics["rough_relative_critical_sharpness"] = float(
+        ((perturbed_loss - base_loss.detach()) / base_loss.detach().abs().clamp_min(1e-12)).item()
+    )
+
+    def hessian_vector_product(vector: torch.Tensor) -> torch.Tensor:
+        model.zero_grad(set_to_none=True)
+        loss = build_probe_objective(
+            model,
+            probe_batches,
+            membership,
+            multiloss_memberships,
+            args,
+            adaptive_log_weights,
+        )
+        first_grads = torch.autograd.grad(loss, parameters, create_graph=True, allow_unused=True)
+        flat_first_grads = flatten_tensors(list(first_grads), parameters)
+        grad_dot_vector = torch.dot(flat_first_grads, vector)
+        hvp = torch.autograd.grad(grad_dot_vector, parameters, retain_graph=False, allow_unused=True)
+        return flatten_tensors(list(hvp), parameters).detach()
+
+    vector = torch.randn_like(flat_grad.detach())
+    vector = vector / torch.norm(vector, p=2).clamp_min(1e-12)
+    top_eigenvalue = torch.tensor(0.0, device=vector.device)
+    for _ in range(max(args.hessian_iters, 1)):
+        hvp = hessian_vector_product(vector)
+        hvp_norm = torch.norm(hvp, p=2).clamp_min(1e-12)
+        vector = hvp / hvp_norm
+        top_eigenvalue = torch.dot(vector, hessian_vector_product(vector))
+    metrics["rough_hessian_top_eigenvalue"] = float(top_eigenvalue.item())
+
+    frobenius_estimates = []
+    trace_estimates = []
+    for _ in range(max(args.hessian_samples, 1)):
+        rademacher = torch.randint(0, 2, flat_grad.shape, device=flat_grad.device, dtype=flat_grad.dtype) * 2 - 1
+        hvp = hessian_vector_product(rademacher)
+        frobenius_estimates.append(torch.sum(hvp**2))
+        trace_estimates.append(torch.dot(rademacher, hvp))
+    metrics["rough_hessian_frobenius"] = float(torch.sqrt(torch.stack(frobenius_estimates).mean()).item())
+    metrics["rough_hessian_trace"] = float(torch.stack(trace_estimates).mean().item())
+
+    model.zero_grad(set_to_none=True)
+    if was_training:
+        model.train()
+    return metrics
+
+
 def build_multiloss_memberships(
     hierarchy_levels: list[list[list[int]]],
     num_classes: int,
@@ -875,6 +1097,12 @@ def train_loop(
     best_path = run_dir / "best_model.pt"
     last_path = run_dir / "last_model.pt"
     current_stage_name = None
+    roughness_epochs = parse_epoch_set(args.roughness_epochs) if args.roughness_probes else set()
+    probe_batches = (
+        fixed_probe_batches(val_loader, device, max(args.roughness_batches, 1))
+        if args.roughness_probes
+        else []
+    )
 
     for epoch in range(args.epochs):
         stage = epoch_to_stage(schedule, epoch) if schedule is not None else None
@@ -1000,6 +1228,17 @@ def train_loop(
             class_group_ids=class_group_ids,
             learned_hierdist_matrix=learned_hierdist_matrix,
         )
+        roughness_metrics = {}
+        if args.roughness_probes and (epoch + 1) in roughness_epochs:
+            logger.info("Computing roughness probes for epoch %d", epoch + 1)
+            roughness_metrics = estimate_roughness_metrics(
+                model=model,
+                probe_batches=probe_batches,
+                membership=membership,
+                multiloss_memberships=multiloss_memberships,
+                args=args,
+                adaptive_log_weights=adaptive_log_weights,
+            )
         train_loss = total_train_loss / max(total_train_samples, 1)
         record = {
             "epoch": epoch + 1,
@@ -1018,6 +1257,7 @@ def train_loop(
         for metric_name, metric_value in test_metrics.items():
             if metric_name not in {"loss", "acc"}:
                 record[f"test_{metric_name}"] = metric_value
+        record.update(roughness_metrics)
         if multiloss_memberships is not None:
             for name in multiloss_names:
                 record[f"loss_{name}"] = loss_component_totals[name] / max(total_train_samples, 1)

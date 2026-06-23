@@ -24,6 +24,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scheduler", default=DEFAULT_SCHEDULER)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--roughness-probes", action="store_true")
+    parser.add_argument("--roughness-epochs", default="1,5,10,11,20,50,100")
+    parser.add_argument("--roughness-batches", type=int, default=2)
+    parser.add_argument("--sharpness-rho", type=float, default=0.05)
+    parser.add_argument("--hessian-iters", type=int, default=10)
+    parser.add_argument("--hessian-samples", type=int, default=2)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-project", default="coarse-to-fine-curriculum")
     parser.add_argument("--wandb-entity", default="")
@@ -63,6 +69,13 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
     ]
     if args.batch_size is not None:
         parts.extend(["--batch_size", str(args.batch_size)])
+    if args.roughness_probes:
+        parts.extend(["--roughness-probes"])
+        parts.extend(["--roughness-epochs", args.roughness_epochs])
+        parts.extend(["--roughness-batches", str(args.roughness_batches)])
+        parts.extend(["--sharpness-rho", str(args.sharpness_rho)])
+        parts.extend(["--hessian-iters", str(args.hessian_iters)])
+        parts.extend(["--hessian-samples", str(args.hessian_samples)])
     if args.wandb:
         group = args.wandb_group or f"{run_prefix}-seed{args.seed}"
         parts.extend(["--wandb", "--wandb-project", args.wandb_project, "--wandb-group", group])
@@ -88,6 +101,8 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "scheduler": args.scheduler,
         "lr": args.lr,
         "batch_size": args.batch_size if args.batch_size is not None else "",
+        "roughness_probes": args.roughness_probes,
+        "roughness_epochs": args.roughness_epochs if args.roughness_probes else "",
         "mode": mode,
         "curriculum_epochs": curriculum_epochs if curriculum_epochs is not None else "",
         "run_id": run_id,

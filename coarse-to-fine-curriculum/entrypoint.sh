@@ -37,6 +37,12 @@ WANDB_PROJECT="${WANDB_PROJECT:-coarse-to-fine-curriculum}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 WANDB_GROUP="${WANDB_GROUP:-}"
 WANDB_TAGS="${WANDB_TAGS:-runpod,figure11}"
+ROUGHNESS_PROBES="${ROUGHNESS_PROBES:-0}"
+ROUGHNESS_EPOCHS="${ROUGHNESS_EPOCHS:-1,5,10,11,20,50,100}"
+ROUGHNESS_BATCHES="${ROUGHNESS_BATCHES:-2}"
+SHARPNESS_RHO="${SHARPNESS_RHO:-0.05}"
+HESSIAN_ITERS="${HESSIAN_ITERS:-10}"
+HESSIAN_SAMPLES="${HESSIAN_SAMPLES:-2}"
 
 is_truthy() {
   case "${1,,}" in
@@ -135,6 +141,14 @@ fi
 if [[ "$AMP" == "1" ]]; then
   common_args+=(--amp)
 fi
+if is_truthy "$ROUGHNESS_PROBES"; then
+  common_args+=(--roughness-probes)
+  common_args+=(--roughness-epochs "$ROUGHNESS_EPOCHS")
+  common_args+=(--roughness-batches "$ROUGHNESS_BATCHES")
+  common_args+=(--sharpness-rho "$SHARPNESS_RHO")
+  common_args+=(--hessian-iters "$HESSIAN_ITERS")
+  common_args+=(--hessian-samples "$HESSIAN_SAMPLES")
+fi
 
 if [[ "$SAVE_CHECKPOINTS" == "1" ]]; then
   common_args+=(--save-checkpoints)
@@ -201,6 +215,7 @@ run_figure11_sweep() {
   local scheduler_arg=()
   local lr_arg=()
   local batch_size_arg=()
+  local roughness_arg=()
   if [[ -n "$OPTIMIZER" ]]; then
     optimizer_arg=(--optimizer "$OPTIMIZER")
   fi
@@ -212,6 +227,14 @@ run_figure11_sweep() {
   fi
   if [[ -n "$BATCH_SIZE" ]]; then
     batch_size_arg=(--batch-size "$BATCH_SIZE")
+  fi
+  if is_truthy "$ROUGHNESS_PROBES"; then
+    roughness_arg+=(--roughness-probes)
+    roughness_arg+=(--roughness-epochs "$ROUGHNESS_EPOCHS")
+    roughness_arg+=(--roughness-batches "$ROUGHNESS_BATCHES")
+    roughness_arg+=(--sharpness-rho "$SHARPNESS_RHO")
+    roughness_arg+=(--hessian-iters "$HESSIAN_ITERS")
+    roughness_arg+=(--hessian-samples "$HESSIAN_SAMPLES")
   fi
 
   local wandb_arg=()
@@ -226,6 +249,7 @@ run_figure11_sweep() {
     "${scheduler_arg[@]}" \
     "${lr_arg[@]}" \
     "${batch_size_arg[@]}" \
+    "${roughness_arg[@]}" \
     "${wandb_arg[@]}" \
     --data-dir "$DATA_DIR" \
     --output-dir "$OUTPUT_DIR"
@@ -263,6 +287,14 @@ run_cnn_multiloss() {
   )
   if [[ "$AMP" == "1" ]]; then
     base_common+=(--amp)
+  fi
+  if is_truthy "$ROUGHNESS_PROBES"; then
+    base_common+=(--roughness-probes)
+    base_common+=(--roughness-epochs "$ROUGHNESS_EPOCHS")
+    base_common+=(--roughness-batches "$ROUGHNESS_BATCHES")
+    base_common+=(--sharpness-rho "$SHARPNESS_RHO")
+    base_common+=(--hessian-iters "$HESSIAN_ITERS")
+    base_common+=(--hessian-samples "$HESSIAN_SAMPLES")
   fi
   if [[ "$DOWNLOAD" == "1" ]]; then
     base_common+=(--download)
