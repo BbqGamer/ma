@@ -231,7 +231,7 @@ To run the ResNet-18 CIFAR-100 curriculum-length sweep automatically inside the 
 set:
 
 ```bash
-EXPERIMENT=figure11_resnet18
+EXPERIMENT=figure11_resnet18  # or figure11_cnn for the paper-like CNN sweep
 DATA_DIR=/runpod-volume/data
 OUTPUT_DIR=/runpod-volume/runs
 SEED=42

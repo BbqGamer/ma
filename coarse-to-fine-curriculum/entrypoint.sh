@@ -137,11 +137,16 @@ run_single_experiment() {
   done
 }
 
-run_figure11_resnet18() {
-  echo "[entrypoint] Running Figure-11-style ResNet-18 sweep"
+run_figure11_sweep() {
+  local fig11_model="resnet18"
+  if [[ "$EXPERIMENT" == "figure11_cnn" ]]; then
+    fig11_model="cnn"
+  fi
+  echo "[entrypoint] Running Figure-11-style CIFAR-100 sweep with model=$fig11_model"
   local optimizer_arg=()
   local scheduler_arg=()
   local lr_arg=()
+  local batch_size_arg=()
   if [[ -n "$OPTIMIZER" ]]; then
     optimizer_arg=(--optimizer "$OPTIMIZER")
   fi
@@ -151,6 +156,9 @@ run_figure11_resnet18() {
   if [[ -n "$LR" ]]; then
     lr_arg=(--lr "$LR")
   fi
+  if [[ -n "$BATCH_SIZE" ]]; then
+    batch_size_arg=(--batch-size "$BATCH_SIZE")
+  fi
 
   local wandb_arg=()
   if wandb_enabled; then
@@ -159,17 +167,19 @@ run_figure11_resnet18() {
     if [[ -n "$WANDB_GROUP" ]]; then
       wandb_arg+=(--wandb-group "$WANDB_GROUP")
     else
-      wandb_arg+=(--wandb-group "fig11-resnet18-cifar100-seed${SEED}")
+      wandb_arg+=(--wandb-group "fig11-${fig11_model}-cifar100-seed${SEED}")
     fi
   fi
 
   python scripts/plan_figure11_resnet18.py \
     --seed "$SEED" \
+    --model "$fig11_model" \
     --epochs "${EPOCHS:-200}" \
     --val-ratio "${VAL_RATIO:-0.1}" \
     "${optimizer_arg[@]}" \
     "${scheduler_arg[@]}" \
     "${lr_arg[@]}" \
+    "${batch_size_arg[@]}" \
     "${wandb_arg[@]}" \
     --data-dir "$DATA_DIR" \
     --output-dir "$OUTPUT_DIR"
@@ -179,6 +189,8 @@ run_figure11_resnet18() {
   python scripts/plot_figure11_resnet18.py \
     "$OUTPUT_DIR" \
     --seed "$SEED" \
+    --model "$fig11_model" \
+    --run-prefix "fig11-${fig11_model}-cifar100" \
     --metric "$FIG11_METRIC"
 
   python scripts/analyze_results.py "$OUTPUT_DIR"
@@ -188,8 +200,8 @@ case "$EXPERIMENT" in
   single)
     run_single_experiment
     ;;
-  figure11_resnet18)
-    run_figure11_resnet18
+  figure11_resnet18|figure11_cnn)
+    run_figure11_sweep
     ;;
   *)
     echo "[entrypoint] Unknown EXPERIMENT=$EXPERIMENT"
@@ -200,13 +212,15 @@ esac
 if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
   archive_base="${RUN_ID}"
   archive_members=()
-  if [[ "$EXPERIMENT" == "figure11_resnet18" ]]; then
-    archive_base="figure11_resnet18-seed${SEED}"
-    archive_members+=("fig11-resnet18-cifar100-seed${SEED}-baseline")
+  if [[ "$EXPERIMENT" == "figure11_resnet18" || "$EXPERIMENT" == "figure11_cnn" ]]; then
+    archive_model="resnet18"
+    [[ "$EXPERIMENT" == "figure11_cnn" ]] && archive_model="cnn"
+    archive_base="figure11_${archive_model}-seed${SEED}"
+    archive_members+=("fig11-${archive_model}-cifar100-seed${SEED}-baseline")
     for n in 5 10 20 30 40 50; do
-      archive_members+=("fig11-resnet18-cifar100-seed${SEED}-curr${n}")
+      archive_members+=("fig11-${archive_model}-cifar100-seed${SEED}-curr${n}")
     done
-    archive_members+=("fig11-resnet18-cifar100-seed${SEED}-figure11-analysis")
+    archive_members+=("fig11-${archive_model}-cifar100-seed${SEED}-figure11-analysis")
     [[ -d "$OUTPUT_DIR/analysis" ]] && archive_members+=("analysis")
   else
     archive_members+=("$RUN_ID")

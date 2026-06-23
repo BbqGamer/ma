@@ -14,14 +14,16 @@ DEFAULT_LR = 1e-3
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate a Figure-11-style CIFAR-100 ResNet-18 curriculum-length sweep"
+        description="Generate a Figure-11-style CIFAR-100 curriculum-length sweep"
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument("--model", choices=["cnn", "resnet18", "resnet50"], default="resnet18")
     parser.add_argument("--optimizer", default=DEFAULT_OPTIMIZER)
     parser.add_argument("--scheduler", default=DEFAULT_SCHEDULER)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
+    parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-project", default="coarse-to-fine-curriculum")
     parser.add_argument("--wandb-entity", default="")
@@ -30,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", default="/workspace/data")
     parser.add_argument("--output-dir", default="/workspace/runs")
     parser.add_argument("--python", default="python train_coarse_to_fine.py")
-    parser.add_argument("--run-prefix", default="fig11-resnet18-cifar100")
+    parser.add_argument("--run-prefix", default=None)
     parser.add_argument("--output", type=Path, default=Path("figure11_resnet18_commands.sh"))
     parser.add_argument(
         "--manifest",
@@ -41,13 +43,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | None) -> tuple[str, dict[str, object]]:
+    run_prefix = args.run_prefix or f"fig11-{args.model}-cifar100"
     suffix = "baseline" if mode == "baseline" else f"curr{curriculum_epochs}"
-    run_id = f"{args.run_prefix}-seed{args.seed}-{suffix}"
+    run_id = f"{run_prefix}-seed{args.seed}-{suffix}"
     parts = [
         args.python,
         "--mode", mode,
         "--dataset", "cifar100",
-        "--model", "resnet18",
+        "--model", args.model,
         "--epochs", str(args.epochs),
         "--val_ratio", str(args.val_ratio),
         "--optimizer", args.optimizer,
@@ -58,8 +61,10 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "--run_id", run_id,
         "--seed", str(args.seed),
     ]
+    if args.batch_size is not None:
+        parts.extend(["--batch_size", str(args.batch_size)])
     if args.wandb:
-        group = args.wandb_group or f"fig11-resnet18-cifar100-seed{args.seed}"
+        group = args.wandb_group or f"{run_prefix}-seed{args.seed}"
         parts.extend(["--wandb", "--wandb-project", args.wandb_project, "--wandb-group", group])
         parts.extend(["--wandb-tags", args.wandb_tags])
         if args.wandb_entity:
@@ -67,23 +72,22 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
 
     reference_run_dir = ""
     if mode == "curriculum":
-        reference_run_id = f"{args.run_prefix}-seed{args.seed}-baseline"
-        reference_run_dir = (
-            f"{args.output_dir}/{reference_run_id}/cifar100_resnet18_baseline"
-        )
+        reference_run_id = f"{run_prefix}-seed{args.seed}-baseline"
+        reference_run_dir = f"{args.output_dir}/{reference_run_id}/cifar100_{args.model}_baseline"
         parts.extend(["--curriculum_epochs", str(curriculum_epochs)])
         parts.extend(["--reference_run_dir", reference_run_dir])
 
     command = " ".join(parts)
     row = {
         "dataset": "cifar100",
-        "model": "resnet18",
+        "model": args.model,
         "seed": args.seed,
         "epochs": args.epochs,
         "val_ratio": args.val_ratio,
         "optimizer": args.optimizer,
         "scheduler": args.scheduler,
         "lr": args.lr,
+        "batch_size": args.batch_size if args.batch_size is not None else "",
         "mode": mode,
         "curriculum_epochs": curriculum_epochs if curriculum_epochs is not None else "",
         "run_id": run_id,
