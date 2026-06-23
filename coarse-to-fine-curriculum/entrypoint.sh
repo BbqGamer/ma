@@ -176,6 +176,21 @@ run_single_experiment() {
   done
 }
 
+wandb_args_array() {
+  local default_group="$1"
+  local -n out_ref="$2"
+  out_ref=()
+  if wandb_enabled; then
+    out_ref+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-tags "$WANDB_TAGS")
+    [[ -n "$WANDB_ENTITY" ]] && out_ref+=(--wandb-entity "$WANDB_ENTITY")
+    if [[ -n "$WANDB_GROUP" ]]; then
+      out_ref+=(--wandb-group "$WANDB_GROUP")
+    else
+      out_ref+=(--wandb-group "$default_group")
+    fi
+  fi
+}
+
 run_figure11_sweep() {
   local fig11_model="resnet18"
   if [[ "$EXPERIMENT" == "figure11_cnn" ]]; then
@@ -200,15 +215,7 @@ run_figure11_sweep() {
   fi
 
   local wandb_arg=()
-  if wandb_enabled; then
-    wandb_arg+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-tags "$WANDB_TAGS")
-    [[ -n "$WANDB_ENTITY" ]] && wandb_arg+=(--wandb-entity "$WANDB_ENTITY")
-    if [[ -n "$WANDB_GROUP" ]]; then
-      wandb_arg+=(--wandb-group "$WANDB_GROUP")
-    else
-      wandb_arg+=(--wandb-group "fig11-${fig11_model}-cifar100-seed${SEED}")
-    fi
-  fi
+  wandb_args_array "fig11-${fig11_model}-cifar100-seed${SEED}" wandb_arg
 
   python scripts/plan_figure11_resnet18.py \
     --seed "$SEED" \
@@ -235,12 +242,60 @@ run_figure11_sweep() {
   python scripts/analyze_results.py "$OUTPUT_DIR"
 }
 
+run_cnn_multiloss() {
+  echo "[entrypoint] Running CNN multiloss weighting comparison"
+  local group="cnn-multiloss-cifar100-seed${SEED}-epochs${EPOCHS}-bs${BATCH_SIZE:-128}"
+  local wandb_arg=()
+  wandb_args_array "$group" wandb_arg
+  local base_common=(
+    --dataset cifar100
+    --model cnn
+    --epochs "$EPOCHS"
+    --val_ratio "$VAL_RATIO"
+    --optimizer "${OPTIMIZER:-adam}"
+    --scheduler "${SCHEDULER:-none}"
+    --lr "${LR:-0.001}"
+    --batch_size "${BATCH_SIZE:-128}"
+    --data_dir "$DATA_DIR"
+    --output_dir "$OUTPUT_DIR"
+    --seed "$SEED"
+    --num_workers "$NUM_WORKERS"
+  )
+  if [[ "$AMP" == "1" ]]; then
+    base_common+=(--amp)
+  fi
+  if [[ "$DOWNLOAD" == "1" ]]; then
+    base_common+=(--download)
+  else
+    base_common+=(--no-download)
+  fi
+  if [[ "$SAVE_CHECKPOINTS" == "1" ]]; then
+    base_common+=(--save-checkpoints)
+  else
+    base_common+=(--no-save-checkpoints)
+  fi
+
+  local prefix="cnn-multiloss-cifar100-seed${SEED}-epochs${EPOCHS}-bs${BATCH_SIZE:-128}"
+  local baseline_id="${prefix}-baseline"
+  local reference_dir="$OUTPUT_DIR/$baseline_id/cifar100_cnn_baseline"
+
+  python train_coarse_to_fine.py --mode baseline "${base_common[@]}" --run_id "$baseline_id" "${wandb_arg[@]}"
+  python train_coarse_to_fine.py --mode curriculum "${base_common[@]}" --run_id "${prefix}-hard-curr10" --curriculum_epochs 10 --reference_run_dir "$reference_dir" "${wandb_arg[@]}"
+  python train_coarse_to_fine.py --mode multiloss "${base_common[@]}" --run_id "${prefix}-uncertainty" --multi-weighting uncertainty --multi-initial-weights 1,1,1,1 --reference_run_dir "$reference_dir" "${wandb_arg[@]}"
+  python train_coarse_to_fine.py --mode multiloss "${base_common[@]}" --run_id "${prefix}-gradnorm" --multi-weighting gradnorm --multi-initial-weights 1,1,1,1 --gradnorm-alpha 0.5 --reference_run_dir "$reference_dir" "${wandb_arg[@]}"
+
+  python scripts/analyze_results.py "$OUTPUT_DIR"
+}
+
 case "$EXPERIMENT" in
   single)
     run_single_experiment
     ;;
   figure11_resnet18|figure11_cnn)
     run_figure11_sweep
+    ;;
+  cnn_multiloss)
+    run_cnn_multiloss
     ;;
   *)
     echo "[entrypoint] Unknown EXPERIMENT=$EXPERIMENT"

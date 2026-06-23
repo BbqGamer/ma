@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="PyTorch reproduction of Coarse-to-Fine Curriculum Learning"
     )
-    parser.add_argument("--mode", choices=["baseline", "curriculum"], required=True)
+    parser.add_argument("--mode", choices=["baseline", "curriculum", "multiloss"], required=True)
     parser.add_argument(
         "--dataset",
         choices=["cifar10", "cifar100", "shapes", "tiny-imagenet"],
@@ -65,6 +65,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb-entity", type=str, default=None)
     parser.add_argument("--wandb-group", type=str, default=None)
     parser.add_argument("--wandb-tags", type=str, default="")
+    parser.add_argument(
+        "--multi-weighting",
+        choices=["uncertainty", "gradnorm", "static"],
+        default="uncertainty",
+        help="Independent per-loss weighting strategy for --mode multiloss.",
+    )
+    parser.add_argument("--gradnorm-alpha", type=float, default=0.5)
+    parser.add_argument(
+        "--multi-static-weights",
+        type=str,
+        default="1,1,1,1",
+        help="Comma-separated fine,coarse1,coarse2,coarse3 weights for static multiloss.",
+    )
+    parser.add_argument(
+        "--multi-initial-weights",
+        type=str,
+        default="1,1,1,1",
+        help="Comma-separated initial fine,coarse1,coarse2,coarse3 weights for adaptive multiloss.",
+    )
     parser.add_argument("--reference_run_dir", type=str, default=None)
     parser.add_argument("--shapes_path", type=str, default=None)
     parser.add_argument("--tiny_imagenet_path", type=str, default=None)
@@ -230,16 +249,20 @@ def build_loaders(
 def create_optimizer_and_scheduler(
     model: nn.Module,
     args: argparse.Namespace,
+    extra_parameters: list[nn.Parameter] | None = None,
 ) -> tuple[optim.Optimizer, optim.lr_scheduler._LRScheduler | None]:
+    parameters: list[Any] = [{"params": model.parameters()}]
+    if extra_parameters:
+        parameters.append({"params": extra_parameters, "weight_decay": 0.0})
     if args.optimizer == "adam":
         optimizer = optim.Adam(
-            model.parameters(),
+            parameters,
             lr=args.lr,
             weight_decay=args.weight_decay,
         )
     else:
         optimizer = optim.SGD(
-            model.parameters(),
+            parameters,
             lr=args.lr,
             momentum=0.9,
             weight_decay=args.weight_decay,
@@ -392,6 +415,38 @@ def marginalized_loss(
     mask = membership[targets]
     selected = log_probs.masked_fill(~mask, float("-inf"))
     return -torch.logsumexp(selected, dim=1).mean()
+
+
+def parse_weight_list(value: str, expected: int) -> list[float]:
+    weights = [float(item.strip()) for item in value.split(",") if item.strip()]
+    if not weights:
+        raise ValueError("At least one multiloss weight is required")
+    if any(weight <= 0 for weight in weights):
+        raise ValueError("All multiloss weights must be positive")
+    if len(weights) < expected:
+        weights.extend([weights[-1]] * (expected - len(weights)))
+    return weights[:expected]
+
+
+def log_weights_from_initial_weights(weights: list[float], device: torch.device) -> nn.Parameter:
+    raw = torch.log(torch.tensor(weights, dtype=torch.float32, device=device))
+    return nn.Parameter(raw)
+
+
+def normalized_gradnorm_weights(log_weights: torch.Tensor) -> torch.Tensor:
+    return torch.softmax(log_weights, dim=0) * log_weights.numel()
+
+
+def build_multiloss_memberships(
+    hierarchy_levels: list[list[list[int]]],
+    num_classes: int,
+    device: torch.device,
+) -> list[tuple[str, torch.Tensor]]:
+    effective_levels = [clusters for clusters in hierarchy_levels if len(clusters) < num_classes]
+    memberships: list[tuple[str, torch.Tensor]] = []
+    for idx, clusters in enumerate(effective_levels[:3], start=1):
+        memberships.append((f"coarse_{idx}_{len(clusters)}", clusters_to_membership(clusters, num_classes, device)))
+    return memberships
 
 
 def build_curriculum_schedule(
@@ -675,9 +730,27 @@ def train_loop(
     logger: logging.Logger,
     run_dir: Path,
     schedule: list[dict[str, Any]] | None = None,
+    multiloss_memberships: list[tuple[str, torch.Tensor]] | None = None,
 ) -> tuple[nn.Module, list[dict[str, Any]], dict[str, float]]:
-    optimizer, scheduler = create_optimizer_and_scheduler(model, args)
-    use_amp = bool(args.amp and device.type == "cuda")
+    multiloss_names = ["fine"] + [name for name, _ in (multiloss_memberships or [])]
+    adaptive_log_weights: nn.Parameter | None = None
+    gradnorm_optimizer: optim.Optimizer | None = None
+    initial_gradnorm_losses: torch.Tensor | None = None
+    if multiloss_memberships is not None:
+        expected_weights = len(multiloss_names)
+        if args.multi_weighting in {"uncertainty", "gradnorm"}:
+            adaptive_log_weights = log_weights_from_initial_weights(
+                parse_weight_list(args.multi_initial_weights, expected_weights),
+                device,
+            )
+        if args.multi_weighting == "gradnorm" and adaptive_log_weights is not None:
+            gradnorm_optimizer = optim.Adam([adaptive_log_weights], lr=args.lr)
+
+    extra_params = [adaptive_log_weights] if adaptive_log_weights is not None and args.multi_weighting == "uncertainty" else None
+    optimizer, scheduler = create_optimizer_and_scheduler(model, args, extra_params)
+    use_amp = bool(args.amp and device.type == "cuda" and args.multi_weighting != "gradnorm")
+    if args.amp and device.type == "cuda" and args.multi_weighting == "gradnorm":
+        logger.info("Disabling AMP for GradNorm because it needs higher-order gradients")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     history: list[dict[str, Any]] = []
@@ -700,17 +773,82 @@ def train_loop(
         total_train_loss = 0.0
         total_train_samples = 0
         total_train_correct = 0
+        loss_component_totals = {name: 0.0 for name in multiloss_names}
+        weight_component_totals = {name: 0.0 for name in multiloss_names}
+        gradnorm_component_totals = {name: 0.0 for name in multiloss_names}
+        num_weight_observations = 0
+        static_weights: list[float] | None = None
+        if multiloss_memberships is not None and args.multi_weighting == "static":
+            static_weights = parse_weight_list(args.multi_static_weights, len(multiloss_names))
+
         for inputs, labels in train_loader:
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
+            if gradnorm_optimizer is not None:
+                gradnorm_optimizer.zero_grad(set_to_none=True)
             autocast_ctx = (lambda: torch.amp.autocast("cuda")) if use_amp else nullcontext
             with autocast_ctx():
                 logits = model(inputs)
-                if membership is None:
-                    loss = F.cross_entropy(logits, labels)
+                if multiloss_memberships is None:
+                    if membership is None:
+                        loss = F.cross_entropy(logits, labels)
+                    else:
+                        loss = marginalized_loss(logits, labels, membership)
+                    component_losses = [loss]
+                    component_weights = [1.0]
+                    gradnorm_values = [0.0]
                 else:
-                    loss = marginalized_loss(logits, labels, membership)
+                    component_losses = [F.cross_entropy(logits, labels)]
+                    for _, coarse_membership in multiloss_memberships:
+                        component_losses.append(marginalized_loss(logits, labels, coarse_membership))
+                    if args.multi_weighting == "static":
+                        component_weights = static_weights or [1.0] * len(component_losses)
+                        loss = sum(weight * component for weight, component in zip(component_weights, component_losses, strict=True))
+                        gradnorm_values = [0.0] * len(component_losses)
+                    elif args.multi_weighting == "uncertainty":
+                        assert adaptive_log_weights is not None
+                        precisions = torch.exp(-adaptive_log_weights)
+                        loss = sum(
+                            precision * component + log_weight
+                            for precision, component, log_weight in zip(
+                                precisions,
+                                component_losses,
+                                adaptive_log_weights,
+                                strict=True,
+                            )
+                        )
+                        component_weights = precisions.detach().cpu().tolist()
+                        gradnorm_values = [0.0] * len(component_losses)
+                    else:
+                        assert adaptive_log_weights is not None
+                        assert gradnorm_optimizer is not None
+                        weights_tensor = normalized_gradnorm_weights(adaptive_log_weights)
+                        component_weights = weights_tensor.detach().cpu().tolist()
+                        if initial_gradnorm_losses is None:
+                            initial_gradnorm_losses = torch.stack([item.detach() for item in component_losses]).clamp_min(1e-8)
+                        shared_parameter = model.classifier_weight
+                        grad_norms = []
+                        for weight, component in zip(weights_tensor, component_losses, strict=True):
+                            grad = torch.autograd.grad(
+                                weight * component,
+                                shared_parameter,
+                                retain_graph=True,
+                                create_graph=True,
+                            )[0]
+                            grad_norms.append(torch.norm(grad, p=2))
+                        grad_norm_tensor = torch.stack(grad_norms)
+                        loss_ratios = torch.stack([item.detach() for item in component_losses]).clamp_min(1e-8) / initial_gradnorm_losses
+                        inverse_rates = loss_ratios / loss_ratios.mean().clamp_min(1e-8)
+                        target_grad_norms = grad_norm_tensor.detach().mean() * (inverse_rates ** args.gradnorm_alpha)
+                        gradnorm_loss = F.l1_loss(grad_norm_tensor, target_grad_norms, reduction="sum")
+                        gradnorm_loss.backward(retain_graph=True)
+                        gradnorm_optimizer.step()
+                        loss = sum(
+                            weight.detach() * component
+                            for weight, component in zip(weights_tensor, component_losses, strict=True)
+                        )
+                        gradnorm_values = grad_norm_tensor.detach().cpu().tolist()
             if use_amp:
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -721,6 +859,13 @@ def train_loop(
             total_train_loss += loss.item() * labels.size(0)
             total_train_samples += labels.size(0)
             total_train_correct += (logits.argmax(dim=1) == labels).sum().item()
+            for name, component in zip(multiloss_names, component_losses, strict=True):
+                loss_component_totals[name] += float(component.detach().item()) * labels.size(0)
+            for name, weight in zip(multiloss_names, component_weights, strict=True):
+                weight_component_totals[name] += float(weight)
+            for name, grad_norm in zip(multiloss_names, gradnorm_values, strict=True):
+                gradnorm_component_totals[name] += float(grad_norm)
+            num_weight_observations += 1
 
         if scheduler is not None:
             scheduler.step()
@@ -739,6 +884,12 @@ def train_loop(
             "test_acc": test_metrics["acc"],
             "lr": optimizer.param_groups[0]["lr"],
         }
+        if multiloss_memberships is not None:
+            for name in multiloss_names:
+                record[f"loss_{name}"] = loss_component_totals[name] / max(total_train_samples, 1)
+                record[f"weight_{name}"] = weight_component_totals[name] / max(num_weight_observations, 1)
+                if args.multi_weighting == "gradnorm":
+                    record[f"gradnorm_{name}"] = gradnorm_component_totals[name] / max(num_weight_observations, 1)
         history.append(record)
         if args.wandb:
             try:
@@ -843,6 +994,90 @@ def baseline_run(
         except ImportError:
             pass
     return result
+
+
+def load_or_train_reference(
+    args: argparse.Namespace,
+    bundle: DatasetBundle,
+    loaders: tuple[DataLoader, DataLoader, DataLoader],
+    device: torch.device,
+    logger: logging.Logger,
+    run_dir: Path,
+) -> tuple[Path, nn.Module | None, list[dict[str, Any]]]:
+    train_loader, val_loader, test_loader = loaders
+    if args.reference_run_dir is not None:
+        reference_dir = Path(args.reference_run_dir)
+        logger.info("Loading reference baseline from %s", reference_dir)
+        if (reference_dir / "best_model.pt").exists():
+            reference_model, reference_history = load_reference_model(reference_dir, args, bundle, device)
+        else:
+            reference_model = None
+            reference_history = json.loads((reference_dir / "history.json").read_text())
+        return reference_dir, reference_model, reference_history
+
+    reference_dir = run_dir / "reference_baseline"
+    reference_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Training reference baseline for hierarchy construction")
+    reference_logger = setup_logger(reference_dir, "training_log_reference.txt")
+    reference_model = build_model(
+        model_name=args.model,
+        input_shape=bundle.input_shape,
+        num_classes=bundle.num_classes,
+        dropout=args.dropout,
+    ).to(device)
+    reference_model, reference_history, _ = train_loop(
+        model=reference_model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        num_classes=bundle.num_classes,
+        args=args,
+        device=device,
+        logger=reference_logger,
+        run_dir=reference_dir,
+        schedule=None,
+    )
+    np.save(reference_dir / "distance_matrix_classifier_weights.npy", classifier_weight_distance(reference_model))
+    save_evaluation_artifacts(reference_model, val_loader, device, bundle, reference_dir, "val")
+    save_evaluation_artifacts(reference_model, test_loader, device, bundle, reference_dir, "test")
+    return reference_dir, reference_model, reference_history
+
+
+def hierarchy_from_reference(
+    args: argparse.Namespace,
+    bundle: DatasetBundle,
+    val_loader: DataLoader,
+    device: torch.device,
+    logger: logging.Logger,
+    run_dir: Path,
+    reference_dir: Path,
+    reference_model: nn.Module | None,
+) -> list[list[list[int]]]:
+    if args.distance_source == "classifier_weights":
+        if reference_model is not None:
+            dist_matrix = classifier_weight_distance(reference_model)
+        else:
+            dist_path = reference_dir / "distance_matrix_classifier_weights.npy"
+            if not dist_path.exists():
+                raise FileNotFoundError(f"Missing reference distance matrix: {dist_path}")
+            dist_matrix = np.load(dist_path)
+    else:
+        if reference_model is None:
+            raise RuntimeError("confusion distance requires a reference checkpoint/model")
+        dist_matrix = confusion_distance(reference_model, val_loader, bundle.num_classes, device)
+    np.save(run_dir / "distance_matrix.npy", dist_matrix)
+
+    hierarchy_levels = compute_hierarchy(dist_matrix)
+    save_json(
+        run_dir / "hierarchy.json",
+        {
+            "distance_source": args.distance_source,
+            "levels": hierarchy_levels,
+            "class_names": bundle.class_names,
+        },
+    )
+    logger.info("Built hierarchy with %d levels", len(hierarchy_levels))
+    return hierarchy_levels
 
 
 def curriculum_run(
@@ -985,6 +1220,98 @@ def curriculum_run(
     return result
 
 
+def multiloss_run(
+    args: argparse.Namespace,
+    bundle: DatasetBundle,
+    loaders: tuple[DataLoader, DataLoader, DataLoader],
+    device: torch.device,
+    logger: logging.Logger,
+    run_dir: Path,
+) -> dict[str, Any]:
+    train_loader, val_loader, test_loader = loaders
+    reference_dir, reference_model, reference_history = load_or_train_reference(
+        args,
+        bundle,
+        loaders,
+        device,
+        logger,
+        run_dir,
+    )
+    hierarchy_levels = hierarchy_from_reference(
+        args,
+        bundle,
+        val_loader,
+        device,
+        logger,
+        run_dir,
+        reference_dir,
+        reference_model,
+    )
+    memberships = build_multiloss_memberships(hierarchy_levels, bundle.num_classes, device)
+    save_json(
+        run_dir / "multiloss_config.json",
+        {
+            "weighting": args.multi_weighting,
+            "losses": ["fine"] + [name for name, _ in memberships],
+            "static_weights": args.multi_static_weights,
+            "initial_weights": args.multi_initial_weights,
+            "gradnorm_alpha": args.gradnorm_alpha,
+            "reference_run_dir": str(reference_dir),
+        },
+    )
+
+    model = build_model(
+        model_name=args.model,
+        input_shape=bundle.input_shape,
+        num_classes=bundle.num_classes,
+        dropout=args.dropout,
+    ).to(device)
+    _, history, test_metrics = train_loop(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        test_loader=test_loader,
+        num_classes=bundle.num_classes,
+        args=args,
+        device=device,
+        logger=logger,
+        run_dir=run_dir,
+        schedule=None,
+        multiloss_memberships=memberships,
+    )
+    val_artifacts = save_evaluation_artifacts(model, val_loader, device, bundle, run_dir, "val")
+    test_artifacts = save_evaluation_artifacts(model, test_loader, device, bundle, run_dir, "test")
+    result = {
+        "mode": "multiloss",
+        "dataset": bundle.name,
+        "model": args.model,
+        "epochs_requested": args.epochs,
+        "epochs_completed": len(history),
+        "multi_weighting": args.multi_weighting,
+        "num_multiloss_levels": len(memberships),
+        "best_val_acc": max(float(entry["val_acc"]) for entry in history),
+        "best_test_acc": max(float(entry["test_acc"]) for entry in history),
+        "final_test_acc": float(test_metrics["acc"]),
+        "distance_source": args.distance_source,
+        "reference_run_dir": str(reference_dir),
+        "reference_best_val_acc": max(float(entry["val_acc"]) for entry in reference_history),
+        "val_difficulty_class_accuracy_variance": float(val_artifacts["class_accuracy_variance"]),
+        "test_difficulty_class_accuracy_variance": float(test_artifacts["class_accuracy_variance"]),
+        "test_difficulty_confusion_entropy_mean": float(test_artifacts["confusion_entropy_mean"]),
+    }
+    save_json(run_dir / "results.json", result)
+    save_single_row_csv(run_dir / "summary.csv", result)
+    if args.wandb:
+        try:
+            import wandb
+            if wandb.run is not None:
+                wandb.run.summary.update(result)
+                log_wandb_artifacts(run_dir, f"{args.run_id}-{bundle.name}-{args.model}-multiloss")
+        except ImportError:
+            pass
+    return result
+
+
 def main() -> None:
     args = resolve_defaults(parse_args())
     seed_everything(args.seed)
@@ -1033,8 +1360,10 @@ def main() -> None:
 
     if args.mode == "baseline":
         result = baseline_run(args, bundle, loaders, device, logger, run_dir)
-    else:
+    elif args.mode == "curriculum":
         result = curriculum_run(args, bundle, loaders, device, logger, run_dir)
+    else:
+        result = multiloss_run(args, bundle, loaders, device, logger, run_dir)
 
     logger.info("Run complete: %s", json.dumps(result, indent=2))
     if wandb_run is not None:
