@@ -281,6 +281,26 @@ def create_optimizer_and_scheduler(
     return optimizer, scheduler
 
 
+def classification_metrics_from_confusion(confusion: torch.Tensor) -> dict[str, float]:
+    confusion_f = confusion.to(dtype=torch.float64)
+    tp = confusion_f.diag()
+    pred_count = confusion_f.sum(dim=0)
+    true_count = confusion_f.sum(dim=1)
+    precision = tp / pred_count.clamp_min(1.0)
+    recall = tp / true_count.clamp_min(1.0)
+    f1 = 2 * precision * recall / (precision + recall).clamp_min(1e-12)
+    support = true_count
+    total = support.sum().clamp_min(1.0)
+    present = support > 0
+    return {
+        "precision_macro": float(precision[present].mean().item()) if present.any() else 0.0,
+        "recall_macro": float(recall[present].mean().item()) if present.any() else 0.0,
+        "f1_macro": float(f1[present].mean().item()) if present.any() else 0.0,
+        "f1_weighted": float(((f1 * support).sum() / total).item()),
+        "balanced_acc": float(recall[present].mean().item()) if present.any() else 0.0,
+    }
+
+
 @torch.inference_mode()
 def evaluate(
     model: nn.Module,
@@ -290,22 +310,64 @@ def evaluate(
     model.eval()
     total_loss = 0.0
     total_correct = 0
+    total_top5_correct = 0
     total_samples = 0
+    confidence_sum = 0.0
+    ece_bins = 15
+    ece_conf_sum = torch.zeros(ece_bins, dtype=torch.float64)
+    ece_acc_sum = torch.zeros(ece_bins, dtype=torch.float64)
+    ece_count = torch.zeros(ece_bins, dtype=torch.float64)
+    confusion: torch.Tensor | None = None
 
     for inputs, labels in loader:
         inputs = inputs.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         logits = model(inputs)
+        if confusion is None:
+            num_classes = logits.shape[1]
+            confusion = torch.zeros((num_classes, num_classes), dtype=torch.int64)
         loss = F.cross_entropy(logits, labels)
+        probs = torch.softmax(logits, dim=1)
+        confidence, preds = probs.max(dim=1)
+        correct = preds == labels
         total_loss += loss.item() * labels.size(0)
-        preds = logits.argmax(dim=1)
-        total_correct += (preds == labels).sum().item()
+        total_correct += correct.sum().item()
+        if logits.shape[1] >= 5:
+            top5 = logits.topk(5, dim=1).indices
+            total_top5_correct += (top5 == labels.unsqueeze(1)).any(dim=1).sum().item()
         total_samples += labels.size(0)
+        confidence_sum += confidence.sum().item()
 
-    return {
-        "loss": total_loss / max(total_samples, 1),
-        "acc": total_correct / max(total_samples, 1),
-    }
+        labels_cpu = labels.cpu()
+        preds_cpu = preds.cpu()
+        indices = labels_cpu * confusion.shape[1] + preds_cpu
+        confusion += torch.bincount(indices, minlength=confusion.numel()).reshape_as(confusion)
+
+        bin_ids = torch.clamp((confidence.cpu() * ece_bins).long(), max=ece_bins - 1)
+        correct_cpu = correct.cpu().to(dtype=torch.float64)
+        confidence_cpu = confidence.cpu().to(dtype=torch.float64)
+        ece_count += torch.bincount(bin_ids, minlength=ece_bins).to(dtype=torch.float64)
+        ece_conf_sum += torch.bincount(bin_ids, weights=confidence_cpu, minlength=ece_bins)
+        ece_acc_sum += torch.bincount(bin_ids, weights=correct_cpu, minlength=ece_bins)
+
+    metrics = classification_metrics_from_confusion(confusion if confusion is not None else torch.zeros((1, 1), dtype=torch.int64))
+    non_empty_bins = ece_count > 0
+    ece = torch.tensor(0.0, dtype=torch.float64)
+    if non_empty_bins.any():
+        bin_conf = ece_conf_sum[non_empty_bins] / ece_count[non_empty_bins]
+        bin_acc = ece_acc_sum[non_empty_bins] / ece_count[non_empty_bins]
+        ece = ((ece_count[non_empty_bins] / max(total_samples, 1)) * (bin_acc - bin_conf).abs()).sum()
+
+    metrics.update(
+        {
+            "loss": total_loss / max(total_samples, 1),
+            "acc": total_correct / max(total_samples, 1),
+            "top5_acc": total_top5_correct / max(total_samples, 1),
+            "mean_confidence": confidence_sum / max(total_samples, 1),
+            "ece": float(ece.item()),
+        }
+    )
+    return metrics
 
 
 @torch.inference_mode()
@@ -884,6 +946,12 @@ def train_loop(
             "test_acc": test_metrics["acc"],
             "lr": optimizer.param_groups[0]["lr"],
         }
+        for metric_name, metric_value in val_metrics.items():
+            if metric_name not in {"loss", "acc"}:
+                record[f"val_{metric_name}"] = metric_value
+        for metric_name, metric_value in test_metrics.items():
+            if metric_name not in {"loss", "acc"}:
+                record[f"test_{metric_name}"] = metric_value
         if multiloss_memberships is not None:
             for name in multiloss_names:
                 record[f"loss_{name}"] = loss_component_totals[name] / max(total_train_samples, 1)
@@ -978,7 +1046,13 @@ def baseline_run(
         "epochs_completed": len(history),
         "best_val_acc": max(float(entry["val_acc"]) for entry in history),
         "best_test_acc": max(float(entry["test_acc"]) for entry in history),
+        "best_test_f1_macro": max(float(entry.get("test_f1_macro", 0.0)) for entry in history),
         "final_test_acc": float(test_metrics["acc"]),
+        "final_test_f1_macro": float(test_metrics["f1_macro"]),
+        "final_test_precision_macro": float(test_metrics["precision_macro"]),
+        "final_test_recall_macro": float(test_metrics["recall_macro"]),
+        "final_test_top5_acc": float(test_metrics["top5_acc"]),
+        "final_test_ece": float(test_metrics["ece"]),
         "val_difficulty_class_accuracy_variance": float(val_artifacts["class_accuracy_variance"]),
         "test_difficulty_class_accuracy_variance": float(test_artifacts["class_accuracy_variance"]),
         "test_difficulty_confusion_entropy_mean": float(test_artifacts["confusion_entropy_mean"]),
@@ -1200,7 +1274,13 @@ def curriculum_run(
         "num_hierarchy_levels": len(hierarchy_levels),
         "best_val_acc": max(float(entry["val_acc"]) for entry in history),
         "best_test_acc": max(float(entry["test_acc"]) for entry in history),
+        "best_test_f1_macro": max(float(entry.get("test_f1_macro", 0.0)) for entry in history),
         "final_test_acc": float(test_metrics["acc"]),
+        "final_test_f1_macro": float(test_metrics["f1_macro"]),
+        "final_test_precision_macro": float(test_metrics["precision_macro"]),
+        "final_test_recall_macro": float(test_metrics["recall_macro"]),
+        "final_test_top5_acc": float(test_metrics["top5_acc"]),
+        "final_test_ece": float(test_metrics["ece"]),
         "distance_source": args.distance_source,
         "reference_run_dir": str(reference_dir),
         "val_difficulty_class_accuracy_variance": float(val_artifacts["class_accuracy_variance"]),
@@ -1291,7 +1371,13 @@ def multiloss_run(
         "num_multiloss_levels": len(memberships),
         "best_val_acc": max(float(entry["val_acc"]) for entry in history),
         "best_test_acc": max(float(entry["test_acc"]) for entry in history),
+        "best_test_f1_macro": max(float(entry.get("test_f1_macro", 0.0)) for entry in history),
         "final_test_acc": float(test_metrics["acc"]),
+        "final_test_f1_macro": float(test_metrics["f1_macro"]),
+        "final_test_precision_macro": float(test_metrics["precision_macro"]),
+        "final_test_recall_macro": float(test_metrics["recall_macro"]),
+        "final_test_top5_acc": float(test_metrics["top5_acc"]),
+        "final_test_ece": float(test_metrics["ece"]),
         "distance_source": args.distance_source,
         "reference_run_dir": str(reference_dir),
         "reference_best_val_acc": max(float(entry["val_acc"]) for entry in reference_history),
