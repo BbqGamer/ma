@@ -55,8 +55,47 @@ wandb_enabled() {
   return 1
 }
 
+auto_stop_pod() {
+  local status="${1:-0}"
+  if ! is_truthy "$AUTO_STOP_POD"; then
+    return 0
+  fi
+  if [[ -z "${RUNPOD_POD_ID:-}" ]]; then
+    echo "[entrypoint] AUTO_STOP_POD is enabled but RUNPOD_POD_ID is not set"
+    return 0
+  fi
+
+  echo "[entrypoint] Run finished with status $status; stopping Runpod pod ${RUNPOD_POD_ID}"
+  if command -v runpodctl >/dev/null 2>&1; then
+    if [[ -n "${RUNPOD_API_KEY:-}" ]]; then
+      runpodctl config --apiKey "$RUNPOD_API_KEY" >/dev/null 2>&1 || true
+    fi
+    runpodctl pod stop "$RUNPOD_POD_ID" && return 0
+  fi
+
+  if [[ -n "${RUNPOD_API_KEY:-}" ]]; then
+    python - "$RUNPOD_POD_ID" "$RUNPOD_API_KEY" <<'PY' || true
+import sys
+import urllib.request
+
+pod_id, api_key = sys.argv[1], sys.argv[2]
+request = urllib.request.Request(
+    f"https://rest.runpod.io/v1/pods/{pod_id}/stop",
+    method="POST",
+    headers={"Authorization": f"Bearer {api_key}"},
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    print(f"[entrypoint] Runpod REST stop returned HTTP {response.status}")
+PY
+  else
+    echo "[entrypoint] Cannot auto-stop: provide RUNPOD_API_KEY or include configured runpodctl"
+  fi
+}
+
+trap 'status=$?; auto_stop_pod "$status"' EXIT
+
 echo "[entrypoint] image=bbqdocker/coarse-to-fine-curriculum:v0.3.x"
-echo "[entrypoint] EXPERIMENT=$EXPERIMENT WANDB=$WANDB WANDB_PROJECT=$WANDB_PROJECT WANDB_GROUP=${WANDB_GROUP:-<auto>} WANDB_API_KEY_SET=$([[ -n "${WANDB_API_KEY:-}" ]] && echo yes || echo no)"
+echo "[entrypoint] EXPERIMENT=$EXPERIMENT WANDB=$WANDB WANDB_PROJECT=$WANDB_PROJECT WANDB_GROUP=${WANDB_GROUP:-<auto>} WANDB_API_KEY_SET=$([[ -n "${WANDB_API_KEY:-}" ]] && echo yes || echo no) RUNPOD_API_KEY_SET=$([[ -n "${RUNPOD_API_KEY:-}" ]] && echo yes || echo no)"
 
 common_args=(
   --dataset "$DATASET"
@@ -238,11 +277,3 @@ if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
   fi
 fi
 
-if [[ "$AUTO_STOP_POD" == "1" && -n "${RUNPOD_POD_ID:-}" ]]; then
-  echo "[entrypoint] Training finished; stopping Runpod pod ${RUNPOD_POD_ID}"
-  if command -v runpodctl >/dev/null 2>&1; then
-    runpodctl pod stop "$RUNPOD_POD_ID" || runpodctl remove pod "$RUNPOD_POD_ID" || true
-  else
-    echo "[entrypoint] runpodctl not found; cannot auto-stop pod"
-  fi
-fi

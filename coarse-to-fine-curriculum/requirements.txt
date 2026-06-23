@@ -3,3 +3,5 @@ numpy
 pillow
 tqdm
 wandb
+pandas
+matplotlib
