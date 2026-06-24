@@ -5,13 +5,15 @@ EXPERIMENT="${EXPERIMENT:-single}"
 RUN_MODES="${RUN_MODES:-baseline,curriculum}"
 RUN_ID="${RUN_ID:-$(date +%Y-%m-%d_%H-%M-%S)}"
 DATASET="${DATASET:-cifar100}"
-MODEL="${MODEL:-cnn}"
+MODEL="${MODEL:-}"
 EPOCHS="${EPOCHS:-400}"
 CURRICULUM_EPOCHS="${CURRICULUM_EPOCHS:-}"
 BATCH_SIZE="${BATCH_SIZE:-}"
 LR="${LR:-}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-}"
 DROPOUT="${DROPOUT:-0.0}"
+CNN_WIDTH_MULTIPLIER="${CNN_WIDTH_MULTIPLIER:-1.0}"
+CIFAR_RESNET_WIDTH_MULTIPLIER="${CIFAR_RESNET_WIDTH_MULTIPLIER:-1.0}"
 PATIENCE="${PATIENCE:-50}"
 VAL_RATIO="${VAL_RATIO:-0.2}"
 SHAPES_TEST_RATIO="${SHAPES_TEST_RATIO:-0.2}"
@@ -105,9 +107,11 @@ echo "[entrypoint] EXPERIMENT=$EXPERIMENT WANDB=$WANDB WANDB_PROJECT=$WANDB_PROJ
 
 common_args=(
   --dataset "$DATASET"
-  --model "$MODEL"
+  --model "${MODEL:-cnn}"
   --epochs "$EPOCHS"
   --dropout "$DROPOUT"
+  --cnn-width-multiplier "$CNN_WIDTH_MULTIPLIER"
+  --cifar-resnet-width-multiplier "$CIFAR_RESNET_WIDTH_MULTIPLIER"
   --patience "$PATIENCE"
   --val_ratio "$VAL_RATIO"
   --shapes_test_ratio "$SHAPES_TEST_RATIO"
@@ -210,11 +214,22 @@ run_figure11_sweep() {
   if [[ "$EXPERIMENT" == "figure11_cnn" ]]; then
     fig11_model="cnn"
   fi
-  echo "[entrypoint] Running Figure-11-style CIFAR-100 sweep with model=$fig11_model"
+  if [[ -n "$MODEL" ]]; then
+    fig11_model="$MODEL"
+  fi
+  local fig11_model_token="$fig11_model"
+  if [[ "$fig11_model" == "cnn" && "$CNN_WIDTH_MULTIPLIER" != "1.0" && "$CNN_WIDTH_MULTIPLIER" != "1" ]]; then
+    fig11_model_token="cnn-w${CNN_WIDTH_MULTIPLIER}"
+  fi
+  if [[ "$fig11_model" == cifar_resnet* && "$CIFAR_RESNET_WIDTH_MULTIPLIER" != "1.0" && "$CIFAR_RESNET_WIDTH_MULTIPLIER" != "1" ]]; then
+    fig11_model_token="${fig11_model}-w${CIFAR_RESNET_WIDTH_MULTIPLIER}"
+  fi
+  echo "[entrypoint] Running Figure-11-style CIFAR-100 sweep with model=$fig11_model token=$fig11_model_token"
   local optimizer_arg=()
   local scheduler_arg=()
   local lr_arg=()
   local batch_size_arg=()
+  local width_arg=(--cnn-width-multiplier "$CNN_WIDTH_MULTIPLIER" --cifar-resnet-width-multiplier "$CIFAR_RESNET_WIDTH_MULTIPLIER")
   local roughness_arg=()
   if [[ -n "$OPTIMIZER" ]]; then
     optimizer_arg=(--optimizer "$OPTIMIZER")
@@ -238,7 +253,7 @@ run_figure11_sweep() {
   fi
 
   local wandb_arg=()
-  wandb_args_array "fig11-${fig11_model}-${DATASET}-seed${SEED}" wandb_arg
+  wandb_args_array "fig11-${fig11_model_token}-${DATASET}-seed${SEED}" wandb_arg
 
   python scripts/plan_figure11_resnet18.py \
     --seed "$SEED" \
@@ -250,6 +265,7 @@ run_figure11_sweep() {
     "${scheduler_arg[@]}" \
     "${lr_arg[@]}" \
     "${batch_size_arg[@]}" \
+    "${width_arg[@]}" \
     "${roughness_arg[@]}" \
     "${wandb_arg[@]}" \
     --data-dir "$DATA_DIR" \
@@ -262,7 +278,7 @@ run_figure11_sweep() {
     --seed "$SEED" \
     --model "$fig11_model" \
     --dataset "$DATASET" \
-    --run-prefix "fig11-${fig11_model}-${DATASET}" \
+    --run-prefix "fig11-${fig11_model_token}-${DATASET}" \
     --metric "$FIG11_METRIC"
 
   python scripts/analyze_results.py "$OUTPUT_DIR"
@@ -283,6 +299,8 @@ run_cnn_multiloss() {
     --scheduler "${SCHEDULER:-none}"
     --lr "${LR:-0.001}"
     --batch_size "${BATCH_SIZE:-128}"
+    --cnn-width-multiplier "$CNN_WIDTH_MULTIPLIER"
+    --cifar-resnet-width-multiplier "$CIFAR_RESNET_WIDTH_MULTIPLIER"
     --data_dir "$DATA_DIR"
     --output_dir "$OUTPUT_DIR"
     --seed "$SEED"
@@ -345,12 +363,20 @@ if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
   if [[ "$EXPERIMENT" == "figure11_resnet18" || "$EXPERIMENT" == "figure11_cnn" ]]; then
     archive_model="resnet18"
     [[ "$EXPERIMENT" == "figure11_cnn" ]] && archive_model="cnn"
-    archive_base="figure11_${archive_model}_${DATASET}-seed${SEED}"
-    archive_members+=("fig11-${archive_model}-${DATASET}-seed${SEED}-baseline")
+    [[ -n "$MODEL" ]] && archive_model="$MODEL"
+    archive_model_token="$archive_model"
+    if [[ "$archive_model" == "cnn" && "$CNN_WIDTH_MULTIPLIER" != "1.0" && "$CNN_WIDTH_MULTIPLIER" != "1" ]]; then
+      archive_model_token="cnn-w${CNN_WIDTH_MULTIPLIER}"
+    fi
+    if [[ "$archive_model" == cifar_resnet* && "$CIFAR_RESNET_WIDTH_MULTIPLIER" != "1.0" && "$CIFAR_RESNET_WIDTH_MULTIPLIER" != "1" ]]; then
+      archive_model_token="${archive_model}-w${CIFAR_RESNET_WIDTH_MULTIPLIER}"
+    fi
+    archive_base="figure11_${archive_model_token}_${DATASET}-seed${SEED}"
+    archive_members+=("fig11-${archive_model_token}-${DATASET}-seed${SEED}-baseline")
     for n in 5 10 20 30 40 50; do
-      archive_members+=("fig11-${archive_model}-${DATASET}-seed${SEED}-curr${n}")
+      archive_members+=("fig11-${archive_model_token}-${DATASET}-seed${SEED}-curr${n}")
     done
-    archive_members+=("fig11-${archive_model}-${DATASET}-seed${SEED}-figure11-analysis")
+    archive_members+=("fig11-${archive_model_token}-${DATASET}-seed${SEED}-figure11-analysis")
     [[ -d "$OUTPUT_DIR/analysis" ]] && archive_members+=("analysis")
   else
     archive_members+=("$RUN_ID")

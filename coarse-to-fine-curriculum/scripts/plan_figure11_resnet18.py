@@ -33,7 +33,23 @@ def parse_args() -> argparse.Namespace:
         ],
         default="cifar100",
     )
-    parser.add_argument("--model", choices=["cnn", "resnet18", "resnet50"], default="resnet18")
+    parser.add_argument(
+        "--model",
+        choices=[
+            "cnn",
+            "cifar_resnet8",
+            "cifar_resnet14",
+            "cifar_resnet20",
+            "cifar_resnet32",
+            "cifar_resnet44",
+            "cifar_resnet56",
+            "resnet18",
+            "resnet50",
+        ],
+        default="resnet18",
+    )
+    parser.add_argument("--cnn-width-multiplier", type=float, default=1.0)
+    parser.add_argument("--cifar-resnet-width-multiplier", type=float, default=1.0)
     parser.add_argument("--optimizer", default=DEFAULT_OPTIMIZER)
     parser.add_argument("--scheduler", default=DEFAULT_SCHEDULER)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
@@ -63,7 +79,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | None) -> tuple[str, dict[str, object]]:
-    run_prefix = args.run_prefix or f"fig11-{args.model}-{args.dataset}"
+    model_token = args.model
+    if args.model == "cnn" and args.cnn_width_multiplier != 1.0:
+        model_token = f"cnn-w{args.cnn_width_multiplier:g}"
+    if args.model.startswith("cifar_resnet") and args.cifar_resnet_width_multiplier != 1.0:
+        model_token = f"{args.model}-w{args.cifar_resnet_width_multiplier:g}"
+    run_prefix = args.run_prefix or f"fig11-{model_token}-{args.dataset}"
     suffix = "baseline" if mode == "baseline" else f"curr{curriculum_epochs}"
     run_id = f"{run_prefix}-seed{args.seed}-{suffix}"
     parts = [
@@ -83,6 +104,8 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
     ]
     if args.batch_size is not None:
         parts.extend(["--batch_size", str(args.batch_size)])
+    parts.extend(["--cnn-width-multiplier", str(args.cnn_width_multiplier)])
+    parts.extend(["--cifar-resnet-width-multiplier", str(args.cifar_resnet_width_multiplier)])
     if args.roughness_probes:
         parts.extend(["--roughness-probes"])
         parts.extend(["--roughness-epochs", args.roughness_epochs])
@@ -115,6 +138,8 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "scheduler": args.scheduler,
         "lr": args.lr,
         "batch_size": args.batch_size if args.batch_size is not None else "",
+        "cnn_width_multiplier": args.cnn_width_multiplier,
+        "cifar_resnet_width_multiplier": args.cifar_resnet_width_multiplier,
         "roughness_probes": args.roughness_probes,
         "roughness_epochs": args.roughness_epochs if args.roughness_probes else "",
         "mode": mode,

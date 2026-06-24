@@ -23,7 +23,21 @@ def parse_args() -> argparse.Namespace:
         help="Directory containing the generated run_id directories",
     )
     parser.add_argument("--run-prefix", default="fig11-resnet18-cifar100")
-    parser.add_argument("--model", choices=["cnn", "resnet18", "resnet50"], default="resnet18")
+    parser.add_argument(
+        "--model",
+        choices=[
+            "cnn",
+            "cifar_resnet8",
+            "cifar_resnet14",
+            "cifar_resnet20",
+            "cifar_resnet32",
+            "cifar_resnet44",
+            "cifar_resnet56",
+            "resnet18",
+            "resnet50",
+        ],
+        default="resnet18",
+    )
     parser.add_argument("--dataset", default="cifar100")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--metric", choices=["test_acc", "val_acc"], default="test_acc")

@@ -41,7 +41,23 @@ def parse_args() -> argparse.Namespace:
         ],
         default="cifar100",
     )
-    parser.add_argument("--model", choices=["cnn", "resnet18", "resnet50"], default="cnn")
+    parser.add_argument(
+        "--model",
+        choices=[
+            "cnn",
+            "cifar_resnet8",
+            "cifar_resnet14",
+            "cifar_resnet20",
+            "cifar_resnet32",
+            "cifar_resnet44",
+            "cifar_resnet56",
+            "resnet18",
+            "resnet50",
+        ],
+        default="cnn",
+    )
+    parser.add_argument("--cnn-width-multiplier", type=float, default=1.0)
+    parser.add_argument("--cifar-resnet-width-multiplier", type=float, default=1.0)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--curriculum_epochs", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
@@ -157,6 +173,25 @@ def seed_everything(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def model_size_metrics(model: nn.Module) -> dict[str, int]:
+    return {
+        "num_parameters": sum(parameter.numel() for parameter in model.parameters()),
+        "num_trainable_parameters": sum(
+            parameter.numel() for parameter in model.parameters() if parameter.requires_grad
+        ),
+    }
+
+
+def model_spec_metrics(model: nn.Module) -> dict[str, Any]:
+    spec = getattr(model, "spec", None)
+    if spec is None:
+        return {}
+    return {
+        "model_spec_name": getattr(spec, "name", ""),
+        "model_feature_dim": getattr(spec, "feature_dim", None),
+    }
 
 
 def setup_logger(output_dir: Path, filename: str) -> logging.Logger:
@@ -1059,6 +1094,8 @@ def load_reference_model(
         input_shape=bundle.input_shape,
         num_classes=bundle.num_classes,
         dropout=args.dropout,
+        cnn_width_multiplier=args.cnn_width_multiplier,
+        cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
     ).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -1345,6 +1382,8 @@ def baseline_run(
         input_shape=bundle.input_shape,
         num_classes=bundle.num_classes,
         dropout=args.dropout,
+        cnn_width_multiplier=args.cnn_width_multiplier,
+        cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
     ).to(device)
     _, history, test_metrics = train_loop(
         model=model,
@@ -1379,6 +1418,10 @@ def baseline_run(
         "mode": "baseline",
         "dataset": bundle.name,
         "model": args.model,
+        "cnn_width_multiplier": args.cnn_width_multiplier,
+        "cifar_resnet_width_multiplier": args.cifar_resnet_width_multiplier,
+        **model_size_metrics(model),
+        **model_spec_metrics(model),
         "epochs_requested": args.epochs,
         "epochs_completed": len(history),
         "best_val_acc": max(float(entry["val_acc"]) for entry in history),
@@ -1442,6 +1485,8 @@ def load_or_train_reference(
         input_shape=bundle.input_shape,
         num_classes=bundle.num_classes,
         dropout=args.dropout,
+        cnn_width_multiplier=args.cnn_width_multiplier,
+        cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
     ).to(device)
     reference_model, reference_history, _ = train_loop(
         model=reference_model,
@@ -1528,6 +1573,8 @@ def curriculum_run(
             input_shape=bundle.input_shape,
             num_classes=bundle.num_classes,
             dropout=args.dropout,
+            cnn_width_multiplier=args.cnn_width_multiplier,
+            cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
         ).to(device)
         reference_model, reference_history, _ = train_loop(
             model=reference_model,
@@ -1595,6 +1642,8 @@ def curriculum_run(
         input_shape=bundle.input_shape,
         num_classes=bundle.num_classes,
         dropout=args.dropout,
+        cnn_width_multiplier=args.cnn_width_multiplier,
+        cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
     ).to(device)
     _, history, test_metrics = train_loop(
         model=model,
@@ -1616,6 +1665,10 @@ def curriculum_run(
         "mode": "curriculum",
         "dataset": bundle.name,
         "model": args.model,
+        "cnn_width_multiplier": args.cnn_width_multiplier,
+        "cifar_resnet_width_multiplier": args.cifar_resnet_width_multiplier,
+        **model_size_metrics(model),
+        **model_spec_metrics(model),
         "epochs_requested": args.epochs,
         "epochs_completed": len(history),
         "curriculum_epochs": curriculum_epochs,
@@ -1701,6 +1754,8 @@ def multiloss_run(
         input_shape=bundle.input_shape,
         num_classes=bundle.num_classes,
         dropout=args.dropout,
+        cnn_width_multiplier=args.cnn_width_multiplier,
+        cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
     ).to(device)
     _, history, test_metrics = train_loop(
         model=model,
@@ -1723,6 +1778,10 @@ def multiloss_run(
         "mode": "multiloss",
         "dataset": bundle.name,
         "model": args.model,
+        "cnn_width_multiplier": args.cnn_width_multiplier,
+        "cifar_resnet_width_multiplier": args.cifar_resnet_width_multiplier,
+        **model_size_metrics(model),
+        **model_spec_metrics(model),
         "epochs_requested": args.epochs,
         "epochs_completed": len(history),
         "multi_weighting": args.multi_weighting,
