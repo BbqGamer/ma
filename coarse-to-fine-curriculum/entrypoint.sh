@@ -266,6 +266,7 @@ run_figure11_sweep() {
     --metric "$FIG11_METRIC"
 
   python scripts/analyze_results.py "$OUTPUT_DIR"
+  python scripts/analyze_pareto.py "$OUTPUT_DIR"
 }
 
 run_cnn_multiloss() {
@@ -319,6 +320,7 @@ run_cnn_multiloss() {
   python train_coarse_to_fine.py --mode multiloss "${base_common[@]}" --run_id "${prefix}-gradnorm" --multi-weighting gradnorm --multi-initial-weights 1,1,1,1 --gradnorm-alpha 0.5 --reference_run_dir "$reference_dir" "${wandb_arg[@]}"
 
   python scripts/analyze_results.py "$OUTPUT_DIR"
+  python scripts/analyze_pareto.py "$OUTPUT_DIR"
 }
 
 case "$EXPERIMENT" in
