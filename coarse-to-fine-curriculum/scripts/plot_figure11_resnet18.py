@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--run-prefix", default="fig11-resnet18-cifar100")
     parser.add_argument("--model", choices=["cnn", "resnet18", "resnet50"], default="resnet18")
+    parser.add_argument("--dataset", default="cifar100")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--metric", choices=["test_acc", "val_acc"], default="test_acc")
     return parser.parse_args()
@@ -70,7 +71,7 @@ def plot_metric(
 
     ax.set_xlabel("Epoch")
     ax.set_ylabel(metric)
-    ax.set_title(f"CIFAR-100: {metric} across curriculum lengths")
+    ax.set_title(f"{metric} across curriculum lengths")
     ax.grid(alpha=0.25)
     ax.legend(ncol=2)
     fig.tight_layout()
@@ -110,7 +111,7 @@ def main() -> None:
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     baseline_run_id = f"{run_prefix}-seed{seed}-baseline"
-    baseline_dir = run_dir(root, baseline_run_id, f"cifar100_{args.model}_baseline")
+    baseline_dir = run_dir(root, baseline_run_id, f"{args.dataset}_{args.model}_baseline")
     baseline_history = load_history(baseline_dir)
     baseline_summary = load_summary(baseline_dir)
 
@@ -118,7 +119,7 @@ def main() -> None:
     curriculum_summaries: dict[int, pd.Series] = {}
     for curriculum_epochs in CURRICULUM_LENGTHS:
         run_id = f"{run_prefix}-seed{seed}-curr{curriculum_epochs}"
-        path = run_dir(root, run_id, f"cifar100_{args.model}_curriculum")
+        path = run_dir(root, run_id, f"{args.dataset}_{args.model}_curriculum")
         curriculum_histories[curriculum_epochs] = load_history(path)
         curriculum_summaries[curriculum_epochs] = load_summary(path)
 

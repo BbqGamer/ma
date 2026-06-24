@@ -19,6 +19,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument(
+        "--dataset",
+        choices=[
+            "cifar10",
+            "cifar100",
+            "mnist",
+            "fashion-mnist",
+            "kmnist",
+            "svhn",
+            "stl10",
+            "tiny-imagenet",
+        ],
+        default="cifar100",
+    )
     parser.add_argument("--model", choices=["cnn", "resnet18", "resnet50"], default="resnet18")
     parser.add_argument("--optimizer", default=DEFAULT_OPTIMIZER)
     parser.add_argument("--scheduler", default=DEFAULT_SCHEDULER)
@@ -49,13 +63,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | None) -> tuple[str, dict[str, object]]:
-    run_prefix = args.run_prefix or f"fig11-{args.model}-cifar100"
+    run_prefix = args.run_prefix or f"fig11-{args.model}-{args.dataset}"
     suffix = "baseline" if mode == "baseline" else f"curr{curriculum_epochs}"
     run_id = f"{run_prefix}-seed{args.seed}-{suffix}"
     parts = [
         args.python,
         "--mode", mode,
-        "--dataset", "cifar100",
+        "--dataset", args.dataset,
         "--model", args.model,
         "--epochs", str(args.epochs),
         "--val_ratio", str(args.val_ratio),
@@ -86,13 +100,13 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
     reference_run_dir = ""
     if mode == "curriculum":
         reference_run_id = f"{run_prefix}-seed{args.seed}-baseline"
-        reference_run_dir = f"{args.output_dir}/{reference_run_id}/cifar100_{args.model}_baseline"
+        reference_run_dir = f"{args.output_dir}/{reference_run_id}/{args.dataset}_{args.model}_baseline"
         parts.extend(["--curriculum_epochs", str(curriculum_epochs)])
         parts.extend(["--reference_run_dir", reference_run_dir])
 
     command = " ".join(parts)
     row = {
-        "dataset": "cifar100",
+        "dataset": args.dataset,
         "model": args.model,
         "seed": args.seed,
         "epochs": args.epochs,

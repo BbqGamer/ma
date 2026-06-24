@@ -88,6 +88,38 @@ CIFAR10_CLASS_NAMES = [
     "truck",
 ]
 
+MNIST_CLASS_NAMES = [str(idx) for idx in range(10)]
+
+FASHION_MNIST_CLASS_NAMES = [
+    "t-shirt_top",
+    "trouser",
+    "pullover",
+    "dress",
+    "coat",
+    "sandal",
+    "shirt",
+    "sneaker",
+    "bag",
+    "ankle_boot",
+]
+
+KMNIST_CLASS_NAMES = ["o", "ki", "su", "tsu", "na", "ha", "ma", "ya", "re", "wo"]
+
+SVHN_CLASS_NAMES = [str(idx) for idx in range(10)]
+
+STL10_CLASS_NAMES = [
+    "airplane",
+    "bird",
+    "car",
+    "cat",
+    "deer",
+    "dog",
+    "horse",
+    "monkey",
+    "ship",
+    "truck",
+]
+
 CIFAR100_CLASS_NAMES = [
     "apple",
     "aquarium_fish",
@@ -237,11 +269,22 @@ def build_transforms(dataset_name: str, augmentation: bool) -> tuple[Callable, C
     train_transforms: list[Callable] = []
     eval_transforms: list[Callable] = []
 
+    if dataset_name in {"mnist", "fashion-mnist", "kmnist"}:
+        train_transforms.extend([transforms.Resize(32), transforms.Grayscale(num_output_channels=3)])
+        eval_transforms.extend([transforms.Resize(32), transforms.Grayscale(num_output_channels=3)])
+
     if augmentation:
-        if dataset_name in {"cifar10", "cifar100"}:
+        if dataset_name in {"cifar10", "cifar100", "svhn", "mnist", "fashion-mnist", "kmnist"}:
             train_transforms.extend(
                 [
                     transforms.RandomCrop(32, padding=4),
+                    transforms.RandomHorizontalFlip(),
+                ]
+            )
+        elif dataset_name == "stl10":
+            train_transforms.extend(
+                [
+                    transforms.RandomCrop(96, padding=12),
                     transforms.RandomHorizontalFlip(),
                 ]
             )
@@ -274,6 +317,46 @@ def load_dataset(
         return load_cifar10(data_dir, val_ratio, seed, download, train_transform, eval_transform)
     if dataset_name == "cifar100":
         return load_cifar100(data_dir, val_ratio, seed, download, train_transform, eval_transform)
+    if dataset_name == "mnist":
+        return load_mnist_like(
+            datasets.MNIST,
+            "mnist",
+            MNIST_CLASS_NAMES,
+            data_dir,
+            val_ratio,
+            seed,
+            download,
+            train_transform,
+            eval_transform,
+        )
+    if dataset_name == "fashion-mnist":
+        return load_mnist_like(
+            datasets.FashionMNIST,
+            "fashion-mnist",
+            FASHION_MNIST_CLASS_NAMES,
+            data_dir,
+            val_ratio,
+            seed,
+            download,
+            train_transform,
+            eval_transform,
+        )
+    if dataset_name == "kmnist":
+        return load_mnist_like(
+            datasets.KMNIST,
+            "kmnist",
+            KMNIST_CLASS_NAMES,
+            data_dir,
+            val_ratio,
+            seed,
+            download,
+            train_transform,
+            eval_transform,
+        )
+    if dataset_name == "svhn":
+        return load_svhn(data_dir, val_ratio, seed, download, train_transform, eval_transform)
+    if dataset_name == "stl10":
+        return load_stl10(data_dir, val_ratio, seed, download, train_transform, eval_transform)
     if dataset_name == "shapes":
         root = shapes_path if shapes_path is not None else data_dir / "shapes"
         return load_shapes(root, val_ratio, shapes_test_ratio, seed, train_transform, eval_transform)
@@ -353,6 +436,78 @@ def load_cifar100(
         input_shape=(3, 32, 32),
         class_group_ids=CIFAR100_FINE_TO_COARSE,
         class_group_names=CIFAR100_COARSE_CLASS_NAMES,
+    )
+
+
+def load_mnist_like(
+    dataset_cls: type,
+    dataset_name: str,
+    class_names: list[str],
+    data_dir: Path,
+    val_ratio: float,
+    seed: int,
+    download: bool,
+    train_transform: Callable,
+    eval_transform: Callable,
+) -> DatasetBundle:
+    train_base = dataset_cls(root=data_dir, train=True, download=download, transform=train_transform)
+    train_eval_base = dataset_cls(root=data_dir, train=True, download=download, transform=eval_transform)
+    test_dataset = dataset_cls(root=data_dir, train=False, download=download, transform=eval_transform)
+    train_indices, val_indices = split_indices(len(train_base), val_ratio, seed)
+    return DatasetBundle(
+        name=dataset_name,
+        train_dataset=Subset(train_base, train_indices.tolist()),
+        val_dataset=Subset(train_eval_base, val_indices.tolist()),
+        test_dataset=test_dataset,
+        num_classes=10,
+        class_names=class_names,
+        input_shape=(3, 32, 32),
+    )
+
+
+def load_svhn(
+    data_dir: Path,
+    val_ratio: float,
+    seed: int,
+    download: bool,
+    train_transform: Callable,
+    eval_transform: Callable,
+) -> DatasetBundle:
+    train_base = datasets.SVHN(root=data_dir, split="train", download=download, transform=train_transform)
+    train_eval_base = datasets.SVHN(root=data_dir, split="train", download=download, transform=eval_transform)
+    test_dataset = datasets.SVHN(root=data_dir, split="test", download=download, transform=eval_transform)
+    train_indices, val_indices = split_indices(len(train_base), val_ratio, seed)
+    return DatasetBundle(
+        name="svhn",
+        train_dataset=Subset(train_base, train_indices.tolist()),
+        val_dataset=Subset(train_eval_base, val_indices.tolist()),
+        test_dataset=test_dataset,
+        num_classes=10,
+        class_names=SVHN_CLASS_NAMES,
+        input_shape=(3, 32, 32),
+    )
+
+
+def load_stl10(
+    data_dir: Path,
+    val_ratio: float,
+    seed: int,
+    download: bool,
+    train_transform: Callable,
+    eval_transform: Callable,
+) -> DatasetBundle:
+    train_base = datasets.STL10(root=data_dir, split="train", download=download, transform=train_transform)
+    train_eval_base = datasets.STL10(root=data_dir, split="train", download=download, transform=eval_transform)
+    test_dataset = datasets.STL10(root=data_dir, split="test", download=download, transform=eval_transform)
+    train_indices, val_indices = split_indices(len(train_base), val_ratio, seed)
+    return DatasetBundle(
+        name="stl10",
+        train_dataset=Subset(train_base, train_indices.tolist()),
+        val_dataset=Subset(train_eval_base, val_indices.tolist()),
+        test_dataset=test_dataset,
+        num_classes=10,
+        class_names=STL10_CLASS_NAMES,
+        input_shape=(3, 96, 96),
     )
 
 

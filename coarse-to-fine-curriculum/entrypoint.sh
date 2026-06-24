@@ -238,10 +238,11 @@ run_figure11_sweep() {
   fi
 
   local wandb_arg=()
-  wandb_args_array "fig11-${fig11_model}-cifar100-seed${SEED}" wandb_arg
+  wandb_args_array "fig11-${fig11_model}-${DATASET}-seed${SEED}" wandb_arg
 
   python scripts/plan_figure11_resnet18.py \
     --seed "$SEED" \
+    --dataset "$DATASET" \
     --model "$fig11_model" \
     --epochs "${EPOCHS:-200}" \
     --val-ratio "${VAL_RATIO:-0.1}" \
@@ -260,7 +261,8 @@ run_figure11_sweep() {
     "$OUTPUT_DIR" \
     --seed "$SEED" \
     --model "$fig11_model" \
-    --run-prefix "fig11-${fig11_model}-cifar100" \
+    --dataset "$DATASET" \
+    --run-prefix "fig11-${fig11_model}-${DATASET}" \
     --metric "$FIG11_METRIC"
 
   python scripts/analyze_results.py "$OUTPUT_DIR"
@@ -341,12 +343,12 @@ if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
   if [[ "$EXPERIMENT" == "figure11_resnet18" || "$EXPERIMENT" == "figure11_cnn" ]]; then
     archive_model="resnet18"
     [[ "$EXPERIMENT" == "figure11_cnn" ]] && archive_model="cnn"
-    archive_base="figure11_${archive_model}-seed${SEED}"
-    archive_members+=("fig11-${archive_model}-cifar100-seed${SEED}-baseline")
+    archive_base="figure11_${archive_model}_${DATASET}-seed${SEED}"
+    archive_members+=("fig11-${archive_model}-${DATASET}-seed${SEED}-baseline")
     for n in 5 10 20 30 40 50; do
-      archive_members+=("fig11-${archive_model}-cifar100-seed${SEED}-curr${n}")
+      archive_members+=("fig11-${archive_model}-${DATASET}-seed${SEED}-curr${n}")
     done
-    archive_members+=("fig11-${archive_model}-cifar100-seed${SEED}-figure11-analysis")
+    archive_members+=("fig11-${archive_model}-${DATASET}-seed${SEED}-figure11-analysis")
     [[ -d "$OUTPUT_DIR/analysis" ]] && archive_members+=("analysis")
   else
     archive_members+=("$RUN_ID")

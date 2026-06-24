@@ -28,7 +28,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["baseline", "curriculum", "multiloss"], required=True)
     parser.add_argument(
         "--dataset",
-        choices=["cifar10", "cifar100", "shapes", "tiny-imagenet"],
+        choices=[
+            "cifar10",
+            "cifar100",
+            "mnist",
+            "fashion-mnist",
+            "kmnist",
+            "svhn",
+            "stl10",
+            "shapes",
+            "tiny-imagenet",
+        ],
         default="cifar100",
     )
     parser.add_argument("--model", choices=["cnn", "resnet18", "resnet50"], default="cnn")
@@ -137,7 +147,8 @@ def resolve_defaults(args: argparse.Namespace) -> argparse.Namespace:
         else:
             args.weight_decay = 0.0
     if args.augmentation is None:
-        args.augmentation = args.model != "cnn" and args.dataset != "shapes"
+        no_default_aug = {"shapes", "mnist", "fashion-mnist", "kmnist", "svhn"}
+        args.augmentation = args.model != "cnn" and args.dataset not in no_default_aug
     return args
 
 
