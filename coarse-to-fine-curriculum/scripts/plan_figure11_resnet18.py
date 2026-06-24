@@ -54,6 +54,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--scheduler", default=DEFAULT_SCHEDULER)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument(
+        "--curriculum-lengths",
+        default=",".join(str(length) for length in CURRICULUM_LENGTHS),
+        help="Comma-separated curriculum lengths to sweep.",
+    )
     parser.add_argument("--roughness-probes", action="store_true")
     parser.add_argument("--roughness-epochs", default="1,5,10,11,20,50,100")
     parser.add_argument("--roughness-batches", type=int, default=2)
@@ -160,7 +165,10 @@ def main() -> None:
     commands.append(command)
     rows.append(row)
 
-    for curriculum_epochs in CURRICULUM_LENGTHS:
+    curriculum_lengths = [
+        int(item.strip()) for item in args.curriculum_lengths.split(",") if item.strip()
+    ]
+    for curriculum_epochs in curriculum_lengths:
         command, row = build_command(args, "curriculum", curriculum_epochs)
         commands.append(command)
         rows.append(row)

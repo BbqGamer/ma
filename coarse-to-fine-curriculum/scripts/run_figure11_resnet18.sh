@@ -10,6 +10,7 @@ LR="${LR:-0.001}"
 DATA_DIR="${DATA_DIR:-/workspace/data}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/runs}"
 FIG11_METRIC="${FIG11_METRIC:-test_acc}"
+CURRICULUM_LENGTHS="${CURRICULUM_LENGTHS:-5,10,20,30,40}"
 AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
 SAVE_CHECKPOINTS="${SAVE_CHECKPOINTS:-0}"
 ARCHIVE_OUTPUTS="${ARCHIVE_OUTPUTS:-1}"
@@ -51,6 +52,7 @@ python scripts/plan_figure11_resnet18.py \
   --seed "$SEED" \
   --epochs "$EPOCHS" \
   --val-ratio "$VAL_RATIO" \
+  --curriculum-lengths "$CURRICULUM_LENGTHS" \
   --optimizer "$OPTIMIZER" \
   --scheduler "$SCHEDULER" \
   --lr "$LR" \
@@ -86,7 +88,6 @@ if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
     "fig11-resnet18-cifar100-seed${SEED}-curr20"
     "fig11-resnet18-cifar100-seed${SEED}-curr30"
     "fig11-resnet18-cifar100-seed${SEED}-curr40"
-    "fig11-resnet18-cifar100-seed${SEED}-curr50"
     "fig11-resnet18-cifar100-seed${SEED}-figure11-analysis"
   )
   existing=()

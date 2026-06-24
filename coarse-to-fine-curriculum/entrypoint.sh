@@ -30,6 +30,7 @@ DOWNLOAD="${DOWNLOAD:-1}"
 AUGMENTATION="${AUGMENTATION:-auto}"
 AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
 FIG11_METRIC="${FIG11_METRIC:-test_acc}"
+CURRICULUM_LENGTHS="${CURRICULUM_LENGTHS:-5,10,20,30,40}"
 OPTIMIZER="${OPTIMIZER:-}"
 SCHEDULER="${SCHEDULER:-}"
 SAVE_CHECKPOINTS="${SAVE_CHECKPOINTS:-0}"
@@ -261,6 +262,7 @@ run_figure11_sweep() {
     --model "$fig11_model" \
     --epochs "${EPOCHS:-200}" \
     --val-ratio "${VAL_RATIO:-0.1}" \
+    --curriculum-lengths "$CURRICULUM_LENGTHS" \
     "${optimizer_arg[@]}" \
     "${scheduler_arg[@]}" \
     "${lr_arg[@]}" \
@@ -279,7 +281,8 @@ run_figure11_sweep() {
     --model "$fig11_model" \
     --dataset "$DATASET" \
     --run-prefix "fig11-${fig11_model_token}-${DATASET}" \
-    --metric "$FIG11_METRIC"
+    --metric "$FIG11_METRIC" \
+    --curriculum-lengths "$CURRICULUM_LENGTHS"
 
   python scripts/analyze_results.py "$OUTPUT_DIR"
   python scripts/analyze_pareto.py "$OUTPUT_DIR"
@@ -373,7 +376,10 @@ if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
     fi
     archive_base="figure11_${archive_model_token}_${DATASET}-seed${SEED}"
     archive_members+=("fig11-${archive_model_token}-${DATASET}-seed${SEED}-baseline")
-    for n in 5 10 20 30 40 50; do
+    IFS=',' read -r -a archive_curriculum_lengths <<< "$CURRICULUM_LENGTHS"
+    for n in "${archive_curriculum_lengths[@]}"; do
+      n="$(echo "$n" | xargs)"
+      [[ -z "$n" ]] && continue
       archive_members+=("fig11-${archive_model_token}-${DATASET}-seed${SEED}-curr${n}")
     done
     archive_members+=("fig11-${archive_model_token}-${DATASET}-seed${SEED}-figure11-analysis")

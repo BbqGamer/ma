@@ -41,6 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default="cifar100")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--metric", choices=["test_acc", "val_acc"], default="test_acc")
+    parser.add_argument(
+        "--curriculum-lengths",
+        default=",".join(str(length) for length in CURRICULUM_LENGTHS),
+        help="Comma-separated curriculum lengths to plot.",
+    )
     return parser.parse_args()
 
 
@@ -131,7 +136,10 @@ def main() -> None:
 
     curriculum_histories: dict[int, pd.DataFrame] = {}
     curriculum_summaries: dict[int, pd.Series] = {}
-    for curriculum_epochs in CURRICULUM_LENGTHS:
+    curriculum_lengths = [
+        int(item.strip()) for item in args.curriculum_lengths.split(",") if item.strip()
+    ]
+    for curriculum_epochs in curriculum_lengths:
         run_id = f"{run_prefix}-seed{seed}-curr{curriculum_epochs}"
         path = run_dir(root, run_id, f"{args.dataset}_{args.model}_curriculum")
         curriculum_histories[curriculum_epochs] = load_history(path)
