@@ -57,6 +57,7 @@
 %Najwygodniej jeśli każdy rozdział znajduje się w oddzielnym pliku
 \mainmatter%
 \chapter{Introduction}
+\label{chap:introduction}
 
 task. Inspired by Elman's concept of "starting small" \cite{elman1993learning},
 target later. theoretical continuation methods and modern meta-optimization
@@ -99,6 +100,7 @@ continuation methods with practical meta-optimization strategies
 \cite{gupta2025efficient, mao2022metaweighting}.
 
 \chapter{Literature Review}
+\label{chap:literature-review}
 
 grounded in \textbf{Numerical Continuation Methods} (or Homotopy Methods) used
 in global optimization \cite{allgower1990numerical}. In non-convex
@@ -126,6 +128,7 @@ studies show that combining their ideas can help address the difficulties of
 training complex models.
 
 \section{Curriculum Learning and Numerical Continuation}
+\label{sec:curriculum-continuation}
 
 The idea that models benefit from learning tasks in order of increasing
 difficulty was formalized by Bengio et al. \cite{bengio2009curriculum}, drawing
@@ -218,6 +221,7 @@ gradients of the smoothed and sharp losses; we want to schedule them to
 maximize final validation performance.
 
 \section{Meta-Learning and Continual Adaptation}
+\label{sec:meta-learning-continual}
 
 Meta-learning, or ``learning to learn,'' provides the algorithmic engine to
 automate the curriculum schedule. While early meta-learning focused on learning
@@ -295,6 +299,28 @@ task is uniform. Their method consistenly outperformed the baseline in terms of
 final validation accuracy. It turned out that there is a sweet spot for when to
 stop the curriculum at around 0.9 number of epochs that it would normally take
 the network to converge.
+\subsection{Sharpness-Aware Minimization for Efficiently Improving Generalization}
+The authors of the paper \cite{foretSharpnessAwareMinimizationEfficiently2021} from
+google introduced a novel optimization objective allowing to improve generlization 
+abilities of deep learning models. They did it by introducing a sharpness metric,
+which allows to find model parameters $w$ that not only have low training loss
+$L_S(w)$ but also whoose neighborhood have uniformly low training loss value.
+They have shown that the generalization ability is bounded in terms of
+neighborhood-wise training loss. 
+
+The formula for Sharpness-Aware-Minimization loss is:
+$L_S^{\mathrm{SAM}}(w) \triangleq \max_{\|\epsilon\|_p \leq \rho} L_S(w+\epsilon)$
+Which basically means, finding such perturbation $\eps$ of weight $w$, which
+length is smaller than $\rho$ (the hyperparameter) that yields in the highest
+increase of loss function. Flat regions don't have perturbations that would
+change the loss greatly while sharp regions do have them. Unfortunately it is
+highly inefficient to find the exact value for every training step, so we need
+to approximate it. We do it by ascending in the direction of the gradient.
+
+Optimizing this sharpness metric has shown to empirically improve generalization
+abilities of deep learning models on vision tasks. In our CL research, we want to
+log sharpness metric to see whether utilizing curriculum results in simliar effects
+as SAM optimization, i.e reaching flatter local optima.
 
 \section{Synthesis}
 
@@ -315,47 +341,267 @@ curriculum trajectory. By enforcing monotonic constraints on the
 meta-gradients, the method ensures the stability of the continuation process
 while leveraging the adaptability of meta-learning.
 
-\chapter{Implementation}
+\chapter{Project Timeline and Current Experimental Status}
+\label{chap:project-timeline}
 
-Rozdziały dokumentujące pracę własną studenta: opisujące ideę, sposób lub
-metodę rozwiązania postawionego problemu oraz rozdziały opisujące techniczną
-stronę rozwiązania --- dokumentacja techniczna, przeprowadzone testy, badania i
-uzyskane wyniki.
+This chapter summarizes the practical progress of the project. It was prepared
+from the repository history, experiment configuration files, MLflow records and
+archived analysis reports. Its purpose is to give a compact, supervisor-facing
+view of what has already been implemented, what was tested, and what the current
+empirical evidence supports.
 
-Praca musi zawierać elementy pracy własnej autora adekwatne do jego wiedzy
-praktycznej uzyskanej w okresie studiów. Za pracę własną autora można uznać
-np.: stworzenie aplikacji informatycznej lub jej fragmentu, zaproponowanie
-algorytmu rozwiązania problemu szczegółowego, przedstawienie projektu
-np.~systemu informatycznego lub sieci komputerowej, analizę i ocenę nowych
-technologii lub rozwiązań informatycznych wykorzystywanych w
-przedsiębiorstwach, itp.
+\section{High-level timeline}
 
-Autor powinien zadbać o właściwą dokumentację pracy własnej obejmującą
-specyfikację założeń i sposób realizacji poszczególnych zadań wraz z ich oceną
-i opisem napotkanych problemów. W przypadku prac o charakterze
-projektowo-implementacyjnym, ta część pracy jest zastępowana dokumentacją
-techniczną i użytkową systemu.
+The timeline below combines the repository history, MLflow records and archived
+analysis reports. At the time of inspection, the local MLflow database contained
+8032 tracked runs: 5663 finished, 542 failed, 1791 killed and 36 still marked as
+running. These numbers should be treated as a project-status snapshot rather than
+as final thesis tables.
 
-W pracy \textbf{nie należy zamieszczać całego kodu źródłowego} opracowanych
-programów. Kod źródłowy napisanych programów, wszelkie oprogramowanie
-wytworzone i wykorzystane w pracy, wyniki przeprowadzonych eksperymentów
-powinny być umieszczone np. na płycie CD, stanowiącej dodatek do pracy.
+\begin{description}
+    \item[Nov--Dec 2025.] The repository was initialized from a data-science
+          template. First Ackley and Bukin visualizations, a simple regression
+          dataset script, plotting utilities and an initial training loop were
+          created. The project started as a controlled regression setting for
+          testing whether smooth-to-hard training could help neural
+          approximation of difficult surfaces. The motivation for this direction
+          is introduced in Chapter~\ref{chap:introduction} and connected to
+          continuation methods in Section~\ref{sec:curriculum-continuation}.
+    \item[Feb 2026.] Gaussian smoothing was extended to Levy and Eggholder.
+          Dataset persistence and training-code refactors were added. The work
+          moved from notebooks and one-off scripts to a reusable
+          Gaussian-continuation pipeline with saved datasets. The theoretical
+          background for smoothing-based curricula is reviewed in
+          Section~\ref{sec:curriculum-continuation}.
+    \item[Early Mar 2026.] After supervisor discussion, the focus shifted toward
+          stronger baselines. Input scaling, surface visualizations, common
+          model utilities and a config-driven experiment runner were added. The
+          key lesson was that curriculum gains are not convincing unless the
+          baseline is already strong; the resulting baseline sweep is documented
+          in Appendix~\ref{app:sweep-pack-v1}.
+    \item[14--16 Mar 2026.] The first full sweep pack and the first full
+          curriculum-vs-single benchmark were run and archived. The baseline
+          search succeeded. Curriculum was not a universal winner: quality wins
+          were mixed, while single-target training was faster in every benchmark
+          cell. Details are in Appendices~\ref{app:sweep-pack-v1} and
+          \ref{app:curr-vs-single-v1}.
+    \item[Late Mar--early Apr 2026.] Ratio-controlled sweeps,
+          schedule-sweep infrastructure, shared IO, MLflow utilities and shared
+          training-loop primitives were added. The codebase became more
+          reproducible and modular, although schedule-sweep experiments remained
+          less mature than the main sweep and benchmark pipeline. The v3 sweep
+          setup is summarized in Appendix~\ref{app:sweep-pack-v3-setup}.
+    \item[Apr 2026.] Meta-weighting benchmark tooling was implemented. The
+          project tested validation-guided adaptive weighting over several
+          smoothed losses. The direction became operational, but results were
+          mixed: multi-loss weighting helped in selected settings but did not
+          consistently beat a single hard-loss baseline. The literature context
+          for this adaptive weighting direction is in
+          Section~\ref{sec:meta-learning-continual}, and the most complete
+          experiment summary is Appendix~\ref{app:meta-weighting-eggholder-u1}.
+    \item[May 2026.] Meta unroll support, policy-based schedule training,
+          LLM-generated schedule search and Optuna schedule-search comparisons
+          were added. The most promising adaptive result became policy search:
+          LLM-generated schedules slightly outperformed Optuna schedules on the
+          Eggholder benchmark, but with limited completed candidates and a need
+          for confirmation. The detailed generated report is in
+          \texttt{reports/analysis/schedule\_search\_comparison/}.
+    \item[Late May--Jun 2026.] CIFAR-100 easy-vs-hard schedule search and a
+          separate coarse-to-fine curriculum reproduction were added.
+          Docker/Runpod workflows and analysis scripts were prepared. CIFAR-100
+          produced encouraging curriculum signals: LLM schedules slightly beat
+          Optuna on single-seed validation loss, and one coarse-to-fine CNN run
+          showed a strong test-accuracy gain for curriculum. Details are in
+          \texttt{reports/analysis/cifar100\_easy\_hard/} and
+          \texttt{coarse-to-fine-curriculum/runs/}.
+\end{description}
 
-\section*{Styl tekstu}
+\section{Main experimental milestones}
 
-Należy\footnote{Uwagi o stylu pochodzą częściowo ze stron prof. Macieja
-	Drozdowskiego~\cite{Drozdowski2006}.} stosować formę bezosobową, tj.~\emph{w
-	pracy rozważono ......, w ramach pracy zaprojektowano ....}, a nie: \emph{w
-	pracy rozważyłem, w ramach pracy zaprojektowałem}. Odwołania do wcześniejszych
-fragmentów tekstu powinny mieć następującą postać: ,,Jak wspomniano wcześniej,
-....'', ,,Jak wykazano powyżej ....''. Należy unikać długich zdań.
+\subsection{Baseline hyperparameter search}
 
-Niedopuszczalne są zwroty używane w języku potocznym. W pracy należy używać
-terminologii informatycznej, która ma sprecyzowaną treść i znaczenie.
+The first major experiment was the sweep pack archived as
+\texttt{2026-03-14\_sweep-pack-v1}. It used the configuration files under
+\texttt{configs/sweeps/} and covered eight benchmark functions:
+\texttt{ackley}, \texttt{levy}, \texttt{bukin}, \texttt{eggholder},
+\texttt{franke}, \texttt{peaks}, \texttt{friedman1\_2d}, and
+\texttt{friedman2\_2d}. The pack executed 630 Optuna trials, of which 336
+finished and 294 were pruned or killed.
 
-Niedopuszczalne jest pisanie pracy metodą \emph{cut\&paste}, bo jest to plagiat
-i dowód intelektualnej indolencji autora. Dane zagadnienie należy opisać
-własnymi słowami. Zawsze trzeba powołać się na zewnętrzne źródła.
+The main purpose was to avoid comparing curriculum training against a weak
+manual baseline. The sweep showed that MLP architectures were best for most
+functions, while \texttt{peaks} preferred SIREN and \texttt{eggholder} preferred
+Fourier features. Eggholder remained the hardest benchmark by a large margin.
+This result established a stronger baseline for later curriculum comparisons.
+
+\subsection{Curriculum versus single-target training}
+
+The benchmark \texttt{curr\_vs\_single\_20260315\_175826} compared
+\texttt{single} and \texttt{curriculum} training using the best hyperparameters
+from the sweep pack. It covered eight functions, three seeds and two fairness
+regimes: equal epoch budget and equal wall-clock-time budget.
+
+The benchmark completed successfully: 96 out of 96 planned runner jobs finished,
+and all 96 corresponding MLflow runs were marked finished. The result was
+balanced on final quality but one-sided on runtime:
+
+\begin{itemize}
+    \item Under equal epochs, curriculum won 5 function-level quality comparisons
+          and single-target training won 3.
+    \item Under equal time, curriculum won 3 quality comparisons and
+          single-target training won 5.
+    \item Across all function/regime cells, curriculum and single training each
+          won 8 quality comparisons.
+    \item Single-target training won all 16 runtime comparisons.
+\end{itemize}
+
+The strongest interpretation is therefore not that curriculum learning is always
+better. The safer conclusion is that Gaussian-continuation curriculum is useful
+for selected functions, especially \texttt{bukin}, \texttt{franke} and
+\texttt{levy}, but it is not a global default. It clearly adds runtime overhead.
+
+\subsection{Ratio-controlled sweeps and training diagnostics}
+
+After the first benchmark, additional v2 and v3 ratio-controlled sweeps were
+introduced. Their goal was to control model capacity more carefully through the
+train-samples-per-parameter ratio and to log additional optimization diagnostics,
+such as gradient statistics, Hessian-trace estimates and sharpness proxies.
+
+The v3 ratio experiments produced many MLflow runs, for example 553 recorded
+runs for \texttt{sweep-ackley-v3-ratio} and 270 for
+\texttt{sweep-levy-v3-ratio}. These experiments improved the infrastructure and
+provided useful diagnostics, but they are less clean as final headline evidence
+than the archived sweep-pack v1 and curriculum-vs-single benchmark. They should
+be used mainly for methodological discussion and internal model-selection notes.
+
+\subsection{Meta-weighting experiments}
+
+The next stage implemented validation-guided adaptive weighting over multiple
+smoothed losses. The code is in \texttt{ma\_thesis/meta\_train.py}. The method
+uses softmax-normalized loss weights and updates them using the hard-target
+validation loss after a short differentiable lookahead. This is an operational
+meta-weighting approach, but it should be described carefully: it is not yet the
+full monotonic-gradient-regularized algorithm proposed in the early design notes.
+
+Several meta-weighting campaigns were run in April and May 2026. The clearest
+Eggholder analysis is the unroll-1 campaign
+\texttt{meta\_weighting\_eggholder\_u1\_20260504\_221357}, which analyzed 288
+finished runs. The aggregate result was mixed:
+
+\begin{itemize}
+    \item \texttt{num\_losses=1} had the best average final validation loss.
+    \item Among true multi-loss variants, \texttt{num\_losses=3} was the most
+          promising aggregate setting.
+    \item Multi-loss variants had win rates below 50\% against matched
+          single-loss baselines in the paired comparison.
+    \item The most promising region was around \(\eta_{\mathrm{model}}=0.03\),
+          \(\eta_{\mathrm{meta}}=0.003\), and one-step meta lookahead.
+\end{itemize}
+
+This is an important negative or mixed result. It shows that adaptive
+meta-weighting is feasible and produces meaningful weight trajectories, but it
+also shows that the method is sensitive and cannot yet be claimed as a robust
+improvement over hard-target training.
+
+\subsection{Policy-based and LLM-generated schedules}
+
+Because direct meta-weighting was unstable, the project added a more modular
+policy-based schedule interface. Schedule policies receive a compact training
+state and output normalized loss weights. This enabled both handcrafted schedules
+and LLM-generated schedules to be evaluated with the same benchmark scripts.
+
+The strongest policy-search result so far is the canonical Eggholder LLM
+schedule study compared with the corresponding Eggholder Optuna schedule study.
+The best completed LLM candidate had mean best hard validation loss 42680.20,
+while the best Optuna trial had 43669.97.
+The absolute gap was 989.77 in favor of the LLM schedule. This is promising, but
+it should be reported with caveats: only 11 of 20 LLM candidates completed, and
+the result should be confirmed before being treated as definitive.
+
+The substantive observation is that the LLM-generated schedules often converged
+to interpretable easy-first-to-hard trajectories, whereas Optuna explored a wider
+and less stable family of schedules. This gives a useful thesis discussion point:
+schedule search can matter more than simply adding more smoothed losses.
+
+\subsection{CIFAR-100 easy-vs-hard weighting}
+
+A second adaptive-schedule track was added for CIFAR-100. The easy task is
+coarse superclass prediction, while the hard task is fine-label prediction. This
+track is implemented with PyTorch Lightning in
+\texttt{ma\_thesis/cifar100\_lightning.py}.
+
+The single-seed comparison \texttt{cifar100\_v1\_llm} versus
+\texttt{cifar100\_v1\_optuna} found that the best LLM-generated schedule reached
+best hard validation loss 1.3115, while the best Optuna schedule reached 1.3279.
+Five of the ten successful LLM candidates beat the best Optuna trial on the
+search objective. However, the comparison used only seed 42, and the best Optuna
+loss trial had slightly better test accuracy. Therefore this result is promising
+but not final.
+
+\subsection{Coarse-to-fine CIFAR-100 reproduction}
+
+In June 2026, a separate PyTorch reproduction of coarse-to-fine curriculum
+learning was added under \texttt{coarse-to-fine-curriculum/}. This experiment is
+not the original Gaussian-continuation method, but it is useful because it tests
+a related curriculum idea in a more standard vision setting.
+
+One completed CIFAR-100 CNN run showed a clear positive result:
+
+\begin{itemize}
+    \item Baseline best test accuracy: 0.3625.
+    \item Curriculum best test accuracy: 0.4128.
+    \item Absolute gain: 0.0503, or 5.03 percentage points.
+    \item Relative gain over baseline: 13.88\%.
+\end{itemize}
+
+This is currently one of the clearest positive curriculum signals in the
+repository. Since it is only one seed and one model, it should be presented as a
+promising supporting experiment unless it is repeated across additional seeds.
+
+\section{Current state of the thesis project}
+
+The implementation side of the project is now substantially developed. The
+repository contains data generation, training, sweeps, MLflow logging, analysis
+scripts, meta-weighting, policy schedules, CIFAR-100 experiments and
+coarse-to-fine reproduction tooling. The main scientific picture is also clearer
+than at the beginning of the project:
+
+\begin{itemize}
+    \item Strong baselines matter. Once hyperparameters are tuned, fixed
+          Gaussian-continuation curriculum does not automatically dominate.
+    \item Curriculum learning is task-dependent. It helps some benchmark
+          functions but hurts or slows others.
+    \item Runtime cost is a real limitation. Sequential curriculum was slower in
+          every cell of the main curriculum-vs-single benchmark.
+    \item Direct meta-weighting is feasible but unstable. The current evidence is
+          mixed, especially on Eggholder.
+    \item Policy-based schedule search is the most promising adaptive direction,
+          especially LLM-generated easy-to-hard schedules, but it still needs
+          confirmation.
+    \item CIFAR-100 experiments provide useful supporting evidence that
+          curriculum can help in output-space or hierarchical settings.
+\end{itemize}
+
+The recommended final thesis claim should therefore be cautious: curriculum
+learning is not a universal improvement, but schedule design matters, and
+adaptive or task-aware schedules can produce gains in selected regimes.
+
+\section{Remaining work before final submission}
+
+The main remaining work is not infrastructure, but consolidation. The following
+steps are the most important:
+
+\begin{enumerate}
+    \item Freeze the final set of experiments and avoid broad new sweeps.
+    \item Confirm the most promising CIFAR-100 or policy-search result across
+          additional seeds if time permits.
+    \item Convert the existing appendices and reports into the main experimental
+          chapter.
+    \item Clearly separate implemented methods from proposed but not fully
+          validated ideas, especially the monotonic meta-regularizer.
+    \item Present negative and mixed results explicitly, because they strengthen
+          the credibility of the thesis.
+\end{enumerate}
 
 \chapter{Conclusions}
 
