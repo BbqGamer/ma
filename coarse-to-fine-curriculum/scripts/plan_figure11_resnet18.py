@@ -12,7 +12,7 @@ DEFAULT_SCHEDULER = "none"
 DEFAULT_LR = 1e-3
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate a Figure-11-style CIFAR-100 curriculum-length sweep"
     )
@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("figure11_resnet18_manifest.csv"),
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | None) -> tuple[str, dict[str, object]]:

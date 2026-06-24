@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ctf ./ctf
 COPY scripts ./scripts
+COPY tests ./tests
 COPY train_coarse_to_fine.py .
 COPY analyze_run.py .
 COPY entrypoint.sh .
