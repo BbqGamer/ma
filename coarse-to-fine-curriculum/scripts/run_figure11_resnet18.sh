@@ -11,7 +11,6 @@ DATA_DIR="${DATA_DIR:-/workspace/data}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/runs}"
 FIG11_METRIC="${FIG11_METRIC:-test_acc}"
 CURRICULUM_LENGTHS="${CURRICULUM_LENGTHS:-5,10,20,30,40}"
-AUTO_STOP_POD="${AUTO_STOP_POD:-1}"
 SAVE_CHECKPOINTS="${SAVE_CHECKPOINTS:-0}"
 ARCHIVE_OUTPUTS="${ARCHIVE_OUTPUTS:-1}"
 WANDB="${WANDB:-auto}"
@@ -100,11 +99,14 @@ if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
   fi
 fi
 
-if [[ "$AUTO_STOP_POD" == "1" && -n "${RUNPOD_POD_ID:-}" ]]; then
+if [[ -n "${RUNPOD_POD_ID:-}" ]]; then
   echo "[run_figure11_resnet18] Sweep finished; stopping Runpod pod ${RUNPOD_POD_ID}"
   if command -v runpodctl >/dev/null 2>&1; then
-    runpodctl pod stop "$RUNPOD_POD_ID" || runpodctl remove pod "$RUNPOD_POD_ID" || true
+    echo "[run_figure11_resnet18] Executing: runpodctl stop pod ${RUNPOD_POD_ID}"
+    runpodctl stop pod "$RUNPOD_POD_ID" || true
   else
-    echo "[run_figure11_resnet18] runpodctl not found; cannot auto-stop pod"
+    echo "[run_figure11_resnet18] runpodctl not found; cannot stop pod"
   fi
+else
+  echo "[run_figure11_resnet18] RUNPOD_POD_ID is not set; skipping Runpod stop command"
 fi

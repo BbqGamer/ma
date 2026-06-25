@@ -248,7 +248,6 @@ WANDB_PROJECT=coarse-to-fine-curriculum
 WANDB_ENTITY=
 WANDB_GROUP=fig11-resnet18-cifar100-seed42
 WANDB_TAGS=runpod,figure11,adam
-AUTO_STOP_POD=1
 ```
 
 You can either:
@@ -275,7 +274,9 @@ This will:
 - `DATA_DIR=/workspace/data`
 - `OUTPUT_DIR=/workspace/runs`
 - `AMP=1`
-- `AUTO_STOP_POD=1`
+
+The entrypoint always attempts to stop the Runpod pod at exit when `RUNPOD_POD_ID` is set,
+using `runpodctl stop pod $RUNPOD_POD_ID`.
 
 For shapes:
 
