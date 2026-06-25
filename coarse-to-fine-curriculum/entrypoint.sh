@@ -23,7 +23,15 @@ DATA_DIR="${DATA_DIR:-/workspace/data}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/runs}"
 SHAPES_PATH="${SHAPES_PATH:-}"
 TINY_IMAGENET_PATH="${TINY_IMAGENET_PATH:-}"
-NUM_WORKERS="${NUM_WORKERS:-4}"
+if [[ -z "${NUM_WORKERS:-}" ]]; then
+  CPU_COUNT="${RUNPOD_CPU_COUNT:-$(nproc 2>/dev/null || echo 4)}"
+  NUM_WORKERS="$(( CPU_COUNT / 2 ))"
+  (( NUM_WORKERS < 2 )) && NUM_WORKERS=2
+  (( NUM_WORKERS > 12 )) && NUM_WORKERS=12
+  echo "[entrypoint] Auto-selected NUM_WORKERS=$NUM_WORKERS from CPU_COUNT=$CPU_COUNT"
+else
+  echo "[entrypoint] Using explicit NUM_WORKERS=$NUM_WORKERS"
+fi
 SEED="${SEED:-42}"
 AMP="${AMP:-1}"
 DOWNLOAD="${DOWNLOAD:-1}"
@@ -81,7 +89,7 @@ auto_stop_pod() {
 
 trap 'status=$?; auto_stop_pod "$status"' EXIT
 
-echo "[entrypoint] image=bbqdocker/coarse-to-fine-curriculum:v0.3.x"
+echo "[entrypoint] image=bbqdocker/coarse-to-fine-curriculum:v0.5.x"
 echo "[entrypoint] EXPERIMENT=$EXPERIMENT WANDB=$WANDB WANDB_PROJECT=$WANDB_PROJECT WANDB_GROUP=${WANDB_GROUP:-<auto>} WANDB_API_KEY_SET=$([[ -n "${WANDB_API_KEY:-}" ]] && echo yes || echo no)"
 
 common_args=(

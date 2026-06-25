@@ -275,6 +275,9 @@ This will:
 - `OUTPUT_DIR=/workspace/runs`
 - `AMP=1`
 
+The entrypoint auto-selects `NUM_WORKERS` when unset as roughly half of available CPUs,
+capped to `[2, 12]`. Set `NUM_WORKERS` explicitly to override.
+
 The entrypoint always attempts to stop the Runpod pod at exit when `RUNPOD_POD_ID` is set,
 using `runpodctl stop pod $RUNPOD_POD_ID`.
 
