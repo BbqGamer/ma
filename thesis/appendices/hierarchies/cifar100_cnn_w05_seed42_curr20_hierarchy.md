@@ -1,0 +1,141 @@
+# CIFAR-100 learned hierarchy: cnn_w0.5 seed42 curr20
+
+## Level 1: 6 clusters
+
+- Cluster 1: apple, sweet_pepper, orange, pear, butterfly, possum, squirrel
+- Cluster 2: aquarium_fish, train, lawn_mower, bridge, bus, lobster, skyscraper, streetcar, chair, chimpanzee, cloud, tractor, pickup_truck, willow_tree, forest, rocket, keyboard, maple_tree, spider, oak_tree, tank, palm_tree, pine_tree, shark, bed, couch, plain, road, sea, castle, house, mountain
+- Cluster 3: lamp, cup, telephone, baby, girl, woman, boy, man, rose, caterpillar, orchid
+- Cluster 4: mouse, shrew, otter, wolf, raccoon, bear, seal, tiger, skunk, porcupine, elephant, mushroom, snail, sunflower, bee, tulip, dinosaur, poppy, rabbit, bottle, fox, hamster, cattle, camel
+- Cluster 5: leopard, lion, trout, crocodile, beaver, ray, turtle, bicycle, motorcycle, lizard, kangaroo, cockroach, flatfish, dolphin, whale
+- Cluster 6: worm, snake, can, table, television, bowl, wardrobe, plate, clock, crab, beetle
+
+## Level 2: 25 clusters
+
+- Cluster 1: apple, sweet_pepper, orange, pear, butterfly
+- Cluster 2: aquarium_fish, train, lawn_mower, bridge, bus, lobster, skyscraper, streetcar, chair, chimpanzee, cloud, tractor, pickup_truck
+- Cluster 3: baby, girl, woman, boy, man
+- Cluster 4: wolf, raccoon, bear, seal, tiger, skunk, porcupine, elephant
+- Cluster 5: trout, crocodile, beaver
+- Cluster 6: shark, bed, couch
+- Cluster 7: sunflower, bee, tulip, dinosaur, poppy
+- Cluster 8: crab, beetle
+- Cluster 9: bicycle, motorcycle, lizard, kangaroo
+- Cluster 10: rabbit, bottle, fox, hamster
+- Cluster 11: can, table, television, bowl, wardrobe
+- Cluster 12: cattle, camel
+- Cluster 13: castle, house, mountain
+- Cluster 14: rose, caterpillar, orchid
+- Cluster 15: plate, clock
+- Cluster 16: cockroach, flatfish, dolphin, whale
+- Cluster 17: lamp, cup, telephone
+- Cluster 18: willow_tree, forest, rocket, keyboard, maple_tree, spider, oak_tree, tank, palm_tree, pine_tree
+- Cluster 19: leopard, lion
+- Cluster 20: mouse, shrew, otter
+- Cluster 21: mushroom, snail
+- Cluster 22: plain, road, sea
+- Cluster 23: possum, squirrel
+- Cluster 24: ray, turtle
+- Cluster 25: worm, snake
+
+## Level 3: 100 clusters
+
+- Cluster 1: apple
+- Cluster 2: aquarium_fish
+- Cluster 3: baby
+- Cluster 4: bear
+- Cluster 5: beaver
+- Cluster 6: bed
+- Cluster 7: bee
+- Cluster 8: beetle
+- Cluster 9: bicycle
+- Cluster 10: bottle
+- Cluster 11: bowl
+- Cluster 12: boy
+- Cluster 13: bridge
+- Cluster 14: bus
+- Cluster 15: butterfly
+- Cluster 16: camel
+- Cluster 17: can
+- Cluster 18: castle
+- Cluster 19: caterpillar
+- Cluster 20: cattle
+- Cluster 21: chair
+- Cluster 22: chimpanzee
+- Cluster 23: clock
+- Cluster 24: cloud
+- Cluster 25: cockroach
+- Cluster 26: couch
+- Cluster 27: crab
+- Cluster 28: crocodile
+- Cluster 29: cup
+- Cluster 30: dinosaur
+- Cluster 31: dolphin
+- Cluster 32: elephant
+- Cluster 33: flatfish
+- Cluster 34: forest
+- Cluster 35: fox
+- Cluster 36: girl
+- Cluster 37: hamster
+- Cluster 38: house
+- Cluster 39: kangaroo
+- Cluster 40: keyboard
+- Cluster 41: lamp
+- Cluster 42: lawn_mower
+- Cluster 43: leopard
+- Cluster 44: lion
+- Cluster 45: lizard
+- Cluster 46: lobster
+- Cluster 47: man
+- Cluster 48: maple_tree
+- Cluster 49: motorcycle
+- Cluster 50: mountain
+- Cluster 51: mouse
+- Cluster 52: mushroom
+- Cluster 53: oak_tree
+- Cluster 54: orange
+- Cluster 55: orchid
+- Cluster 56: otter
+- Cluster 57: palm_tree
+- Cluster 58: pear
+- Cluster 59: pickup_truck
+- Cluster 60: pine_tree
+- Cluster 61: plain
+- Cluster 62: plate
+- Cluster 63: poppy
+- Cluster 64: porcupine
+- Cluster 65: possum
+- Cluster 66: rabbit
+- Cluster 67: raccoon
+- Cluster 68: ray
+- Cluster 69: road
+- Cluster 70: rocket
+- Cluster 71: rose
+- Cluster 72: sea
+- Cluster 73: seal
+- Cluster 74: shark
+- Cluster 75: shrew
+- Cluster 76: skunk
+- Cluster 77: skyscraper
+- Cluster 78: snail
+- Cluster 79: snake
+- Cluster 80: spider
+- Cluster 81: squirrel
+- Cluster 82: streetcar
+- Cluster 83: sunflower
+- Cluster 84: sweet_pepper
+- Cluster 85: table
+- Cluster 86: tank
+- Cluster 87: telephone
+- Cluster 88: television
+- Cluster 89: tiger
+- Cluster 90: tractor
+- Cluster 91: train
+- Cluster 92: trout
+- Cluster 93: tulip
+- Cluster 94: turtle
+- Cluster 95: wardrobe
+- Cluster 96: whale
+- Cluster 97: willow_tree
+- Cluster 98: wolf
+- Cluster 99: woman
+- Cluster 100: worm

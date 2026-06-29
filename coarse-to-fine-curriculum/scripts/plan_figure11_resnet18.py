@@ -17,6 +17,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Generate a Figure-11-style CIFAR-100 curriculum-length sweep"
     )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--deterministic", action="store_true", default=True)
+    parser.add_argument("--no-deterministic", action="store_false", dest="deterministic")
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument(
@@ -106,6 +108,7 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "--output_dir", args.output_dir,
         "--run_id", run_id,
         "--seed", str(args.seed),
+        "--deterministic" if args.deterministic else "--no-deterministic",
     ]
     if args.batch_size is not None:
         parts.extend(["--batch_size", str(args.batch_size)])
@@ -137,6 +140,7 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "dataset": args.dataset,
         "model": args.model,
         "seed": args.seed,
+        "deterministic": args.deterministic,
         "epochs": args.epochs,
         "val_ratio": args.val_ratio,
         "optimizer": args.optimizer,

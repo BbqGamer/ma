@@ -9,16 +9,19 @@ import numpy as np
 import pandas as pd
 import torch
 
+from ctf.hierarchy import compute_hierarchy
 from ctf.models import build_model
 from scripts.analyze_pareto import add_baseline_thresholds, add_pareto_columns, normalized_auc
 from scripts.plan_figure11_resnet18 import parse_args as parse_plan_args
 from scripts.plan_figure11_resnet18 import build_command
 from train_coarse_to_fine import (
     classification_metrics_from_confusion,
+    clusters_to_membership,
     estimate_roughness_metrics,
     hierarchy_distance_matrix_from_levels,
     marginalized_loss,
     parse_weight_list,
+    seed_everything,
 )
 
 
@@ -57,6 +60,17 @@ class ModelScalingTests(unittest.TestCase):
 
 
 class LossAndMetricTests(unittest.TestCase):
+    def test_clusters_to_membership_expands_cluster_mask_to_all_rows(self) -> None:
+        membership = clusters_to_membership([[0, 2], [1]], 3, torch.device("cpu"))
+        expected = torch.tensor(
+            [
+                [True, False, True],
+                [False, True, False],
+                [True, False, True],
+            ]
+        )
+        self.assertTrue(torch.equal(membership.cpu(), expected))
+
     def test_marginalized_loss_matches_manual_logsumexp(self) -> None:
         logits = torch.tensor([[2.0, 1.0, -1.0], [0.0, 2.0, 3.0]])
         targets = torch.tensor([0, 1])
@@ -137,6 +151,23 @@ class RoughnessProbeTests(unittest.TestCase):
         self.assertTrue(expected.issubset(metrics.keys()))
         for key in expected:
             self.assertTrue(np.isfinite(metrics[key]), key)
+
+
+class ReproducibilityTests(unittest.TestCase):
+    def test_seed_everything_enables_deterministic_torch(self) -> None:
+        info = seed_everything(123, deterministic=True)
+        self.assertTrue(info["deterministic"])
+        self.assertTrue(torch.are_deterministic_algorithms_enabled())
+        self.assertFalse(torch.backends.cudnn.benchmark)
+        self.assertTrue(torch.backends.cudnn.deterministic)
+
+    def test_hierarchy_tie_breaking_is_seeded(self) -> None:
+        dist = np.ones((5, 5), dtype=np.float32) - np.eye(5, dtype=np.float32)
+        first = compute_hierarchy(dist, seed=7)
+        second = compute_hierarchy(dist, seed=7)
+        other = compute_hierarchy(dist, seed=8)
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, other)
 
 
 class PlannerTests(unittest.TestCase):

@@ -566,13 +566,18 @@ def load_shapes(
 
 def maybe_download_tiny_imagenet(target_root: Path) -> Path:
     if target_root.name == TINY_IMAGENET_FOLDER and (target_root / "wnids.txt").exists():
+        print(f"Tiny ImageNet already available at {target_root}", flush=True)
         return target_root
     if (target_root / TINY_IMAGENET_FOLDER / "wnids.txt").exists():
-        return target_root / TINY_IMAGENET_FOLDER
+        existing_root = target_root / TINY_IMAGENET_FOLDER
+        print(f"Tiny ImageNet already available at {existing_root}", flush=True)
+        return existing_root
 
     target_root.mkdir(parents=True, exist_ok=True)
     archive_path = target_root / f"{TINY_IMAGENET_FOLDER}.zip"
+    print(f"Downloading Tiny ImageNet from {TINY_IMAGENET_URL} to {archive_path}", flush=True)
     urlretrieve(TINY_IMAGENET_URL, archive_path)
+    print(f"Extracting Tiny ImageNet archive to {target_root}", flush=True)
     with zipfile.ZipFile(archive_path, "r") as zf:
         zf.extractall(target_root)
     return target_root / TINY_IMAGENET_FOLDER

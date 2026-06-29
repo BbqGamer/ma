@@ -95,9 +95,14 @@ def merge_clusters(
     ]
 
 
-def affinity_clustering(dist_matrix: np.ndarray, eps: float = 1e-7) -> list[list[list[int]]]:
+def affinity_clustering(
+    dist_matrix: np.ndarray,
+    eps: float = 1e-7,
+    seed: int | None = None,
+) -> list[list[list[int]]]:
     num_elem = dist_matrix.shape[0]
-    dist_matrix = dist_matrix + np.random.rand(num_elem, num_elem) * eps
+    rng = np.random.default_rng(0 if seed is None else seed)
+    dist_matrix = dist_matrix + rng.random((num_elem, num_elem)) * eps
 
     clusters = [[i] for i in range(num_elem)]
     clusters_per_level: list[list[list[int]]] = [clusters]
@@ -128,12 +133,13 @@ def compute_hierarchy(
     dist_matrix: np.ndarray,
     make_symmetric: bool = True,
     eps: float = 1e-7,
+    seed: int | None = None,
 ) -> list[list[list[int]]]:
     working = np.array(dist_matrix, copy=True)
     if make_symmetric:
         working = working + working.T
     logging.info("Computing hierarchy from distance matrix with shape %s", working.shape)
-    clusters_per_level = affinity_clustering(working, eps=eps)
+    clusters_per_level = affinity_clustering(working, eps=eps, seed=seed)
     clusters_per_level = clusters_per_level[::-1]
     return clusters_per_level[1:]
 

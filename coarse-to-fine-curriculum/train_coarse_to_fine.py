@@ -10,6 +10,8 @@ import random
 from pathlib import Path
 from typing import Any
 
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -130,6 +132,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tiny_imagenet_path", type=str, default=None)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        default=True,
+        help="Enable deterministic PyTorch/CUDA settings for reproducible runs.",
+    )
+    parser.add_argument(
+        "--no-deterministic",
+        action="store_false",
+        dest="deterministic",
+        help="Allow nondeterministic/cuDNN benchmark kernels for speed.",
+    )
     parser.add_argument("--download", action="store_true")
     parser.add_argument("--no-download", action="store_false", dest="download")
     parser.set_defaults(download=True)
@@ -168,11 +182,42 @@ def resolve_defaults(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
-def seed_everything(seed: int) -> None:
+def seed_everything(seed: int, deterministic: bool = True) -> dict[str, Any]:
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+    if deterministic:
+        torch.use_deterministic_algorithms(True)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        if hasattr(torch.backends, "cuda"):
+            torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        if hasattr(torch, "set_float32_matmul_precision"):
+            torch.set_float32_matmul_precision("highest")
+    else:
+        torch.use_deterministic_algorithms(False)
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+
+    return {
+        "seed": seed,
+        "deterministic": deterministic,
+        "pythonhashseed": os.environ.get("PYTHONHASHSEED"),
+        "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
+        "cudnn_benchmark": torch.backends.cudnn.benchmark,
+        "cudnn_deterministic": torch.backends.cudnn.deterministic,
+        "torch_deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+        "torch_num_threads": torch.get_num_threads(),
+        "torch_num_interop_threads": torch.get_num_interop_threads(),
+        "torch_version": torch.__version__,
+        "cuda_version": torch.version.cuda,
+    }
 
 
 def model_size_metrics(model: nn.Module) -> dict[str, int]:
@@ -261,6 +306,42 @@ def setup_wandb(args: argparse.Namespace, run_dir: Path) -> Any | None:
     )
 
 
+def hierarchy_to_markdown(
+    hierarchy_levels: list[list[list[int]]],
+    class_names: list[str] | None,
+    title: str,
+) -> str:
+    lines = [f"# {title}", ""]
+    for level_idx, clusters in enumerate(hierarchy_levels, start=1):
+        lines.append(f"## Level {level_idx}: {len(clusters)} clusters")
+        lines.append("")
+        for cluster_idx, cluster in enumerate(clusters, start=1):
+            names = [class_names[item] if class_names is not None else str(item) for item in cluster]
+            lines.append(f"- Cluster {cluster_idx}: " + ", ".join(names))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def save_hierarchy_artifacts(
+    run_dir: Path,
+    hierarchy_levels: list[list[list[int]]],
+    class_names: list[str] | None,
+    distance_source: str,
+) -> None:
+    save_json(
+        run_dir / "hierarchy.json",
+        {
+            "distance_source": distance_source,
+            "levels": hierarchy_levels,
+            "class_names": class_names,
+        },
+    )
+    title = f"Learned hierarchy ({distance_source})"
+    (run_dir / "hierarchy.md").write_text(
+        hierarchy_to_markdown(hierarchy_levels, class_names, title),
+    )
+
+
 def log_wandb_artifacts(run_dir: Path, name: str) -> None:
     try:
         import wandb
@@ -269,7 +350,7 @@ def log_wandb_artifacts(run_dir: Path, name: str) -> None:
     if wandb.run is None:
         return
     artifact = wandb.Artifact(name=name, type="run_outputs")
-    patterns = ["*.json", "*.csv", "training_log_*.txt", "schedule.json", "hierarchy.json"]
+    patterns = ["*.json", "*.csv", "*.md", "training_log_*.txt", "schedule.json", "hierarchy.json"]
     added = False
     for pattern in patterns:
         for path in run_dir.glob(pattern):
@@ -287,23 +368,39 @@ def build_loaders(
     seed: int,
     device: torch.device,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
-    generator = torch.Generator()
-    generator.manual_seed(seed)
+    def make_generator(offset: int) -> torch.Generator:
+        generator = torch.Generator()
+        generator.manual_seed(seed + offset)
+        return generator
+
     loader_kwargs: dict[str, Any] = {
         "batch_size": batch_size,
         "num_workers": num_workers,
         "pin_memory": device.type == "cuda",
         "worker_init_fn": seed_worker,
-        "generator": generator,
     }
     if num_workers > 0:
         loader_kwargs["persistent_workers"] = True
         loader_kwargs["prefetch_factor"] = 4
 
-    train_loader = DataLoader(bundle.train_dataset, shuffle=True, **loader_kwargs)
-    eval_loader_kwargs = {k: v for k, v in loader_kwargs.items() if k != "generator"}
-    val_loader = DataLoader(bundle.val_dataset, shuffle=False, **eval_loader_kwargs)
-    test_loader = DataLoader(bundle.test_dataset, shuffle=False, **eval_loader_kwargs)
+    train_loader = DataLoader(
+        bundle.train_dataset,
+        shuffle=True,
+        generator=make_generator(0),
+        **loader_kwargs,
+    )
+    val_loader = DataLoader(
+        bundle.val_dataset,
+        shuffle=False,
+        generator=make_generator(1),
+        **loader_kwargs,
+    )
+    test_loader = DataLoader(
+        bundle.test_dataset,
+        shuffle=False,
+        generator=make_generator(2),
+        **loader_kwargs,
+    )
     return train_loader, val_loader, test_loader
 
 
@@ -577,7 +674,7 @@ def clusters_to_membership(
         cluster_tensor = torch.tensor(cluster, dtype=torch.long, device=device)
         cluster_mask = torch.zeros((num_classes,), dtype=torch.bool, device=device)
         cluster_mask[cluster_tensor] = True
-        membership[cluster_tensor] = cluster_mask
+        membership[cluster_tensor] = cluster_mask.unsqueeze(0).expand(len(cluster), -1)
     return membership
 
 
@@ -1400,7 +1497,13 @@ def baseline_run(
     )
     baseline_dist_matrix = classifier_weight_distance(model)
     np.save(run_dir / "distance_matrix_classifier_weights.npy", baseline_dist_matrix)
-    baseline_hierarchy = compute_hierarchy(baseline_dist_matrix)
+    baseline_hierarchy = compute_hierarchy(baseline_dist_matrix, seed=args.seed)
+    save_hierarchy_artifacts(
+        run_dir,
+        baseline_hierarchy,
+        bundle.class_names,
+        "classifier_weights",
+    )
     baseline_learned_hierdist_matrix = hierarchy_distance_matrix_from_levels(
         baseline_hierarchy,
         bundle.num_classes,
@@ -1531,15 +1634,8 @@ def hierarchy_from_reference(
         dist_matrix = confusion_distance(reference_model, val_loader, bundle.num_classes, device)
     np.save(run_dir / "distance_matrix.npy", dist_matrix)
 
-    hierarchy_levels = compute_hierarchy(dist_matrix)
-    save_json(
-        run_dir / "hierarchy.json",
-        {
-            "distance_source": args.distance_source,
-            "levels": hierarchy_levels,
-            "class_names": bundle.class_names,
-        },
-    )
+    hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
+    save_hierarchy_artifacts(run_dir, hierarchy_levels, bundle.class_names, args.distance_source)
     logger.info("Built hierarchy with %d levels", len(hierarchy_levels))
     return hierarchy_levels
 
@@ -1606,15 +1702,8 @@ def curriculum_run(
         dist_matrix = confusion_distance(reference_model, val_loader, bundle.num_classes, device)
     np.save(run_dir / "distance_matrix.npy", dist_matrix)
 
-    hierarchy_levels = compute_hierarchy(dist_matrix)
-    save_json(
-        run_dir / "hierarchy.json",
-        {
-            "distance_source": args.distance_source,
-            "levels": hierarchy_levels,
-            "class_names": bundle.class_names,
-        },
-    )
+    hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
+    save_hierarchy_artifacts(run_dir, hierarchy_levels, bundle.class_names, args.distance_source)
 
     if args.curriculum_epochs is None:
         curriculum_epochs = infer_curriculum_epochs(reference_history, args.curriculum_target_fraction)
@@ -1824,10 +1913,9 @@ def multiloss_run(
 
 def main() -> None:
     args = resolve_defaults(parse_args())
-    seed_everything(args.seed)
+    reproducibility = seed_everything(args.seed, deterministic=args.deterministic)
+    args.reproducibility = reproducibility
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if device.type == "cuda":
-        torch.backends.cudnn.benchmark = True
 
     output_dir = Path(args.output_dir)
     run_dir = output_dir / args.run_id / f"{args.dataset}_{args.model}_{args.mode}"
@@ -1867,6 +1955,7 @@ def main() -> None:
         args.lr,
         args.augmentation,
     )
+    logger.info("Reproducibility: %s", json.dumps(reproducibility, sort_keys=True))
 
     if args.mode == "baseline":
         result = baseline_run(args, bundle, loaders, device, logger, run_dir)
