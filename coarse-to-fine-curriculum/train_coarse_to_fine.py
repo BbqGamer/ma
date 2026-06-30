@@ -82,6 +82,28 @@ def parse_args() -> argparse.Namespace:
         default=0.9,
         help="Auto curriculum length target: first baseline epoch reaching this fraction of best val acc.",
     )
+    parser.add_argument(
+        "--curriculum-policy",
+        choices=["fixed", "adaptive_plateau"],
+        default="fixed",
+        help="Use fixed stage lengths or advance curriculum stages on validation plateau.",
+    )
+    parser.add_argument(
+        "--curriculum-min-clusters",
+        type=int,
+        default=0,
+        help="Skip hierarchy levels with fewer clusters; 0 keeps all non-singleton levels.",
+    )
+    parser.add_argument(
+        "--curriculum-max-levels",
+        type=int,
+        default=0,
+        help="Maximum hierarchy levels to use; 0 keeps all levels after filtering.",
+    )
+    parser.add_argument("--curriculum-stage-min-epochs", type=int, default=10)
+    parser.add_argument("--curriculum-stage-max-epochs", type=int, default=50)
+    parser.add_argument("--curriculum-stage-patience", type=int, default=5)
+    parser.add_argument("--curriculum-stage-min-delta", type=float, default=0.002)
     parser.add_argument("--data_dir", type=str, default="/workspace/data")
     parser.add_argument("--output_dir", type=str, default="/workspace/runs")
     parser.add_argument("--run_id", type=str, default="run")
@@ -928,15 +950,60 @@ def build_multiloss_memberships(
     return memberships
 
 
+def filtered_curriculum_levels(
+    hierarchy_levels: list[list[list[int]]],
+    num_classes: int,
+    min_clusters: int = 0,
+    max_levels: int = 0,
+) -> list[list[list[int]]]:
+    effective_levels = [
+        clusters
+        for clusters in hierarchy_levels
+        if len(clusters) < num_classes and len(clusters) >= max(min_clusters, 0)
+    ]
+    if max_levels > 0:
+        effective_levels = effective_levels[:max_levels]
+    return effective_levels
+
+
 def build_curriculum_schedule(
     num_classes: int,
     hierarchy_levels: list[list[list[int]]],
     curriculum_epochs: int,
     total_epochs: int,
+    min_clusters: int = 0,
+    max_levels: int = 0,
+    policy: str = "fixed",
+    stage_max_epochs: int = 50,
 ) -> list[dict[str, Any]]:
     schedule: list[dict[str, Any]] = []
-    effective_levels = [clusters for clusters in hierarchy_levels if len(clusters) < num_classes]
+    effective_levels = filtered_curriculum_levels(
+        hierarchy_levels,
+        num_classes,
+        min_clusters=min_clusters,
+        max_levels=max_levels,
+    )
     num_levels = len(effective_levels)
+    if policy == "adaptive_plateau":
+        for level_idx, clusters in enumerate(effective_levels):
+            schedule.append(
+                {
+                    "name": f"level_{level_idx + 1}_{len(clusters)}clusters",
+                    "clusters": clusters,
+                    "epochs": max(stage_max_epochs, 1),
+                    "adaptive": True,
+                }
+            )
+        schedule.append(
+            {
+                "name": "fine_tune",
+                "clusters": singleton_clusters(num_classes),
+                "epochs": total_epochs,
+                "adaptive": False,
+            }
+        )
+        return schedule
+
     if num_levels > 0 and curriculum_epochs > 0:
         base_epochs = curriculum_epochs // num_levels
         remainder = curriculum_epochs % num_levels
@@ -946,7 +1013,7 @@ def build_curriculum_schedule(
                 continue
             schedule.append(
                 {
-                    "name": f"level_{level_idx + 1}",
+                    "name": f"level_{level_idx + 1}_{len(clusters)}clusters",
                     "clusters": clusters,
                     "epochs": epochs_this_level,
                 }
@@ -1242,6 +1309,11 @@ def train_loop(
     best_path = run_dir / "best_model.pt"
     last_path = run_dir / "last_model.pt"
     current_stage_name = None
+    adaptive_stage_idx = 0
+    adaptive_stage_epoch = 0
+    adaptive_stage_best_val = -float("inf")
+    adaptive_stage_bad_epochs = 0
+    use_adaptive_curriculum = bool(schedule) and args.curriculum_policy == "adaptive_plateau"
     roughness_epochs = parse_epoch_set(args.roughness_epochs) if args.roughness_probes else set()
     probe_batches = (
         fixed_probe_batches(val_loader, device, max(args.roughness_batches, 1))
@@ -1250,7 +1322,12 @@ def train_loop(
     )
 
     for epoch in range(args.epochs):
-        stage = epoch_to_stage(schedule, epoch) if schedule is not None else None
+        if use_adaptive_curriculum:
+            assert schedule is not None
+            stage = schedule[min(adaptive_stage_idx, len(schedule) - 1)]
+            adaptive_stage_epoch += 1
+        else:
+            stage = epoch_to_stage(schedule, epoch) if schedule is not None else None
         if stage is not None and stage["name"] != current_stage_name:
             current_stage_name = str(stage["name"])
             logger.info("Switching to curriculum stage %s", current_stage_name)
@@ -1366,6 +1443,19 @@ def train_loop(
             class_group_ids=class_group_ids,
             learned_hierdist_matrix=learned_hierdist_matrix,
         )
+        adaptive_advance_reason = ""
+        if use_adaptive_curriculum and stage is not None and stage["name"] != "fine_tune":
+            val_acc = float(val_metrics["acc"])
+            if val_acc > adaptive_stage_best_val + args.curriculum_stage_min_delta:
+                adaptive_stage_best_val = val_acc
+                adaptive_stage_bad_epochs = 0
+            else:
+                adaptive_stage_bad_epochs += 1
+            min_reached = adaptive_stage_epoch >= max(args.curriculum_stage_min_epochs, 1)
+            patience_reached = adaptive_stage_bad_epochs >= max(args.curriculum_stage_patience, 1)
+            max_reached = adaptive_stage_epoch >= max(args.curriculum_stage_max_epochs, 1)
+            if min_reached and (patience_reached or max_reached):
+                adaptive_advance_reason = "max_epochs" if max_reached else "plateau"
         test_metrics = evaluate(
             model,
             test_loader,
@@ -1396,6 +1486,11 @@ def train_loop(
             "test_acc": test_metrics["acc"],
             "lr": optimizer.param_groups[0]["lr"],
         }
+        if use_adaptive_curriculum:
+            record["adaptive_stage_epoch"] = adaptive_stage_epoch
+            record["adaptive_stage_best_val_acc"] = adaptive_stage_best_val
+            record["adaptive_stage_bad_epochs"] = adaptive_stage_bad_epochs
+            record["adaptive_advance_reason"] = adaptive_advance_reason
         for metric_name, metric_value in val_metrics.items():
             if metric_name not in {"loss", "acc"}:
                 record[f"val_{metric_name}"] = metric_value
@@ -1417,6 +1512,22 @@ def train_loop(
                     wandb.log(record, step=epoch + 1)
             except ImportError:
                 pass
+        if adaptive_advance_reason:
+            assert schedule is not None
+            old_stage_name = str(stage["name"] if stage is not None else "")
+            adaptive_stage_idx = min(adaptive_stage_idx + 1, len(schedule) - 1)
+            new_stage_name = str(schedule[adaptive_stage_idx]["name"])
+            logger.info(
+                "Adaptive curriculum advancing from %s to %s after %d epochs (%s)",
+                old_stage_name,
+                new_stage_name,
+                adaptive_stage_epoch,
+                adaptive_advance_reason,
+            )
+            adaptive_stage_epoch = 0
+            adaptive_stage_best_val = -float("inf")
+            adaptive_stage_bad_epochs = 0
+
         logger.info(
             "Epoch [%d/%d] | stage=%s | train_loss=%.4f | train_acc=%.4f | val_acc=%.4f | test_acc=%.4f | lr=%.6f",
             epoch + 1,
@@ -1705,7 +1816,18 @@ def curriculum_run(
     hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
     save_hierarchy_artifacts(run_dir, hierarchy_levels, bundle.class_names, args.distance_source)
 
-    if args.curriculum_epochs is None:
+    if args.curriculum_policy == "adaptive_plateau":
+        curriculum_epochs = args.epochs
+        logger.info(
+            "Adaptive plateau curriculum | min_clusters=%d | max_levels=%d | min_epochs=%d | max_epochs=%d | patience=%d | min_delta=%.4f",
+            args.curriculum_min_clusters,
+            args.curriculum_max_levels,
+            args.curriculum_stage_min_epochs,
+            args.curriculum_stage_max_epochs,
+            args.curriculum_stage_patience,
+            args.curriculum_stage_min_delta,
+        )
+    elif args.curriculum_epochs is None:
         curriculum_epochs = infer_curriculum_epochs(reference_history, args.curriculum_target_fraction)
         logger.info(
             "Auto curriculum length: %d epochs (target fraction %.2f)",
@@ -1722,6 +1844,10 @@ def curriculum_run(
         hierarchy_levels=hierarchy_levels,
         curriculum_epochs=curriculum_epochs,
         total_epochs=args.epochs,
+        min_clusters=args.curriculum_min_clusters,
+        max_levels=args.curriculum_max_levels,
+        policy=args.curriculum_policy,
+        stage_max_epochs=args.curriculum_stage_max_epochs,
     )
     save_json(run_dir / "schedule.json", schedule)
     learned_hierdist_matrix = hierarchy_distance_matrix_from_levels(hierarchy_levels, bundle.num_classes)
@@ -1761,6 +1887,13 @@ def curriculum_run(
         "epochs_requested": args.epochs,
         "epochs_completed": len(history),
         "curriculum_epochs": curriculum_epochs,
+        "curriculum_policy": args.curriculum_policy,
+        "curriculum_min_clusters": args.curriculum_min_clusters,
+        "curriculum_max_levels": args.curriculum_max_levels,
+        "curriculum_stage_min_epochs": args.curriculum_stage_min_epochs,
+        "curriculum_stage_max_epochs": args.curriculum_stage_max_epochs,
+        "curriculum_stage_patience": args.curriculum_stage_patience,
+        "curriculum_stage_min_delta": args.curriculum_stage_min_delta,
         "num_hierarchy_levels": len(hierarchy_levels),
         "best_val_acc": max(float(entry["val_acc"]) for entry in history),
         "best_test_acc": max(float(entry["test_acc"]) for entry in history),

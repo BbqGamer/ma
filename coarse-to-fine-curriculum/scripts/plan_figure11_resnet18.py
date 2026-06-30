@@ -61,6 +61,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=",".join(str(length) for length in CURRICULUM_LENGTHS),
         help="Comma-separated curriculum lengths to sweep.",
     )
+    parser.add_argument("--curriculum-policy", choices=["fixed", "adaptive_plateau"], default="fixed")
+    parser.add_argument("--curriculum-min-clusters", type=int, default=0)
+    parser.add_argument("--curriculum-max-levels", type=int, default=0)
+    parser.add_argument("--curriculum-stage-min-epochs", type=int, default=10)
+    parser.add_argument("--curriculum-stage-max-epochs", type=int, default=50)
+    parser.add_argument("--curriculum-stage-patience", type=int, default=5)
+    parser.add_argument("--curriculum-stage-min-delta", type=float, default=0.002)
     parser.add_argument("--roughness-probes", action="store_true")
     parser.add_argument("--roughness-epochs", default="1,5,10,11,20,50,100")
     parser.add_argument("--roughness-batches", type=int, default=2)
@@ -109,6 +116,13 @@ def build_command(args: argparse.Namespace, mode: str, curriculum_epochs: int | 
         "--run_id", run_id,
         "--seed", str(args.seed),
         "--deterministic" if args.deterministic else "--no-deterministic",
+        "--curriculum-policy", args.curriculum_policy,
+        "--curriculum-min-clusters", str(args.curriculum_min_clusters),
+        "--curriculum-max-levels", str(args.curriculum_max_levels),
+        "--curriculum-stage-min-epochs", str(args.curriculum_stage_min_epochs),
+        "--curriculum-stage-max-epochs", str(args.curriculum_stage_max_epochs),
+        "--curriculum-stage-patience", str(args.curriculum_stage_patience),
+        "--curriculum-stage-min-delta", str(args.curriculum_stage_min_delta),
     ]
     if args.batch_size is not None:
         parts.extend(["--batch_size", str(args.batch_size)])

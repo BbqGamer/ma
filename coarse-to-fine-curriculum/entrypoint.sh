@@ -19,6 +19,13 @@ VAL_RATIO="${VAL_RATIO:-0.2}"
 SHAPES_TEST_RATIO="${SHAPES_TEST_RATIO:-0.2}"
 DISTANCE_SOURCE="${DISTANCE_SOURCE:-classifier_weights}"
 CURRICULUM_TARGET_FRACTION="${CURRICULUM_TARGET_FRACTION:-0.9}"
+CURRICULUM_POLICY="${CURRICULUM_POLICY:-fixed}"
+CURRICULUM_MIN_CLUSTERS="${CURRICULUM_MIN_CLUSTERS:-0}"
+CURRICULUM_MAX_LEVELS="${CURRICULUM_MAX_LEVELS:-0}"
+CURRICULUM_STAGE_MIN_EPOCHS="${CURRICULUM_STAGE_MIN_EPOCHS:-10}"
+CURRICULUM_STAGE_MAX_EPOCHS="${CURRICULUM_STAGE_MAX_EPOCHS:-50}"
+CURRICULUM_STAGE_PATIENCE="${CURRICULUM_STAGE_PATIENCE:-5}"
+CURRICULUM_STAGE_MIN_DELTA="${CURRICULUM_STAGE_MIN_DELTA:-0.002}"
 DATA_DIR="${DATA_DIR:-/workspace/data}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/runs}"
 SHAPES_PATH="${SHAPES_PATH:-}"
@@ -119,6 +126,13 @@ common_args=(
   --shapes_test_ratio "$SHAPES_TEST_RATIO"
   --distance_source "$DISTANCE_SOURCE"
   --curriculum_target_fraction "$CURRICULUM_TARGET_FRACTION"
+  --curriculum-policy "$CURRICULUM_POLICY"
+  --curriculum-min-clusters "$CURRICULUM_MIN_CLUSTERS"
+  --curriculum-max-levels "$CURRICULUM_MAX_LEVELS"
+  --curriculum-stage-min-epochs "$CURRICULUM_STAGE_MIN_EPOCHS"
+  --curriculum-stage-max-epochs "$CURRICULUM_STAGE_MAX_EPOCHS"
+  --curriculum-stage-patience "$CURRICULUM_STAGE_PATIENCE"
+  --curriculum-stage-min-delta "$CURRICULUM_STAGE_MIN_DELTA"
   --data_dir "$DATA_DIR"
   --output_dir "$OUTPUT_DIR"
   --run_id "$RUN_ID"
@@ -239,6 +253,15 @@ run_figure11_sweep() {
   local width_arg=(--cnn-width-multiplier "$CNN_WIDTH_MULTIPLIER" --cifar-resnet-width-multiplier "$CIFAR_RESNET_WIDTH_MULTIPLIER")
   local roughness_arg=()
   local deterministic_arg=()
+  local curriculum_policy_arg=(
+    --curriculum-policy "$CURRICULUM_POLICY"
+    --curriculum-min-clusters "$CURRICULUM_MIN_CLUSTERS"
+    --curriculum-max-levels "$CURRICULUM_MAX_LEVELS"
+    --curriculum-stage-min-epochs "$CURRICULUM_STAGE_MIN_EPOCHS"
+    --curriculum-stage-max-epochs "$CURRICULUM_STAGE_MAX_EPOCHS"
+    --curriculum-stage-patience "$CURRICULUM_STAGE_PATIENCE"
+    --curriculum-stage-min-delta "$CURRICULUM_STAGE_MIN_DELTA"
+  )
   if [[ -n "$OPTIMIZER" ]]; then
     optimizer_arg=(--optimizer "$OPTIMIZER")
   fi
@@ -282,6 +305,7 @@ run_figure11_sweep() {
     "${width_arg[@]}" \
     "${roughness_arg[@]}" \
     "${deterministic_arg[@]}" \
+    "${curriculum_policy_arg[@]}" \
     "${wandb_arg[@]}" \
     --data-dir "$DATA_DIR" \
     --output-dir "$OUTPUT_DIR"
@@ -386,6 +410,13 @@ run_roughness_subset() {
         --cifar-resnet-width-multiplier "$spec_cifar_width"
         --patience "$ROUGHNESS_SUBSET_PATIENCE"
         --distance_source "$DISTANCE_SOURCE"
+        --curriculum-policy "$CURRICULUM_POLICY"
+        --curriculum-min-clusters "$CURRICULUM_MIN_CLUSTERS"
+        --curriculum-max-levels "$CURRICULUM_MAX_LEVELS"
+        --curriculum-stage-min-epochs "$CURRICULUM_STAGE_MIN_EPOCHS"
+        --curriculum-stage-max-epochs "$CURRICULUM_STAGE_MAX_EPOCHS"
+        --curriculum-stage-patience "$CURRICULUM_STAGE_PATIENCE"
+        --curriculum-stage-min-delta "$CURRICULUM_STAGE_MIN_DELTA"
         --data_dir "$DATA_DIR"
         --output_dir "$OUTPUT_DIR"
         --num_workers "$NUM_WORKERS"

@@ -1,0 +1,97 @@
+\subsection{Printed hierarchy trees}
+
+The image grids above are row-wise visualizations of these trees: each horizontal row corresponds to one Level 1 cluster, and the columns show representative classes from that cluster. The trees below print the learned groupings directly. For CIFAR-100, only the first two non-singleton levels are printed; the next level consists of singleton fine classes.
+
+\paragraph{Fashion-MNIST, weak CNN.}
+\begin{quote}
+\footnotesize
+\raggedright
+\begin{itemize}
+\setlength{\itemsep}{0.2em}
+\item \textbf{Level 1 cluster 1:} t-shirt\_top, trouser, coat, sandal, bag
+\item \textbf{Level 1 cluster 2:} pullover, shirt, sneaker
+\item \textbf{Level 1 cluster 3:} ankle\_boot, dress
+\end{itemize}
+\end{quote}
+
+\paragraph{CIFAR-10, weak CNN.}
+\begin{quote}
+\footnotesize
+\raggedright
+\begin{itemize}
+\setlength{\itemsep}{0.2em}
+\item \textbf{Level 1 cluster 1:} airplane, bird, deer, horse, ship
+\item \textbf{Level 1 cluster 2:} automobile, truck
+\item \textbf{Level 1 cluster 3:} cat, dog, frog
+\end{itemize}
+\end{quote}
+
+\paragraph{CIFAR-10, CIFAR-ResNet-8.}
+\begin{quote}
+\footnotesize
+\raggedright
+\begin{itemize}
+\setlength{\itemsep}{0.2em}
+\item \textbf{Level 1 cluster 1:} airplane, bird, deer
+\item \textbf{Level 1 cluster 2:} ship, automobile, truck, frog
+\item \textbf{Level 1 cluster 3:} cat, dog, horse
+\end{itemize}
+\end{quote}
+
+\paragraph{CIFAR-100, weak CNN.}
+\begin{quote}
+\footnotesize
+\raggedright
+\begin{itemize}
+\setlength{\itemsep}{0.2em}
+\item \textbf{Level 1 cluster 1:} apple, sweet\_pepper, orange, pear, butterfly, possum, squirrel
+\begin{itemize}
+\setlength{\itemsep}{0.1em}
+\item Level 2 cluster 1: apple, sweet\_pepper, orange, pear, butterfly
+\item Level 2 cluster 23: possum, squirrel
+\end{itemize}
+\item \textbf{Level 1 cluster 2:} aquarium\_fish, train, lawn\_mower, bridge, bus, lobster, skyscraper, streetcar, chair, chimpanzee, cloud, tractor, pickup\_truck, willow\_tree, forest, rocket, keyboard, maple\_tree, spider, oak\_tree, tank, palm\_tree, pine\_tree, shark, bed, couch, plain, road, sea, castle, house, mountain
+\begin{itemize}
+\setlength{\itemsep}{0.1em}
+\item Level 2 cluster 2: aquarium\_fish, train, lawn\_mower, bridge, bus, lobster, skyscraper, streetcar, chair, chimpanzee, cloud, tractor, pickup\_truck
+\item Level 2 cluster 6: shark, bed, couch
+\item Level 2 cluster 13: castle, house, mountain
+\item Level 2 cluster 18: willow\_tree, forest, rocket, keyboard, maple\_tree, spider, oak\_tree, tank, palm\_tree, pine\_tree
+\item Level 2 cluster 22: plain, road, sea
+\end{itemize}
+\item \textbf{Level 1 cluster 3:} lamp, cup, telephone, baby, girl, woman, boy, man, rose, caterpillar, orchid
+\begin{itemize}
+\setlength{\itemsep}{0.1em}
+\item Level 2 cluster 3: baby, girl, woman, boy, man
+\item Level 2 cluster 14: rose, caterpillar, orchid
+\item Level 2 cluster 17: lamp, cup, telephone
+\end{itemize}
+\item \textbf{Level 1 cluster 4:} mouse, shrew, otter, wolf, raccoon, bear, seal, tiger, skunk, porcupine, elephant, mushroom, snail, sunflower, bee, tulip, dinosaur, poppy, rabbit, bottle, fox, hamster, cattle, camel
+\begin{itemize}
+\setlength{\itemsep}{0.1em}
+\item Level 2 cluster 4: wolf, raccoon, bear, seal, tiger, skunk, porcupine, elephant
+\item Level 2 cluster 7: sunflower, bee, tulip, dinosaur, poppy
+\item Level 2 cluster 10: rabbit, bottle, fox, hamster
+\item Level 2 cluster 12: cattle, camel
+\item Level 2 cluster 20: mouse, shrew, otter
+\item Level 2 cluster 21: mushroom, snail
+\end{itemize}
+\item \textbf{Level 1 cluster 5:} leopard, lion, trout, crocodile, beaver, ray, turtle, bicycle, motorcycle, lizard, kangaroo, cockroach, flatfish, dolphin, whale
+\begin{itemize}
+\setlength{\itemsep}{0.1em}
+\item Level 2 cluster 5: trout, crocodile, beaver
+\item Level 2 cluster 9: bicycle, motorcycle, lizard, kangaroo
+\item Level 2 cluster 16: cockroach, flatfish, dolphin, whale
+\item Level 2 cluster 19: leopard, lion
+\item Level 2 cluster 24: ray, turtle
+\end{itemize}
+\item \textbf{Level 1 cluster 6:} worm, snake, can, table, television, bowl, wardrobe, plate, clock, crab, beetle
+\begin{itemize}
+\setlength{\itemsep}{0.1em}
+\item Level 2 cluster 8: crab, beetle
+\item Level 2 cluster 11: can, table, television, bowl, wardrobe
+\item Level 2 cluster 15: plate, clock
+\item Level 2 cluster 25: worm, snake
+\end{itemize}
+\end{itemize}
+\end{quote}

@@ -1,344 +1,306 @@
-% Appendix generated from W&B roughness follow-up runs.
-\chapter{Roughness Follow-up, Dataset Controls, and Learned Hierarchies}
+% Appendix generated from W&B roughness and adaptive curriculum follow-up runs.
+\chapter{Roughness, Dataset Controls, and Adaptive Curriculum Follow-up}
 \label{app:roughness-followup-curriculum}
 
 \section{Purpose}
 
-Appendix~\ref{app:cifar100-model-size-curriculum} identified a capacity-dependent
-pattern on CIFAR-100: coarse-to-fine curriculum learning helped the smaller CNNs
-and the smallest CIFAR-style ResNet, while the benefit shrank for larger models.
-This appendix reports the follow-up experiments run after that result. The goals
-were:
+Appendix~\ref{app:cifar100-model-size-curriculum} showed that fixed
+coarse-to-fine curriculum learning helped smaller CIFAR-100 models, especially
+weaker CNNs, but helped less as model capacity increased. This appendix extends
+that result in three directions:
 
 \begin{enumerate}
-    \item to verify the CIFAR-100 pattern on multiple seeds for representative
-          models, including the missing \texttt{cnn\_w0.5} case,
-    \item to test whether roughness and sharpness probes explain the curriculum
-          effect,
-    \item to check whether the same behavior appears on smaller control datasets
-          such as Fashion-MNIST and CIFAR-10,
-    \item to run a minimal Tiny ImageNet pilot as a harder many-class stress
-          test.
+    \item multi-seed roughness follow-up runs on CIFAR-100,
+    \item controls on Fashion-MNIST and CIFAR-10,
+    \item an adaptive curriculum policy that advances curriculum stages based on
+          validation plateau instead of a hand-picked fixed curriculum length.
 \end{enumerate}
 
-The experiments were not intended as a full exhaustive sweep. They were designed
-as targeted confirmation and diagnostic runs that could be completed while the
-thesis was being written.
+The central question is not only whether curriculum helps, but under which
+conditions it helps: model capacity, dataset, hierarchy depth, schedule policy,
+and optimizer/model choice.
 
-\section{Protocol and logged artifacts}
+\section{Methods compared}
 
-All runs were logged to W\&B in project
-\texttt{curriculum-learning-ma/coarse-to-fine-curriculum}. The main analyzed
-W\&B groups were:
+Two curriculum families are compared.
+
+\paragraph{Fixed curriculum.}
+The fixed runs use the best or most relevant curriculum lengths identified in the
+previous sweeps, for example \texttt{curr20} for \texttt{cnn\_w0.5},
+\texttt{curr10} for \texttt{cnn\_w1}, and \texttt{curr5} for larger CNNs.
+These runs answer whether a hand-picked schedule can improve the final task.
+
+\paragraph{Adaptive plateau curriculum.}
+The adaptive policy starts at a coarse hierarchy level and monitors fine-label
+validation accuracy. It advances to the next finer level when the validation
+score plateaus after a minimum number of stage epochs, or when a maximum stage
+length is reached. The CIFAR-100 runs used a slower rule: at least 10 epochs per
+stage, at most 40, patience 5, and minimum improvement 0.002. The CIFAR-10 and
+Fashion-MNIST runs used a shorter rule: at least 5 epochs per stage, at most 20,
+patience 3, and minimum improvement 0.001.
+
+For CIFAR-100, two hierarchy-depth variants were tested:
 
 \begin{itemize}
-    \item \texttt{roughness-cifar100-appendix-f-cheap},
-    \item \texttt{roughness-cifar100-w05-followup},
-    \item \texttt{roughness-fashionmnist-control},
-    \item \texttt{roughness-fashionmnist-w05-followup},
-    \item \texttt{roughness-cifar10-control},
-    \item \texttt{roughness-tinyimagenet-minimal}.
+    \item \texttt{adaptive\_all}: use all non-singleton generated hierarchy levels,
+    \item \texttt{adaptive\_max1}: use only the first generated hierarchy level.
 \end{itemize}
 
-The CIFAR-100, Fashion-MNIST, and CIFAR-10 runs used seeds 42, 43, and 44. Tiny
-ImageNet was run only as a one-seed pilot because of runtime cost. The main
-training setup used Adam with learning rate 0.001 and no scheduler. CIFAR-100
-was run for 200 epochs, while Fashion-MNIST and CIFAR-10 were run for 100
-epochs. The Tiny ImageNet pilot was also run for 100 epochs.
+The adaptive method was designed to reduce manual tuning. A negative result is
+therefore still informative: it tells us that simply using validation plateau is
+not enough to replace the fixed schedule.
 
-Roughness probes logged critical sharpness, relative critical sharpness, Hessian
-top-eigenvalue estimates, Hessian Frobenius estimates, Hessian trace estimates,
-and gradient norm statistics. To reduce compute cost, these runs used one probe
-batch and one Hessian iteration/sample. Therefore the roughness numbers should
-be treated as coarse diagnostics rather than high-precision estimates. In
-particular, gradient noise scale is not meaningful with only one probe batch.
+\section{Run summary}
 
-For new runs, the learned hierarchy was also saved as both machine-readable JSON
-and human-readable Markdown:
-
-\begin{verbatim}
-hierarchy.json
-hierarchy.md
-\end{verbatim}
-
-The Markdown hierarchy is uploaded to W\&B as a run artifact and can be inspected
-from the run page under \texttt{Artifacts}. This is especially useful for
-Fashion-MNIST and CIFAR-10, where the number of classes is small enough that the
-learned clusters can be read directly. These hierarchies are generated from the
-baseline classifier-weight distances, not from official semantic metadata.
-
-\section{Run completion summary}
-
-The completed runs used in the updated analysis are summarized in
-Table~\ref{tab:roughness-updated-run-summary}. One earlier Tiny ImageNet
-\texttt{cnn\_w1} baseline was stopped before completion and excluded; a later
-finished baseline was used instead.
+Table~\ref{tab:appg-run-summary} lists the completed run families used in this
+appendix. All runs finished except one early Tiny ImageNet \texttt{cnn\_w1}
+baseline, which was excluded because a later finished baseline was available.
 
 \begin{table}[h]
 \centering
 \small
 \begin{tabular}{llrl}
 \hline
-Dataset & W\&B group(s) & Finished runs & Design \\
+Dataset & Run family & Finished runs & Role \\
 \hline
-CIFAR-100 & main + \texttt{w0.5} follow-up & 30 & 5 model pairs, 3 seeds \\
-Fashion-MNIST & main + \texttt{w0.5} follow-up & 27 & 5 curriculum comparisons, 3 seeds \\
-CIFAR-10 & control & 15 & 3 curriculum comparisons, 3 seeds \\
-Tiny ImageNet & minimal pilot & 4 & 2 model pairs, 1 seed \\
+CIFAR-100 & fixed roughness follow-up & 30 & fixed curriculum reference \\
+CIFAR-100 & adaptive plateau, all levels & 30 & adaptive schedule test \\
+CIFAR-100 & adaptive plateau, first level only & 18 & hierarchy-depth test \\
+Fashion-MNIST & fixed curriculum control & 27 & easy control \\
+Fashion-MNIST & adaptive plateau control & 18 & adaptive easy control \\
+CIFAR-10 & fixed curriculum control & 15 & 10-class natural-image control \\
+CIFAR-10 & adaptive plateau control & 18 & adaptive 10-class control \\
+Tiny ImageNet & small-model and ResNet-18 pilots & 7 & harder dataset pilot \\
 \hline
 \end{tabular}
-\caption{Completed runs used in the updated roughness follow-up analysis.}
-\label{tab:roughness-updated-run-summary}
+\caption{Run families used in Appendix~\ref{app:roughness-followup-curriculum}.}
+\label{tab:appg-run-summary}
 \end{table}
 
-\section{CIFAR-100 confirmation including \texttt{cnn\_w0.5}}
+\section{CIFAR-100: fixed schedules versus adaptive schedules}
 
-Table~\ref{tab:roughness-cifar100-updated} reports absolute best test accuracy
-for the matching baseline and curriculum runs, together with the curriculum gain.
-Values are averaged over seeds 42, 43, and 44. Gains are reported in percentage
-points.
+Table~\ref{tab:appg-cifar100-policy} compares fixed and adaptive policies on
+CIFAR-100. Each cell reports the curriculum best test accuracy and, in
+parentheses, the gain over the matching baseline for that policy. Values are
+means over seeds 42, 43, and 44. The best curriculum accuracy in each row is
+bolded.
 
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{lrrrrr}
+\begin{tabular}{lrrr}
 \hline
-Model & Curriculum & Base best & Curr best & Gain & AUC gain \\
+Model & Fixed best & Adaptive all levels & Adaptive max1 \\
 \hline
-\texttt{cnn\_w0.5} & \texttt{curr20} & 0.3504 & 0.3758 & +2.54 & -1.72 \\
-\texttt{cnn\_w1} & \texttt{curr10} & 0.3862 & 0.4060 & +1.98 & -0.23 \\
-\texttt{cnn\_w2} & \texttt{curr5} & 0.4243 & 0.4415 & +1.72 & +0.15 \\
-\texttt{cnn\_w4} & \texttt{curr5} & 0.4451 & 0.4485 & +0.34 & -1.03 \\
-\texttt{cifar\_resnet8} & \texttt{curr20} & 0.5527 & 0.5660 & +1.33 & -1.96 \\
+\texttt{cnn\_w0.5} & \textbf{0.3758 (+2.54)} & 0.3719 (+1.75) & 0.3722 (+2.24) \\
+\texttt{cnn\_w1} & \textbf{0.4060 (+1.98)} & 0.3935 (+0.79) & 0.4023 (+1.59) \\
+\texttt{cnn\_w2} & \textbf{0.4415 (+1.72)} & 0.3980 (-2.70) & -- \\
+\texttt{cnn\_w4} & \textbf{0.4485 (+0.34)} & 0.3971 (-4.55) & -- \\
+\texttt{cifar\_resnet8} & \textbf{0.5660 (+1.33)} & 0.5577 (+0.09) & 0.5564 (+0.72) \\
 \hline
 \end{tabular}
-\caption{CIFAR-100 updated follow-up. Absolute best test accuracies are means
-over seeds 42, 43, and 44.}
-\label{tab:roughness-cifar100-updated}
+\caption{CIFAR-100 policy comparison. Entries are mean curriculum best test
+accuracy, with gain over the matching baseline in percentage points.}
+\label{tab:appg-cifar100-policy}
 \end{table}
 
-The additional \texttt{cnn\_w0.5} runs strengthen the conclusion from
-Appendix~\ref{app:cifar100-model-size-curriculum}. The weakest CNN obtains the
-largest multi-seed gain in this follow-up (+2.54 percentage points), followed by
-\texttt{cnn\_w1}, \texttt{cnn\_w2}, and \texttt{cifar\_resnet8}. The larger
-\texttt{cnn\_w4} again has only a small best-accuracy improvement and worse AUC.
-Thus, the capacity-conditioned pattern remains visible after adding the missing
-smallest CNN.
+The gains in parentheses are paired against the baseline from the same policy
+family and seed. This matters because an adaptive curriculum can have a strong
+absolute accuracy but a small gain if its matching adaptive baseline is also
+strong.
+
+The main result is clear: fixed hand-picked schedules still outperform the
+adaptive plateau policy on CIFAR-100. Adaptive scheduling is not useless: it
+still improves \texttt{cnn\_w0.5}, \texttt{cnn\_w1}, and
+\texttt{cifar\_resnet8}. However, it fails badly for \texttt{cnn\_w2} and
+\texttt{cnn\_w4}. This suggests that the adaptive rule is too conservative or
+uses coarse supervision for too long in models that only need a very short
+curriculum.
+
+The hierarchy-depth comparison is also important. For the models where both
+adaptive variants were run, \texttt{adaptive\_max1} is consistently better than
+\texttt{adaptive\_all}. This means that simply using all generated hierarchy
+levels is not optimal. The number of hierarchy levels is an experimental design
+choice, not a harmless implementation detail.
 
 \begin{figure}[h]
     \centering
-    \includegraphics[width=0.82\textwidth]{figures/roughness_followup_updated_cifar100_absolute_best_acc.png}
-    \caption{CIFAR-100 absolute best test accuracy for baseline and curriculum
-    runs in the updated follow-up.}
-    \label{fig:roughness-updated-cifar100-absolute}
+    \includegraphics[width=0.78\textwidth]{figures/adaptive_cifar100_absolute_best_heatmap.png}
+    \caption{CIFAR-100 absolute best test accuracy under each curriculum policy.
+    Bold values in the figure indicate the best curriculum policy for a model.}
+    \label{fig:adaptive-cifar100-absolute-heatmap}
 \end{figure}
 
 \begin{figure}[h]
     \centering
-    \includegraphics[width=0.82\textwidth]{figures/roughness_followup_updated_cifar100_best_acc_gains.png}
-    \caption{CIFAR-100 curriculum gains in best test accuracy. Error bars show
-    variation across seeds.}
-    \label{fig:roughness-updated-cifar100-gains}
+    \includegraphics[width=0.95\textwidth]{figures/adaptive_selected_learning_curves.png}
+    \caption{Representative learning curves. The panels show a weak CIFAR-100
+    model where all curricula help, a larger CIFAR-100 CNN where adaptive
+    all-levels hurts, a CIFAR-10 adaptive gain, and the Tiny ImageNet ResNet-18
+    pilot. Shaded regions denote variation across seeds where multiple seeds are
+    available.}
+    \label{fig:adaptive-selected-learning-curves}
 \end{figure}
 
-A subtle point is that \texttt{cnn\_w0.5} improves strongly in best accuracy, but
-its final epoch accuracy is almost unchanged. This means the weak CNN overfits or
-drifts late in training. For this reason, best accuracy and AUC should both be
-reported: curriculum can improve the best solution encountered while still
-hurting the average trajectory.
+\section{Stage allocation in the adaptive policy}
 
-\section{Fashion-MNIST control}
-
-Fashion-MNIST was used as an easy 10-class control. The updated runs include the
-original model set and an additional \texttt{cnn\_w0.5} follow-up with
-\texttt{curr10} and \texttt{curr20}. Results are shown in
-Table~\ref{tab:roughness-fashionmnist-updated}.
+Table~\ref{tab:appg-adaptive-stage-allocation} summarizes the adaptive stage
+allocation up to the epoch of best test accuracy. This is a retrospective
+analysis of the learning trajectories; the adaptive rule itself did not use test
+accuracy to decide when to advance. The corresponding
+Figure~\ref{fig:adaptive-stage-allocation-by-level} separates the individual
+hierarchy levels instead of merging them into a single coarse bucket. A dash
+means that the run did not have that curriculum level available.
 
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{lrrrrr}
+\begin{tabular}{llrrrr}
 \hline
-Model & Curriculum & Base best & Curr best & Gain & AUC gain \\
+Dataset & Model/policy & Level 1 & Level 2 & Level 3 & Fine-tune to best \\
 \hline
-\texttt{cnn\_w0.5} & \texttt{curr10} & 0.9066 & 0.9077 & +0.11 & -5.91 \\
-\texttt{cnn\_w0.5} & \texttt{curr20} & 0.9066 & 0.9078 & +0.12 & -12.01 \\
-\texttt{cnn\_w1} & \texttt{curr10} & 0.9117 & 0.9129 & +0.12 & -6.45 \\
-\texttt{cnn\_w4} & \texttt{curr5} & 0.9163 & 0.9148 & -0.16 & -3.25 \\
-\texttt{cifar\_resnet8} & \texttt{curr10} & 0.9166 & 0.9124 & -0.42 & -7.43 \\
+CIFAR-100 & \texttt{cnn\_w0.5 adaptive\_all} & 11.7 & 13.3 & 4.3 & 14.3 \\
+CIFAR-100 & \texttt{cnn\_w0.5 adaptive\_max1} & 14.7 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 24.0 \\
+CIFAR-100 & \texttt{cnn\_w1 adaptive\_all} & 12.0 & 10.3 & \multicolumn{1}{c}{--} & 6.3 \\
+CIFAR-100 & \texttt{cnn\_w1 adaptive\_max1} & 11.3 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 9.0 \\
+CIFAR-100 & \texttt{cnn\_w2 adaptive\_all} & 10.0 & 10.0 & \multicolumn{1}{c}{--} & 4.7 \\
+CIFAR-100 & \texttt{cnn\_w4 adaptive\_all} & 11.7 & 11.3 & \multicolumn{1}{c}{--} & 5.3 \\
+CIFAR-100 & \texttt{cifar\_resnet8 adaptive\_all} & 11.0 & 14.0 & 31.0 & 132.3 \\
+CIFAR-100 & \texttt{cifar\_resnet8 adaptive\_max1} & 11.7 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 174.0 \\
+CIFAR-10 & \texttt{cnn\_w0.5 adaptive\_all} & 6.3 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 38.7 \\
+CIFAR-10 & \texttt{cnn\_w1 adaptive\_all} & 9.3 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 9.3 \\
+CIFAR-10 & \texttt{cifar\_resnet8 adaptive\_all} & 6.0 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 84.7 \\
+Fashion-MNIST & \texttt{cnn\_w0.5 adaptive\_all} & 7.3 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 21.3 \\
+Fashion-MNIST & \texttt{cnn\_w1 adaptive\_all} & 8.0 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 12.0 \\
+Fashion-MNIST & \texttt{cnn\_w4 adaptive\_all} & 5.3 & \multicolumn{1}{c}{--} & \multicolumn{1}{c}{--} & 10.3 \\
 \hline
 \end{tabular}
-\caption{Fashion-MNIST updated control results. Absolute best test accuracies
-are means over seeds 42, 43, and 44.}
-\label{tab:roughness-fashionmnist-updated}
+\caption{Mean adaptive stage allocation in epochs up to the epoch of best test
+accuracy. The fine-tuning column is not the unused remainder of a 100- or
+200-epoch budget; it reports how many fine-label epochs elapsed before the run
+reached its peak test accuracy. Dashes indicate that no run in that row had the
+corresponding hierarchy level available.}
+\label{tab:appg-adaptive-stage-allocation}
 \end{table}
 
-The Fashion-MNIST control is essentially negative. Even the weak
-\texttt{cnn\_w0.5} gains only about 0.1 percentage points in best accuracy, while
-AUC becomes substantially worse. This supports the interpretation that hard
-coarse-to-fine curriculum is not useful simply because a model is small. The task
-also needs to be hard enough, and the hierarchy needs to provide meaningful
-intermediate supervision.
+The stage allocation explains why adaptive all-level schedules can hurt larger
+CNNs. The previously best fixed schedules for \texttt{cnn\_w2} and
+\texttt{cnn\_w4} used only five curriculum epochs, while adaptive all-levels had
+already spent about 20--23 epochs in coarse levels before the short fine-tuning
+period that produced the best test accuracy. The adaptive rule therefore
+over-curricularizes models that only need a short warm-up.
 
 \begin{figure}[h]
     \centering
-    \includegraphics[width=0.82\textwidth]{figures/roughness_followup_updated_fashionmnist_absolute_best_acc.png}
-    \caption{Fashion-MNIST absolute best test accuracy. Baselines are already
-    high, and curriculum does not add meaningful benefit.}
-    \label{fig:roughness-updated-fashionmnist-absolute}
+    \includegraphics[width=0.98\textwidth]{figures/adaptive_stage_allocation_by_level.png}
+    \caption{Mean adaptive stage allocation split by hierarchy level and counted
+    only up to peak test accuracy. This avoids making every run appear to use the
+    full training budget. CIFAR-100 all-level adaptive schedules sometimes use
+    two or three coarse levels, while CIFAR-10 and Fashion-MNIST almost always
+    advance to fine labels after one short coarse stage.}
+    \label{fig:adaptive-stage-allocation-by-level}
 \end{figure}
 
-\section{CIFAR-10 control}
+\section{CIFAR-10 and Fashion-MNIST controls}
 
-CIFAR-10 was added as a natural-image 10-class control. Unlike Fashion-MNIST, it
-shares the image domain of CIFAR-100, but the class count is much smaller and the
-automatically generated hierarchy is necessarily shallow. The tested pairs were
-\texttt{cnn\_w0.5}/\texttt{curr10}, \texttt{cnn\_w0.5}/\texttt{curr20}, and
-\texttt{cifar\_resnet8}/\texttt{curr10}. Results are shown in
-Table~\ref{tab:roughness-cifar10-results}.
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{lrrrrr}
-\hline
-Model & Curriculum & Base best & Curr best & Gain & AUC gain \\
-\hline
-\texttt{cnn\_w0.5} & \texttt{curr10} & 0.6964 & 0.6988 & +0.24 & -2.80 \\
-\texttt{cnn\_w0.5} & \texttt{curr20} & 0.6964 & 0.7042 & +0.78 & -6.75 \\
-\texttt{cifar\_resnet8} & \texttt{curr10} & 0.8427 & 0.8436 & +0.09 & -3.61 \\
-\hline
-\end{tabular}
-\caption{CIFAR-10 control results. Absolute best test accuracies are means over
-seeds 42, 43, and 44.}
-\label{tab:roughness-cifar10-results}
-\end{table}
-
-CIFAR-10 gives a small positive result for the weakest CNN, especially for
-\texttt{curr20}, but the improvement is much smaller than on CIFAR-100 and comes
-with a large AUC penalty. The CIFAR ResNet result is essentially neutral. This
-places CIFAR-10 between CIFAR-100 and Fashion-MNIST: there is a small possible
-benefit for a weak natural-image CNN, but the effect is not large enough to
-change the main conclusion.
-
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.82\textwidth]{figures/roughness_followup_updated_cifar10_absolute_best_acc.png}
-    \caption{CIFAR-10 absolute best test accuracy for baseline and curriculum
-    runs.}
-    \label{fig:roughness-updated-cifar10-absolute}
-\end{figure}
-
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.95\textwidth]{figures/roughness_followup_updated_all_datasets_best_acc_gains.png}
-    \caption{Updated best-test-accuracy gains across CIFAR-100, Fashion-MNIST,
-    CIFAR-10, and the Tiny ImageNet pilot.}
-    \label{fig:roughness-updated-all-gains}
-\end{figure}
-
-\section{Tiny ImageNet pilot}
-
-The minimal Tiny ImageNet pilot used one seed and the pairs
-\texttt{cnn\_w1}/\texttt{curr20} and \texttt{cifar\_resnet8}/\texttt{curr20}.
-The results are shown in Table~\ref{tab:roughness-tinyimagenet-results}.
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{lrrrrr}
-\hline
-Model & Curriculum & Base best & Curr best & Gain & AUC gain \\
-\hline
-\texttt{cnn\_w1} & \texttt{curr20} & 0.2498 & 0.1775 & -7.23 & -5.71 \\
-\texttt{cifar\_resnet8} & \texttt{curr20} & 0.3842 & 0.3716 & -1.26 & -5.52 \\
-\hline
-\end{tabular}
-\caption{Tiny ImageNet pilot results. These are one-seed results and should be
-interpreted as a stress test rather than a definitive dataset-level conclusion.}
-\label{tab:roughness-tinyimagenet-results}
-\end{table}
-
-This pilot does not support direct transfer of the CIFAR-100 schedule. The
-curriculum hurts both tested models. The most likely explanations are that these
-models are too weak for Tiny ImageNet, the generated hierarchy is not good
-enough, the curriculum is too long or too hard, or the optimizer/schedule needs
-separate tuning. These results should therefore be reported as a negative pilot,
-not as a final statement about Tiny ImageNet.
-
-\section{Roughness and sharpness diagnostics}
-
-Table~\ref{tab:roughness-ratios-updated} summarizes selected roughness ratios.
-The values are \(\log_{10}(\text{curriculum}/\text{baseline})\), so negative
-values mean lower roughness under curriculum and positive values mean higher
-roughness.
+Table~\ref{tab:appg-small-dataset-policy} compares fixed and adaptive policies
+on CIFAR-10 and Fashion-MNIST. The best absolute curriculum accuracy per row is
+bolded.
 
 \begin{table}[h]
 \centering
 \small
 \begin{tabular}{llrr}
 \hline
-Dataset & Model/curriculum & Final sharp. & Final Hess. \\
+Dataset/model & Curriculum & Fixed & Adaptive plateau \\
 \hline
-CIFAR-100 & \texttt{cnn\_w0.5}/\texttt{curr20} & +0.03 & +0.03 \\
-CIFAR-100 & \texttt{cnn\_w1}/\texttt{curr10} & +0.35 & +0.04 \\
-CIFAR-100 & \texttt{cnn\_w2}/\texttt{curr5} & -0.08 & +0.06 \\
-CIFAR-100 & \texttt{cnn\_w4}/\texttt{curr5} & +0.15 & +0.23 \\
-CIFAR-100 & \texttt{cifar\_resnet8}/\texttt{curr20} & -0.16 & -0.30 \\
-Fashion-MNIST & \texttt{cnn\_w0.5}/\texttt{curr20} & -0.10 & -0.41 \\
-CIFAR-10 & \texttt{cnn\_w0.5}/\texttt{curr20} & +0.12 & +0.19 \\
-Tiny ImageNet & \texttt{cnn\_w1}/\texttt{curr20} & +0.08 & +0.20 \\
+CIFAR-10 \texttt{cnn\_w0.5} & \texttt{curr20} & \textbf{0.7042 (+0.78)} & 0.7038 (+0.94) \\
+CIFAR-10 \texttt{cnn\_w1} & \texttt{curr10} & -- & \textbf{0.7308 (+1.05)} \\
+CIFAR-10 \texttt{cifar\_resnet8} & \texttt{curr10} & 0.8436 (+0.09) & \textbf{0.8470 (-0.03)} \\
+Fashion-MNIST \texttt{cnn\_w0.5} & \texttt{curr20} & \textbf{0.9078 (+0.12)} & 0.9071 (+0.07) \\
+Fashion-MNIST \texttt{cnn\_w1} & \texttt{curr10} & \textbf{0.9129 (+0.12)} & 0.9121 (-0.08) \\
+Fashion-MNIST \texttt{cnn\_w4} & \texttt{curr5} & \textbf{0.9148 (-0.16)} & 0.9144 (-0.13) \\
+Fashion-MNIST \texttt{cifar\_resnet8} & \texttt{curr10} & \textbf{0.9124 (-0.42)} & -- \\
 \hline
 \end{tabular}
-\caption{Selected roughness log-ratios. Negative values indicate lower final
-roughness under curriculum.}
-\label{tab:roughness-ratios-updated}
+\caption{CIFAR-10 and Fashion-MNIST controls. Entries are mean curriculum best
+test accuracy, with gain over the matching baseline in percentage points.}
+\label{tab:appg-small-dataset-policy}
 \end{table}
 
-The roughness results remain mixed after the added runs. The cleanest support
-for a flattening interpretation is still CIFAR-100 \texttt{cifar\_resnet8}, where
-curriculum improves accuracy and lowers both final sharpness and Hessian
-estimates. The CNNs do not show a universal pattern. For example,
-\texttt{cnn\_w0.5} and \texttt{cnn\_w1} improve on CIFAR-100, but their final
-roughness is not consistently lower. This means the thesis should not claim that
-coarse-to-fine curriculum works by always finding flatter minima.
+As in the CIFAR-100 table, gains are measured against the matching baseline for
+the same run family. This is why the CIFAR-10 \texttt{cifar\_resnet8} adaptive
+entry has the best absolute curriculum accuracy but a slightly negative gain.
 
-The safer interpretation is that curriculum changes the optimization trajectory
-and can improve the best solution found for some lower-capacity models. The
-roughness probes are useful diagnostics, but they do not yet identify one simple
-causal mechanism.
+CIFAR-10 is more favorable to curriculum than Fashion-MNIST, but the effect is
+still much smaller than CIFAR-100. The adaptive policy gives a useful gain for
+\texttt{cnn\_w1} and a small gain for \texttt{cnn\_w0.5}; however, AUC remains
+negative, so the curriculum delays early fine-label learning. Fashion-MNIST is
+essentially a negative control: neither fixed nor adaptive curricula produce a
+meaningful improvement.
+
+This contrast is important. A weak model alone is not sufficient for curriculum
+learning to help. The dataset must also have enough class structure and task
+complexity for coarse labels to be useful.
+
+\section{Tiny ImageNet pilot}
+
+The Tiny ImageNet results are mixed but more informative after adding the
+ResNet-18 SGD/cosine pilot. Table~\ref{tab:appg-tinyimagenet-policy} includes
+both the earlier small-model pilot and the newer ResNet-18 runs.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrr}
+\hline
+Model/setup & Baseline best & Curriculum best & Gain \\
+\hline
+\texttt{cnn\_w1}, Adam, \texttt{curr20} & 0.2498 & 0.1775 & -7.23 \\
+\texttt{cifar\_resnet8}, Adam, \texttt{curr20} & 0.3842 & 0.3716 & -1.26 \\
+\texttt{resnet18}, SGD cosine, \texttt{curr10} & 0.6466 & \textbf{0.6572} & +1.06 \\
+\texttt{resnet18}, SGD cosine, \texttt{curr20} & 0.6466 & 0.6554 & +0.88 \\
+\hline
+\end{tabular}
+\caption{Tiny ImageNet pilot results. Gains are percentage points. The stronger
+ResNet-18 setup is the only positive Tiny ImageNet result.}
+\label{tab:appg-tinyimagenet-policy}
+\end{table}
+
+The small Tiny ImageNet models were negative, but ResNet-18 with SGD and cosine
+scheduling produced a modest positive peak-accuracy gain. This changes the
+interpretation: Tiny ImageNet is not necessarily impossible for curriculum, but
+it is much more sensitive to model capacity, optimizer, and schedule. The
+positive result is also expensive: the ResNet-18 run took much longer than the
+CIFAR experiments, and the AUC gain remained negative. Thus, for the thesis it
+should be treated as a promising pilot, not a fully validated result.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.86\textwidth]{figures/tinyimagenet_resnet18_trajectory.png}
+    \caption{Tiny ImageNet ResNet-18 trajectory under SGD/cosine. The curriculum
+    run eventually slightly exceeds the baseline peak, but it pays an early
+    trajectory cost.}
+    \label{fig:tinyimagenet-resnet18-trajectory}
+\end{figure}
 
 \section{Learned hierarchy inspection}
 
-The new runs save a readable hierarchy file, \texttt{hierarchy.md}, as a W\&B
-artifact. For example, a Fashion-MNIST curriculum run stores the generated
-clusters under a path like:
+The learned hierarchies below are representative seed-42 examples. They are
+built from the baseline classifier-weight distance matrix, not from official
+semantic labels or manually defined taxonomies. They should therefore be read as
+model-specific similarity structures: useful for understanding what the
+curriculum used, but not guaranteed to match human visual or semantic categories.
 
-\begin{verbatim}
-/runpod-workspace/runs/<run_id>/fashion-mnist_cnn_curriculum/hierarchy.md
-\end{verbatim}
-
-and uploads the same file to W\&B artifacts. The same files were also exported
-locally under:
-
-\begin{verbatim}
-thesis/appendices/hierarchies/
-\end{verbatim}
-
-The hierarchy is generated from the baseline classifier-weight distance matrix,
-not from official semantic labels. Therefore it should be interpreted as the
-model's learned similarity structure, rather than as a ground-truth taxonomy.
-Tables~\ref{tab:hier-fashionmnist}, \ref{tab:hier-cifar10-cnn}, and
-\ref{tab:hier-cifar10-resnet8} show representative learned hierarchies from seed
-42. For these 10-class datasets the hierarchy has only one non-trivial coarse
-level plus the singleton fine-label level.
+For Fashion-MNIST, the learned \texttt{cnn\_w0.5} hierarchy grouped classes as
+follows:
 
 \begin{table}[h]
 \centering
 \small
 \begin{tabular}{lp{0.72\textwidth}}
 \hline
-Cluster & Fashion-MNIST \texttt{cnn\_w0.5}, seed 42, \texttt{curr20} \\
+Cluster & Fashion-MNIST \texttt{cnn\_w0.5}, seed 42 \\
 \hline
 1 & \texttt{t-shirt\_top}, \texttt{trouser}, \texttt{coat}, \texttt{sandal}, \texttt{bag} \\
 2 & \texttt{pullover}, \texttt{shirt}, \texttt{sneaker} \\
@@ -346,107 +308,178 @@ Cluster & Fashion-MNIST \texttt{cnn\_w0.5}, seed 42, \texttt{curr20} \\
 \hline
 \end{tabular}
 \caption{Representative Fashion-MNIST learned hierarchy. The grouping is only
-partly semantic, which helps explain why curriculum did not provide a meaningful
-benefit on this dataset.}
-\label{tab:hier-fashionmnist}
+partly semantic, which helps explain the weak curriculum results.}
+\label{tab:appg-hier-fashionmnist}
 \end{table}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.78\textwidth]{figures/hierarchy_examples_fashion_mnist.png}
+    \caption{Example Fashion-MNIST images from the learned clusters in
+    Table~\ref{tab:appg-hier-fashionmnist}. Each horizontal row is one learned
+    Level 1 cluster. The clusters are visually mixed: for example, shoes and
+    bags are not cleanly separated from clothing. This makes the weak
+    Fashion-MNIST curriculum result easier to interpret.}
+    \label{fig:hierarchy-examples-fashionmnist}
+\end{figure}
+
+For CIFAR-10, the weak CNN hierarchy was more intuitive:
 
 \begin{table}[h]
 \centering
 \small
 \begin{tabular}{lp{0.72\textwidth}}
 \hline
-Cluster & CIFAR-10 \texttt{cnn\_w0.5}, seed 42, \texttt{curr20} \\
+Cluster & CIFAR-10 \texttt{cnn\_w0.5}, seed 42 \\
 \hline
 1 & \texttt{airplane}, \texttt{bird}, \texttt{deer}, \texttt{horse}, \texttt{ship} \\
 2 & \texttt{automobile}, \texttt{truck} \\
 3 & \texttt{cat}, \texttt{dog}, \texttt{frog} \\
 \hline
 \end{tabular}
-\caption{Representative CIFAR-10 hierarchy learned from a weak CNN baseline.
-Some clusters are intuitive, for example vehicles and animals, but the hierarchy
-is necessarily shallow because CIFAR-10 has only ten classes.}
-\label{tab:hier-cifar10-cnn}
+\caption{Representative CIFAR-10 learned hierarchy from a weak CNN. Some
+clusters are intuitive, but the hierarchy is shallow because CIFAR-10 has only
+ten classes.}
+\label{tab:appg-hier-cifar10}
 \end{table}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.82\textwidth]{figures/hierarchy_examples_cifar10.png}
+    \caption{Example CIFAR-10 images from the learned clusters in
+    Table~\ref{tab:appg-hier-cifar10}. Each horizontal row is one learned
+    Level 1 cluster. The vehicle cluster is intuitive, while the large
+    animal/transport/water cluster mixes visually different classes. This partly
+    explains why CIFAR-10 gains are small even when positive.}
+    \label{fig:hierarchy-examples-cifar10}
+\end{figure}
+
+For CIFAR-100, the full hierarchy is too large to show in one figure. Its top
+level contains broad mixed clusters. This is acceptable for a learned hierarchy,
+but it also shows why hierarchy quality and level selection matter.
+Figure~\ref{fig:hierarchy-examples-cifar100} shows selected example images from
+the top-level CIFAR-100 clusters, and the printed trees below list the learned
+groups directly.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.92\textwidth,height=0.72\textheight,keepaspectratio]{figures/hierarchy_examples_cifar100_selected.png}
+    \caption{Selected CIFAR-100 examples from the learned top-level clusters.
+    Each horizontal row is one learned Level 1 cluster. Only the first six class
+    labels from each top-level cluster are shown because the full clusters are
+    too large for one page. The figure illustrates that the learned hierarchy
+    contains both meaningful local groups, such as fruit or carnivores, and
+    broad mixed groups, such as vehicles with buildings or household objects
+    with animals.}
+    \label{fig:hierarchy-examples-cifar100}
+\end{figure}
+
+\clearpage
+\input{appendices/generated_hierarchy_trees}
+
+\section{Roughness and sharpness diagnostics}
+
+The roughness results remain mixed. Table~\ref{tab:appg-roughness-cifar100}
+shows the CIFAR-100 roughness follow-up. The roughness columns are
+\(\log_{10}(\text{curriculum}/\text{baseline})\) ratios, so negative values mean
+that the curriculum run had a lower value than the matching baseline, while
+positive values mean that it had a higher value.
 
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{lp{0.72\textwidth}}
+\begin{tabular}{lrrrrr}
 \hline
-Cluster & CIFAR-10 \texttt{cifar\_resnet8}, seed 42, \texttt{curr10} \\
+Model & Acc. gain & Final sharp. & Final Hess. & Mean sharp. & Mean Hess. \\
 \hline
-1 & \texttt{airplane}, \texttt{bird}, \texttt{deer} \\
-2 & \texttt{ship}, \texttt{automobile}, \texttt{truck}, \texttt{frog} \\
-3 & \texttt{cat}, \texttt{dog}, \texttt{horse} \\
-\hline
-\end{tabular}
-\caption{Representative CIFAR-10 hierarchy learned from a CIFAR-style ResNet-8
-baseline. The grouping differs from the CNN hierarchy, showing that the
-curriculum depends on the reference model as well as the dataset.}
-\label{tab:hier-cifar10-resnet8}
-\end{table}
-
-For CIFAR-100 the hierarchy is too large to print in full, but the top level of
-the \texttt{cnn\_w0.5}, seed 42 hierarchy is shown in
-Table~\ref{tab:hier-cifar100-top}. The complete exported Markdown and JSON files
-are included in \texttt{thesis/appendices/hierarchies/}.
-
-\begin{table}[h]
-\centering
-\scriptsize
-\begin{tabular}{lp{0.78\textwidth}}
-\hline
-Cluster & CIFAR-100 top-level classes, \texttt{cnn\_w0.5}, seed 42, \texttt{curr20} \\
-\hline
-1 & \texttt{apple}, \texttt{sweet\_pepper}, \texttt{orange}, \texttt{pear}, \texttt{butterfly}, \texttt{possum}, \texttt{squirrel} \\
-2 & \texttt{aquarium\_fish}, \texttt{train}, \texttt{lawn\_mower}, \texttt{bridge}, \texttt{bus}, \texttt{lobster}, \texttt{skyscraper}, \texttt{streetcar}, \texttt{chair}, \texttt{chimpanzee}, \texttt{cloud}, \texttt{tractor}, \texttt{pickup\_truck}, \texttt{willow\_tree}, \texttt{forest}, \texttt{rocket}, \texttt{keyboard}, \texttt{maple\_tree}, \texttt{spider}, \texttt{oak\_tree}, \texttt{tank}, \texttt{palm\_tree}, \texttt{pine\_tree}, \texttt{shark}, \texttt{bed}, \texttt{couch}, \texttt{plain}, \texttt{road}, \texttt{sea}, \texttt{castle}, \texttt{house}, \texttt{mountain} \\
-3 & \texttt{lamp}, \texttt{cup}, \texttt{telephone}, \texttt{baby}, \texttt{girl}, \texttt{woman}, \texttt{boy}, \texttt{man}, \texttt{rose}, \texttt{caterpillar}, \texttt{orchid} \\
-4 & \texttt{mouse}, \texttt{shrew}, \texttt{otter}, \texttt{wolf}, \texttt{raccoon}, \texttt{bear}, \texttt{seal}, \texttt{tiger}, \texttt{skunk}, \texttt{porcupine}, \texttt{elephant}, \texttt{mushroom}, \texttt{snail}, \texttt{sunflower}, \texttt{bee}, \texttt{tulip}, \texttt{dinosaur}, \texttt{poppy}, \texttt{rabbit}, \texttt{bottle}, \texttt{fox}, \texttt{hamster}, \texttt{cattle}, \texttt{camel} \\
-5 & \texttt{leopard}, \texttt{lion}, \texttt{trout}, \texttt{crocodile}, \texttt{beaver}, \texttt{ray}, \texttt{turtle}, \texttt{bicycle}, \texttt{motorcycle}, \texttt{lizard}, \texttt{kangaroo}, \texttt{cockroach}, \texttt{flatfish}, \texttt{dolphin}, \texttt{whale} \\
-6 & \texttt{worm}, \texttt{snake}, \texttt{can}, \texttt{table}, \texttt{television}, \texttt{bowl}, \texttt{wardrobe}, \texttt{plate}, \texttt{clock}, \texttt{crab}, \texttt{beetle} \\
+\texttt{cnn\_w1} & +1.98 & +0.35 & +0.04 & +0.28 & -0.07 \\
+\texttt{cnn\_w2} & +1.72 & -0.08 & +0.06 & +0.11 & -0.17 \\
+\texttt{cnn\_w4} & +0.34 & +0.15 & +0.23 & +0.20 & -0.04 \\
+\texttt{cifar\_resnet8} & +1.33 & -0.16 & -0.30 & -0.04 & -0.71 \\
 \hline
 \end{tabular}
-\caption{Top level of the representative CIFAR-100 learned hierarchy. The
-clusters contain a mixture of semantic and visually learned associations, which
-is expected because the hierarchy is derived from classifier weights rather than
-human labels.}
-\label{tab:hier-cifar100-top}
+\caption{CIFAR-100 roughness follow-up for fixed curricula. Accuracy gain is in
+percentage points. Roughness and Hessian columns are log-ratios of curriculum to
+baseline; negative values indicate lower roughness for the curriculum run.}
+\label{tab:appg-roughness-cifar100}
 \end{table}
 
-This qualitative inspection is important because it separates two possible
-failure modes: curriculum may fail because coarse labels are not useful for a
-particular model, or because the generated hierarchy itself is poor. This
-distinction is especially relevant for Tiny ImageNet, where the negative pilot
-may reflect hierarchy quality, model capacity, or schedule choice rather than the
-absence of any useful class structure.
+The most favorable case for a flattening interpretation is
+\texttt{cifar\_resnet8}: it improves accuracy and lowers several roughness
+estimates. The CNNs do not give the same clean story. For example,
+\texttt{cnn\_w1} improves peak accuracy but has higher final sharpness, and
+\texttt{cnn\_w4} barely improves accuracy while also tending toward higher final
+roughness. The adaptive runs do not change this conclusion.
+
+The safest statement is therefore:
+
+\begin{quote}
+The experiments confirm a capacity-, dataset-, and schedule-dependent curriculum
+effect, but current roughness probes do not prove that the effect is caused by
+consistently finding flatter minima.
+\end{quote}
 
 \section{Interpretation}
 
-The updated follow-up supports the following thesis-level conclusions.
+The updated experiments lead to five conclusions.
 
-First, CIFAR-100 remains the strongest positive case. The added
-\texttt{cnn\_w0.5} runs show the largest gain in the follow-up, which reinforces
-the capacity-conditioned result: the weaker CNNs benefit most from curriculum.
+First, CIFAR-100 remains the strongest positive dataset. The fixed schedules are
+still the best-performing method, especially for \texttt{cnn\_w0.5},
+\texttt{cnn\_w1}, \texttt{cnn\_w2}, and \texttt{cifar\_resnet8}.
 
-Second, the effect does not transfer automatically to easy 10-class datasets.
-Fashion-MNIST is essentially negative, and CIFAR-10 shows only a small gain for
-\texttt{cnn\_w0.5}. This suggests that both model weakness and dataset structure
-matter. A weak model alone is not sufficient.
+Second, adaptive plateau scheduling is promising as a concept but not yet better
+than hand-tuned fixed schedules. It reduces manual curriculum-length selection,
+but it can stay in coarse stages too long. This is especially harmful for larger
+CNNs, where the best fixed curriculum was very short.
 
-Third, the Tiny ImageNet pilot is negative under the tested settings. It should
-not be used to conclude that curriculum cannot work on Tiny ImageNet, but it does
-show that the CIFAR-100 schedule and generated hierarchy are not directly
-plug-and-play.
+Third, hierarchy depth matters. On CIFAR-100, \texttt{adaptive\_max1} is better
+than \texttt{adaptive\_all} for the models where both were tested. This suggests
+that future automatic curricula should tune or learn which hierarchy levels to
+use, not only when to advance between them.
 
-Fourth, roughness and sharpness diagnostics are inconclusive as a mechanism.
-Some successful curriculum runs are flatter by these probes, while others are
-not. Therefore the correct claim is:
+Fourth, easy 10-class controls do not show the same effect. Fashion-MNIST is
+neutral or negative, while CIFAR-10 shows only small CNN gains. This supports the
+claim that curriculum is useful only when the dataset has enough class structure
+and difficulty.
+
+Fifth, Tiny ImageNet requires a stronger setup. Small models with Adam were
+negative, but ResNet-18 with SGD/cosine achieved a modest positive curriculum
+gain. This suggests that the failure of the first Tiny ImageNet pilot was not
+only a dataset issue; it also depended on model capacity and optimization.
+
+Overall, the thesis-level claim should be narrow and defensible:
 
 \begin{quote}
-The experiments confirm a capacity- and dataset-dependent curriculum effect, but
-current roughness probes do not prove that this effect is caused by consistently
-finding flatter minima.
+Coarse-to-fine curriculum learning can improve peak accuracy for lower-capacity
+models on structured many-class image classification tasks, but the effect is
+not universal. It depends on hierarchy quality, hierarchy depth, model capacity,
+dataset difficulty, and schedule design.
 \end{quote}
 
-This is the most defensible interpretation for the final thesis.
+\section{Research questions revisited}
+
+Table~\ref{tab:appg-hypotheses-verdicts} summarizes what the appendices answer
+and what remains open. The strongest conclusions are about peak accuracy on
+CIFAR-100 and the weakness of the current adaptive rule. The mechanism and
+hierarchy-quality questions are less settled.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.25\textwidth}>{\raggedright\arraybackslash}p{0.18\textwidth}>{\raggedright\arraybackslash}p{0.47\textwidth}}
+\hline
+Question & Verdict & What the evidence says \\
+\hline
+Does model capacity affect curriculum usefulness? & Mostly supported & The CIFAR-100 CNN width ladder shows large gains for weaker CNNs and little or no gain for the largest CNN. The smallest CIFAR ResNet also benefits more than deeper variants, although cross-family comparisons still mix capacity with architecture and optimization differences. \\
+Does curriculum improve peak accuracy? & Conditionally supported & Gains are clear for weaker CIFAR-100 models, small for CIFAR-10 CNNs, absent on Fashion-MNIST, and mixed on Tiny ImageNet. The caveat is that peak test accuracy is retrospective, so it should be complemented by validation-selected test accuracy. \\
+Does curriculum improve training speed? & Mostly not supported & AUC gains are usually negative, meaning the coarse stage often delays fine-label accuracy. The curriculum can reach a better peak while still being worse over much of the trajectory. \\
+Does curriculum find flatter minima? & Inconclusive & CIFAR-100 \texttt{cifar\_resnet8} supports this story, but the CNN roughness results are mixed. The probes are useful diagnostics, but they do not establish a causal mechanism. \\
+Are adaptive schedules better than fixed schedules? & Not in these runs & Fixed hand-picked CIFAR-100 schedules outperform adaptive plateau schedules. Adaptive all-level schedules can stay coarse for too long, especially for larger CNNs. \\
+Does hierarchy depth and quality matter? & Partly supported & On CIFAR-100, using only the first generated level often beats using all levels, and the visualized hierarchies show mixed top-level groups. A direct random-hierarchy ablation is still missing, so we cannot yet separate useful grouping from simply reducing the number of labels early in training. \\
+Does the result generalize beyond CIFAR-100? & Mixed & Fashion-MNIST is a negative control, CIFAR-10 has small gains, and Tiny ImageNet becomes positive only in the stronger ResNet-18 setup. Tiny ImageNet still needs more seeds and a more systematic schedule and hierarchy study. \\
+\hline
+\end{tabular}
+\caption{Summary of the main hypotheses and current verdicts.}
+\label{tab:appg-hypotheses-verdicts}
+\end{table}

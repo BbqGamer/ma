@@ -6,23 +6,21 @@
 
 This appendix summarizes the first CIFAR-100 model-size study for the
 coarse-to-fine curriculum learning reproduction. The main question was whether
-curriculum learning remains useful as the model becomes larger or architecturally
-stronger. A secondary goal was to inspect whether non-accuracy metrics, such as
-macro-F1, top-5 accuracy, hierarchy-aware scores, and calibration, show the same
-pattern as top-1 accuracy.
+the curriculum remains useful as the model becomes larger or architecturally
+stronger. A secondary goal was to check whether macro-F1, top-5 accuracy,
+hierarchy-aware scores, and calibration tell the same story as top-1 accuracy.
 
-The intended roughness and sharpness probes were implemented in the training
-code, but they were not active in this W\&B run batch. Therefore this appendix
-reports performance, speed, and hierarchy-aware metrics, and leaves the direct
-sharpness/Hessian question for the next experiment described in
-Section~\ref{sec:cifar100-model-size-next-steps}.
+The runs are best read as a screening study. They show where the curriculum is
+promising and where it is not, but they do not by themselves settle questions of
+statistical stability or optimization-landscape smoothness. The roughness and
+sharpness diagnostics were not active in this batch, so the direct Hessian and
+sharpness question is taken up in Appendix~\ref{app:roughness-followup-curriculum}.
 
 \section{Experimental protocol}
 
-All runs were downloaded from W\&B project
-\texttt{curriculum-learning-ma/coarse-to-fine-curriculum}. The analyzed subset
-used the tags \texttt{model-size} and \texttt{cifar100}. In total, 80 W\&B runs
-were exported and analyzed.
+The analysis uses 80 completed runs from the CIFAR-100 model-size sweep. The
+runs were grouped by model, architecture family, and curriculum length before
+aggregation.
 
 The common training protocol was:
 
@@ -48,9 +46,7 @@ The analyzed model ladder consisted of:
 \begin{itemize}
     \item width-scaled CNNs: \texttt{cnn\_w0.5}, \texttt{cnn\_w1},
           \texttt{cnn\_w2}, and \texttt{cnn\_w4},
-    \item CIFAR-style ResNets: \texttt{cifar\_resnet8},
-          \texttt{cifar\_resnet20}, \texttt{cifar\_resnet32}, and
-          \texttt{cifar\_resnet56},
+    \item CIFAR-style ResNets with depths 8, 20, 32, and 56,
     \item ImageNet-style ResNet adapted to CIFAR: \texttt{resnet18}.
 \end{itemize}
 
@@ -60,6 +56,11 @@ same seed and configuration, so they are not independent random seeds. For the
 summary tables below, repeated runs with the same model and curriculum length
 were averaged. All other model configurations have one run per curriculum
 length.
+
+Because this sweep is mostly single-seed, it should be interpreted as an
+exploratory map of the effect rather than a final significance test. The
+multi-seed follow-up in Appendix~\ref{app:roughness-followup-curriculum}
+rechecks the most important CIFAR-100 cases.
 
 \section{Primary results: curriculum benefit versus model size}
 
@@ -89,6 +90,14 @@ Model & Params & Base & Best CL & CL acc. & Gain & AUC gain \\
 reported in percentage points relative to the matching baseline.}
 \label{tab:cifar100-model-size-best}
 \end{table}
+
+Here, ``best test accuracy'' means the best point reached along the test
+trajectory. This is useful for understanding the learning dynamics, but it is
+not a deployment-style model-selection rule. In a stricter protocol, the epoch
+would be selected on validation data and the test set would be used only once at
+the selected epoch. The AUC column is the normalized area under the per-epoch
+test-accuracy curve; a negative AUC gain means that the curriculum spent much of
+training below the baseline trajectory even if it later reached a better peak.
 
 The strongest curriculum benefits occur in the smaller CNNs. The largest gain is
 observed for \texttt{cnn\_w1} (+3.62 percentage points), followed by
@@ -165,9 +174,9 @@ or no hard curriculum at all.
 
 \section{Speed and AUC}
 
-The curriculum runs generally do not improve the area under the test-accuracy
-curve. Figure~\ref{fig:cifar100-model-size-auc-gain} shows the AUC gain for the
-best curriculum run of each model. All values are negative.
+The curriculum runs generally do not improve the full test-accuracy trajectory.
+Figure~\ref{fig:cifar100-model-size-auc-gain} shows the AUC gain for the best
+curriculum run of each model. All values are negative.
 
 \begin{figure}[h]
     \centering
@@ -189,7 +198,10 @@ performance.
 The alternative metrics generally agree with the accuracy results. For the
 models that benefit most in top-1 accuracy, curriculum also improves macro-F1,
 top-5 accuracy, and hierarchy-aware scores. For models with weak or negative
-accuracy gains, the alternative metrics are also weak or negative.
+accuracy gains, the alternative metrics are also weak or negative. The official
+hierarchy-aware score gives partial credit when the prediction falls in the same
+CIFAR-100 superclass as the target, so it measures whether mistakes remain close
+in the human-defined class hierarchy.
 
 \begin{table}[h]
 \centering
@@ -238,26 +250,11 @@ their best curriculum runs.
 \section{Sharpness and landscape smoothness}
 
 No direct conclusion about sharpness or optimization-landscape smoothing can be
-drawn from this W\&B batch, because roughness probes were disabled:
-
-\begin{verbatim}
-config_roughness_probes = False
-\end{verbatim}
-
-Therefore the exported histories do not contain:
-
-\begin{verbatim}
-rough_critical_sharpness
-rough_relative_critical_sharpness
-rough_hessian_top_eigenvalue
-rough_hessian_frobenius
-rough_gradient_noise_scale
-rough_grad_norm_skew
-\end{verbatim}
-
-This is an important negative finding about the current data, not about the
-method itself. The sharpness question remains open and should be tested with the
-focused follow-up in Section~\ref{sec:cifar100-model-size-next-steps}.
+drawn from this batch, because the roughness diagnostics were not active. This
+is a limitation of the data collected here, not evidence for or against the
+method itself. In particular, the accuracy gains in this appendix should not be
+read as proof that the curriculum finds flatter minima. Appendix~\ref{app:roughness-followup-curriculum}
+adds a focused roughness follow-up and shows that the picture is mixed.
 
 \section{Interpretation}
 
@@ -285,46 +282,21 @@ therefore that curriculum usefulness depends on both capacity and architecture,
 with the strongest evidence for a within-family capacity effect in the CNN
 models.
 
-\section{Next experiment plan}
+\section{Connection to the follow-up study}
 \label{sec:cifar100-model-size-next-steps}
 
-The next experiment should answer the sharpness and smoothness question without
-rerunning the full grid. I propose a focused roughness subset:
+Appendix~\ref{app:roughness-followup-curriculum} follows this screening sweep in
+three ways. First, it repeats the most important CIFAR-100 cases across three
+seeds, so the single-seed pattern from this appendix can be checked for
+stability. Second, it adds roughness and sharpness diagnostics for a smaller set
+of representative models. Third, it tests whether the same curriculum idea
+transfers to Fashion-MNIST, CIFAR-10, and Tiny ImageNet.
 
-\begin{itemize}
-    \item \texttt{cnn\_w1}: baseline and \texttt{curr10},
-    \item \texttt{cnn\_w4}: baseline and \texttt{curr5},
-    \item \texttt{cifar\_resnet8}: baseline and \texttt{curr20},
-    \item \texttt{cifar\_resnet32}: baseline and \texttt{curr10},
-    \item \texttt{resnet18}: baseline and \texttt{curr20}.
-\end{itemize}
-
-The recommended roughness settings are:
-
-\begin{verbatim}
-ROUGHNESS_PROBES=1
-ROUGHNESS_EPOCHS=1,10,11,50,100
-ROUGHNESS_BATCHES=1
-HESSIAN_ITERS=1
-HESSIAN_SAMPLES=1
-SHARPNESS_RHO=0.05
-\end{verbatim}
-
-These runs should test whether the models that benefit from curriculum also show
-lower sharpness, lower top Hessian eigenvalue, lower Hessian Frobenius estimate,
-or lower gradient noise. If the smoothing metrics improve only for models where
-curriculum improves accuracy, this would provide a mechanistic explanation for
-the capacity-dependent curriculum effect.
-
-After the roughness subset, the most important robustness step is to repeat the
-core CIFAR-100 size sweep with additional seeds, at least 43 and 44, for:
-
-\begin{itemize}
-    \item \texttt{cnn\_w0.5}, \texttt{cnn\_w1}, \texttt{cnn\_w2}, \texttt{cnn\_w4},
-    \item \texttt{cifar\_resnet8}, \texttt{cifar\_resnet32}, \texttt{cifar\_resnet56},
-    \item \texttt{resnet18}.
-\end{itemize}
-
-Only after these CIFAR-100 conclusions are stable should the same Figure-11-style
-sweep be generalized to other datasets such as CIFAR-10, Fashion-MNIST, SVHN,
-STL-10, and Tiny ImageNet.
+The main remaining gaps are more targeted. The full model-size ladder was not
+repeated across many seeds, and the reported peak test accuracy should ideally
+be complemented by test accuracy at the best validation epoch. The hierarchy
+itself also deserves a separate ablation: learned hierarchies should be compared
+against official semantic hierarchies where available and against random
+hierarchies with matched cluster sizes. That would separate the value of a
+meaningful grouping from the simpler effect of reducing the number of labels in
+the early stage.

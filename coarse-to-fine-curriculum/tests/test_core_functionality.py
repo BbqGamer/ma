@@ -15,6 +15,7 @@ from scripts.analyze_pareto import add_baseline_thresholds, add_pareto_columns, 
 from scripts.plan_figure11_resnet18 import parse_args as parse_plan_args
 from scripts.plan_figure11_resnet18 import build_command
 from train_coarse_to_fine import (
+    build_curriculum_schedule,
     classification_metrics_from_confusion,
     clusters_to_membership,
     estimate_roughness_metrics,
@@ -196,6 +197,25 @@ class PlannerTests(unittest.TestCase):
         command, _ = build_command(args, "baseline", None)
         self.assertIn("--roughness-probes", command)
         self.assertIn("--roughness-epochs 1,2", command)
+
+    def test_adaptive_schedule_filters_levels_by_cluster_count(self) -> None:
+        levels = [
+            [[0, 1, 2, 3]],
+            [[0, 1], [2, 3]],
+            [[0], [1], [2], [3]],
+        ]
+        schedule = build_curriculum_schedule(
+            num_classes=4,
+            hierarchy_levels=levels,
+            curriculum_epochs=10,
+            total_epochs=30,
+            min_clusters=2,
+            policy="adaptive_plateau",
+            stage_max_epochs=7,
+        )
+        self.assertEqual([item["name"] for item in schedule], ["level_1_2clusters", "fine_tune"])
+        self.assertEqual(schedule[0]["epochs"], 7)
+        self.assertTrue(schedule[0]["adaptive"])
 
 
 class ParetoAnalysisTests(unittest.TestCase):
