@@ -151,16 +151,50 @@ tackle more complex aspects of the problem.
 
 \subsection{Gaussian Continuation}
 One practical way to apply continuation methods in deep learning is through
-Gaussian continuation. Mobahi \cite{mobahi2015theoretical} showed that
-convolving the objective function with Gaussian kernels is an effective way to
-smooth the loss landscape, making it easier for optimizers to find global
-minima. Later work by Ilersich et al. \cite{ilersich2025deep} provided
-mathematical evidence that this approach can transform non-convex landscapes
-into ones that are much easier to optimize. Empirical studies, such as
-\cite{sinha2020curriculum}, have used Gaussian smoothing to filter out noise
-during training, and \cite{gupta2025efficient} demonstrated that using
-intermediate checkpoints as smoothed objectives can guide models through a
-gradual learning process.
+Gaussian continuation. Mobahi and Fisher \cite{mobahi2015theoretical} analyze
+this idea theoretically by embedding a non-convex objective into a family of
+Gaussian-smoothed objectives and following a stationary path from the smoothed
+problem back to the original one. Their result does not claim that continuation
+always finds the global optimum. Instead, it bounds the value reached by the
+continuation path using an ``optimization complexity'' term of the objective.
+This is important for this thesis because it gives a formal reason why smoothing
+can help: objectives with lower continuation complexity have better worst-case
+bounds under this procedure. They also show that this complexity can be computed
+analytically for functions represented with Gaussian radial basis functions,
+which connects directly to the use of Gaussian kernels as smoothing operators.
+
+Later work by Ilersich et al. \cite{ilersich2025deep} provided further evidence
+that Gaussian continuation can transform difficult non-convex landscapes into
+ones that are easier to optimize. Empirical studies, such as curriculum by
+smoothing \cite{sinha2020curriculum}, use the same intuition in learning
+systems: early training suppresses high-frequency or noisy parts of the loss,
+and later training restores the full objective. This literature supports the
+main design choice in the Gaussian-continuation experiments in this thesis, but
+it also highlights a limitation: the smoothing schedule is itself a crucial
+algorithmic choice, not a detail that can be ignored.
+
+\subsection{Curriculum Regularization in Scientific Machine Learning}
+A related example of objective-based curriculum appears in physics-informed
+neural networks. Krishnapriyan et al. \cite{krishnapriyan2021characterizing}
+showed that standard PINNs can fail on convection, reaction, and
+reaction-diffusion problems even when the neural network architecture is
+expressive enough to represent the solution. Their diagnosis is especially
+relevant here: the PDE residual used as a soft regularizer can make the loss
+landscape more ill-conditioned and harder to optimize. The failure is therefore
+not only a matter of model capacity, but also of how the objective is presented
+during training.
+
+Their proposed curriculum regularization starts with an easier PDE constraint,
+for example a smaller convection or reaction coefficient, and then gradually
+increases the coefficient until the target problem is reached. This is a form of
+continuation in the objective itself rather than in the data order. On the
+reported PINN benchmarks, this curriculum reduced error by one to two orders of
+magnitude in regimes where regular PINN training often failed. The connection to
+this thesis is conceptual rather than experimental: both approaches treat the
+training objective as something that should be introduced progressively. The PINN
+results strengthen the motivation for dynamic loss schedules, because they show
+that a physically meaningful regularization term can be correct in principle and
+still be harmful if imposed at full strength from the start.
 
 Recent robust curriculum methods also operate directly at the loss level.
 SuperLoss appends a generic adaptive term to existing objectives and
@@ -328,10 +362,14 @@ We can also visualize the spectrum of the hessian spectrum as they did in the Fi
 \section{Synthesis}
 
 The literature reveals a convergence of these three ideas. Continuation methods
-(Gaussian smoothing) provide the theoretical justification for creating a
+and Gaussian smoothing provide the theoretical justification for creating a
 hierarchy of smoothed loss functions to solve non-convex problems
-\cite{ilersich2025deep}. Multi-Objective Optimization provides the
-architectural framework to compute these losses simultaneously
+\cite{mobahi2015theoretical, ilersich2025deep}. Work on curriculum
+regularization in PINNs shows the same principle in a different setting: a
+correct but difficult regularization term may need to be introduced gradually
+rather than imposed at full strength from the beginning
+\cite{krishnapriyan2021characterizing}. Multi-Objective Optimization provides
+the architectural framework to compute these losses simultaneously
 \cite{chen2024gradient}. Meta-Learning provides the bi-level optimization
 machinery to automate the weighting \cite{son2024meta}.
 
