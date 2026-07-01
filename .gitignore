@@ -215,3 +215,21 @@ models/
 # Generated LLM schedules / run outputs
 llm_schedules/generated/*/
 !llm_schedules/generated/__init__.py
+
+# Local W&B exports / analysis scratch
+coarse-to-fine-curriculum/wandb_analysis_*/
+coarse-to-fine-curriculum/wandb_export_*/
+
+# Local reference PDFs / screenshots
+/Mobahi and Iii - 2015 - A Theoretical Analysis of Optimization by Gaussian Continuation.pdf
+/pinn-cl.pdf
+/runpod.png
+
+# Accidental/local Node install used by tools
+/node_modules/
+/package.json
+/package-lock.json
+
+# Generated thesis figures not included in the PDF
+/thesis/figures/adaptive_policy_gain_comparison.png
+/thesis/figures/adaptive_stage_allocation.png
