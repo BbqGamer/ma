@@ -60,73 +60,76 @@
 \chapter{Introduction}
 \label{chap:introduction}
 
-task. Inspired by Elman's concept of "starting small" \cite{elman1993learning},
-target later. theoretical continuation methods and modern meta-optimization
+Training deep neural networks is still difficult when the optimization surface
+is highly non-convex and contains many poor local minima. In most practical
+pipelines, the objective is fixed from the first to the last epoch. Curriculum
+learning offers a different view: instead of exposing the full difficulty at
+once, training can start from an easier objective and progressively move toward
+the final target \cite{elman1993learning,bengio2009curriculum}.
 
-Training deep neural networks is a complex process, especially because their
-loss landscapes are often non-convex and filled with many local minima.
-Traditional training methods usually treat data and objectives as static, which
-can overlook important aspects of the learning process. The idea of curriculum
-learning, introduced by Elman \cite{elman1993learning} and formalized by Bengio
-et al. \cite{bengio2009curriculum}, suggests that models can achieve better
-results when they are exposed to tasks in order of increasing difficulty. This
-concept is closely related to continuation methods from optimization theory,
-which use smoothing techniques to make the loss landscape easier to navigate at
-first, and then gradually restore its complexity \cite{allgower1990numerical}.
-Recent research, such as \cite{ilersich2025deep}, has shown that using Gaussian
-kernels to smooth the objective function can help optimizers avoid poor local
-minima and improve overall performance.
+This thesis studies objective-space curricula, with particular focus on
+Gaussian continuation. Continuation methods smooth the objective early and then
+gradually remove smoothing \cite{allgower1990numerical,mobahi2015theoretical}.
+In neural networks this idea is promising, but schedule design is still mostly
+manual \cite{wang2021survey}. The central problem addressed here is therefore
+how to design and evaluate curriculum schedules that are both effective and
+scientifically defensible.
 
-One of the main challenges in these approaches is the use of fixed, manually
-chosen schedules for adjusting the level of smoothing. These schedules often do
-not respond to the actual progress of the model during training
-\cite{wang2021survey}. The aim of this thesis is to develop a method that
-automates this process using data-driven techniques. The curriculum is
-generated as a continual bi-level learning problem \cite{son2024meta}, where
-meta-learning is used to adjust the weights of different loss functions
-dynamically. Unlike standard multi-task learning, which tries to balance tasks
-equally \cite{chen2024gradient}, this approach focuses on guiding the model
-from easier, smoothed objectives to more difficult, sharp ones as training
-progresses.
+The work combines two perspectives. The first is the original
+Gaussian-continuation track on synthetic non-convex regression surfaces. The
+second is an output-space coarse-to-fine curriculum track in image
+classification, used as a large-scale empirical stress test. Across both
+tracks, the thesis compares fixed schedules, adaptive schedules, and hierarchy
+variants, and places equal emphasis on positive and negative outcomes.
 
-This research involves designing and testing a meta-learning algorithm that can
-automatically adjust the weights of smoothed loss functions. It is important to
-prevent the model from focusing only on the easiest objectives, which can
-happen if the meta-learning process is unconstrained. To address this, a
-monotonic gradient regularizer is introduced, ensuring that the model
-consistently moves from easy to hard tasks. The effectiveness of this approach
-is evaluated on regression problems with non-convex loss landscapes, using
-Gaussian smoothing kernels. This work aims to connect theoretical ideas from
-continuation methods with practical meta-optimization strategies
-\cite{gupta2025efficient, mao2022metaweighting}.
+\section{Research questions}
+
+The empirical part is organized around the following questions:
+
+\begin{enumerate}
+    \item Under what conditions does curriculum learning improve final model quality?
+    \item How strongly does the effect depend on model capacity, hierarchy depth,
+          and dataset difficulty?
+    \item Can adaptive scheduling reliably outperform fixed hand-tuned schedules?
+    \item Do roughness and sharpness diagnostics support a clear optimization
+          mechanism, or only correlate with selected positive cases?
+\end{enumerate}
+
+\section{Contributions}
+
+The main contributions of the thesis are:
+
+\begin{enumerate}
+    \item A reproducible training and analysis pipeline for dynamic multi-loss
+          curriculum experiments in both regression and image-classification
+          settings.
+    \item A broad empirical study showing that curriculum effects are real but
+          strongly conditional: they depend on capacity, schedule, hierarchy
+          quality, and dataset structure.
+    \item An adaptive plateau curriculum variant and a matched random-hierarchy
+          ablation that separates hierarchy quality from simple label-count
+          reduction effects.
+    \item A critical synthesis that includes mixed and negative results, not only
+          best-case improvements.
+\end{enumerate}
+
+\section{Thesis structure}
+
+Chapter~\ref{chap:literature-review} reviews continuation methods, curriculum
+learning, multi-objective optimization, and meta-learning. Chapter~\ref{chap:project-timeline}
+presents the current experimental evidence and discussion. Detailed experimental
+artifacts are provided in the appendices, including the CIFAR-100 model-size
+study, adaptive follow-up, and random-hierarchy ablation.
 
 \chapter{Literature Review}
 \label{chap:literature-review}
 
-grounded in \textbf{Numerical Continuation Methods} (or Homotopy Methods) used
-in global optimization \cite{allgower1990numerical}. In non-convex
-optimization, finding a global minimum is often intractable due to the
-proliferation of poor local minima. Continuation methods address this by
-introducing a smoothing parameter $\sigma$. The optimization begins with a
-heavily smoothed, often convex approximation of the objective function where
-the global minimum is easily locatable. As training progresses, the smoothing
-is removed ($\sigma \to 0$), gradually introducing high-frequency complexities
-while keeping the optimizer in the basin of attraction of the optimal solution.
-equation. This smoothing effectively diffuses local minima, revealing global
-structures early in training. decreasing width during training. They
-demonstrated that this strategy effectively filters out high-frequency noise in
-the loss landscape. Similarly, decay rates (e.g., linear or exponential decay)
-\cite{wang2021survey}. These a weighted sum of component losses $\mathcal{L} =
-	\sum w_i L_i$. However, gradient magnitudes, ensuring all tasks train at
-similar rates. Similarly, Training deep neural networks on non-convex loss
-landscapes is a well-known challenge in artificial intelligence. Most standard
-approaches present data and objectives in a fixed way, which can miss important
-aspects of how models learn. This thesis builds on three main areas of
-research: continuation methods from optimization theory, multi-objective
-optimization as an architectural strategy, and meta-learning for automating the
-training process. Although these fields have developed separately, recent
-studies show that combining their ideas can help address the difficulties of
-training complex models.
+This chapter reviews the literature behind the methodological choices in this
+thesis. The discussion focuses on three lines of work: continuation-based
+curriculum design, multi-objective optimization, and meta-learning. The goal is
+not to provide an exhaustive survey, but to identify which ideas are mature,
+which assumptions are often hidden, and where the open methodological gaps
+remain.
 
 \section{Curriculum Learning and Numerical Continuation}
 \label{sec:curriculum-continuation}
@@ -298,363 +301,203 @@ In our curriculum context, the dilemma is inverted: the model must be
 
 \cite{banayeeanzade2025theoretical} provides theoretical insights into overparameterized models in such multi-task setups, suggesting that without explicit regularization, the interplay between model capacity and task similarity determines the success of transfer. Pure meta-learning of loss weights can be unstable; without constraints, a meta-learner might exploit the easy smoothed loss to achieve artificially low training error without ever transitioning to the hard target function. This necessitates the monotonic regularization strategies explored in this thesis.
 
-\section{Additional papers - TO SORT}
-\subsection{Learning to Reweight Examples for Robust Deep Learning}
-In \cite{renLearningReweightExamples2018a} authors showcase the denoising
-capability of reweighting training examples in the deep learning. Their method
-assumes two datasets, one that is high in volume and noisy, and another one
-that is assumed to be unbiased and clean. Their method doesn't require any
-additional hyperparameters. The method inspects the descent direction of some
-training examples locally on the training loss surface and reweight them
-according to their similarity to the descent direction of the validation loss
-surface. Their datasets were obtained by perturbin original CIFAR-10 and
-CIFAR-100, in one method just by randomly flipping classes to each other, and
-other one where labels flip to some specific new "background" class. In the
-first setting a lot of noise is added but the distribution of classes stays
-largely uniform in the second one we end up with heavily imabalanced dataset
-which is more realistic. It turns out that the method they proposed didn't seem
-to provide any benefits over different regularization techniques, like adding
-random noise to labels, but on the second (imabalanced) setting, using the
-clean and balanced validation set and their novel method, resulted in
-significantly better results.
+\section{Output-Space Curriculum and Optimization Diagnostics}
 
-\subsection{Coarse-to-Fine Curriculum Learning}
-Authors of the paper \cite{stretcuCoarsetoFineCurriculumLearning2021}
-distinguish between curriculum learning in input space and in output space and
-attempt to explore the latter one. They proposed method of decomposing the
-original classification task into a sequence of coarse-to-fine problems. They
-did this by clustering the original labels into a hierarchy of similiar
-classes, the similiarity was obtained by taking the class embedding, being
-parameters of the model trained for couple of epochs in the last layer, just
-before each class. They used hierarchical clustering algorithm to create a tree
-of similiar labels of arbitrary depth. Their method introduces only one
-additional parameter which is number of epochs that the curriculum should take
-before the task is trained on the original loss. The time spent on each coarse
-task is uniform. Their method consistenly outperformed the baseline in terms of
-final validation accuracy. It turned out that there is a sweet spot for when to
-stop the curriculum at around 0.9 number of epochs that it would normally take
-the network to converge.
-\subsection{Sharpness-Aware Minimization for Efficiently Improving Generalization}
-The authors of the paper \cite{foretSharpnessAwareMinimizationEfficiently2021} from
-google introduced a novel optimization objective allowing to improve generlization 
-abilities of deep learning models. They did it by introducing a sharpness metric,
-which allows to find model parameters $w$ that not only have low training loss
-$L_S(w)$ but also whoose neighborhood have uniformly low training loss value.
-They have shown that the generalization ability is bounded in terms of
-neighborhood-wise training loss. 
+\subsection{Learning to Reweight Examples}
+Ren et al. \cite{renLearningReweightExamples2018a} proposed a bilevel procedure
+that reweights training examples according to their short-term effect on a clean
+validation set. Although their work targets noisy labels rather than curriculum
+scheduling, it is directly relevant methodologically: it shows how a validation
+objective can control inner-loop updates without manually defining static
+weights.
 
-The formula for Sharpness-Aware-Minimization loss is:
-$L_S^{\mathrm{SAM}}(w) \triangleq \max_{\|\epsilon\|_p \leq \rho} L_S(w+\epsilon)$
-Which basically means, finding such perturbation $\epsilon$ of weight $w$, which
-length is smaller than $\rho$ (the hyperparameter) that yields in the highest
-increase of loss function. Flat regions don't have perturbations that would
-change the loss greatly while sharp regions do have them. Unfortunately it is
-highly inefficient to find the exact value for every training step, so we need
-to approximate it. We do it by ascending in the direction of the gradient.
+\subsection{Coarse-to-Fine Curriculum in Output Space}
+Stretcu et al. \cite{stretcuCoarsetoFineCurriculumLearning2021} introduced a
+coarse-to-fine curriculum in the output space. Instead of reordering training
+examples, they cluster fine labels into progressively finer groups and train the
+model from coarse supervision to the final class labels. This is a key
+reference for the image-classification experiments in this thesis, especially
+for analyzing how hierarchy quality, hierarchy depth, and curriculum length
+influence the result.
 
-Optimizing this sharpness metric has shown to empirically improve generalization
-abilities of deep learning models on vision tasks. In our CL research, we want to
-log sharpness metric to see whether utilizing curriculum results in simliar effects
-as SAM optimization, i.e reaching flatter local optima.
-
-We can also visualize the spectrum of the hessian spectrum as they did in the Figure 3.
+\subsection{Sharpness-Aware Minimization and Flatness Probes}
+Foret et al. \cite{foretSharpnessAwareMinimizationEfficiently2021} linked
+generalization to neighborhood-aware optimization through the
+Sharpness-Aware Minimization (SAM) objective. This thesis does not optimize SAM
+directly, but uses roughness and sharpness diagnostics inspired by the same
+geometry-based perspective. The practical question is whether curriculum gains
+coincide with flatter regions of the loss landscape.
 
 \section{Synthesis}
 
-The literature reveals a convergence of these three ideas. Continuation methods
-and Gaussian smoothing provide the theoretical justification for creating a
-hierarchy of smoothed loss functions to solve non-convex problems
-\cite{mobahi2015theoretical, ilersich2025deep}. Work on curriculum
-regularization in PINNs shows the same principle in a different setting: a
-correct but difficult regularization term may need to be introduced gradually
-rather than imposed at full strength from the beginning
-\cite{krishnapriyan2021characterizing}. Multi-Objective Optimization provides
-the architectural framework to compute these losses simultaneously
-\cite{chen2024gradient}. Meta-Learning provides the bi-level optimization
-machinery to automate the weighting \cite{son2024meta}.
+The literature supports the core design of this thesis: continuation methods
+motivate easy-to-hard objective transitions
+\cite{allgower1990numerical,mobahi2015theoretical,ilersich2025deep},
+multi-objective methods provide the machinery to combine losses
+\cite{chen2024gradient}, and meta-learning offers mechanisms for dynamic
+weighting \cite{son2024meta,mao2022metaweighting}.
 
-Existing methods fail to fully integrate these components. Heuristic CL lacks
-adaptability. Standard MTL (like GradNorm) seeks equilibrium rather than the
-sequential directionality required for curricula. Pure meta-learning lacks the
-constraints to enforce a monotonic increase in difficulty. This thesis fills
-this gap by using regularized meta-learning to dynamically discover the optimal
-curriculum trajectory. By enforcing monotonic constraints on the
-meta-gradients, the method ensures the stability of the continuation process
-while leveraging the adaptability of meta-learning.
+At the same time, the review exposes clear gaps. Most practical curricula still
+use fixed schedules. Standard multi-task balancing aims at simultaneous
+equilibrium, not sequential transition. Meta-learning methods can adapt weights,
+but without constraints they may overuse easy objectives and delay transfer to
+the final task. The empirical part of this thesis is therefore organized around
+these unresolved points: when curriculum helps, when it fails, and which design
+choices are responsible.
 
-\chapter{Project Timeline and Current Experimental Status}
+\chapter{Current Experimental Evidence and Discussion}
 \label{chap:project-timeline}
 
-This chapter summarizes the practical progress of the project. It was prepared
-from the repository history, experiment configuration files, MLflow records and
-archived analysis reports. Its purpose is to give a compact, supervisor-facing
-view of what has already been implemented, what was tested, and what the current
-empirical evidence supports.
+This chapter presents the current empirical position of the thesis. The focus is
+on defensible findings rather than a chronological project log. Detailed run
+reports remain in the appendices; here the goal is to summarize what the results
+already support and what still requires caution.
 
-\section{High-level timeline}
+\section{Experimental scope}
 
-The timeline below combines the repository history, MLflow records and archived
-analysis reports. At the time of inspection, the local MLflow database contained
-8032 tracked runs: 5663 finished, 542 failed, 1791 killed and 36 still marked as
-running. These numbers should be treated as a project-status snapshot rather than
-as final thesis tables.
+The completed work has two complementary tracks.
 
-\begin{description}
-    \item[Nov--Dec 2025.] The repository was initialized from a data-science
-          template. First Ackley and Bukin visualizations, a simple regression
-          dataset script, plotting utilities and an initial training loop were
-          created. The project started as a controlled regression setting for
-          testing whether smooth-to-hard training could help neural
-          approximation of difficult surfaces. The motivation for this direction
-          is introduced in Chapter~\ref{chap:introduction} and connected to
-          continuation methods in Section~\ref{sec:curriculum-continuation}.
-    \item[Feb 2026.] Gaussian smoothing was extended to Levy and Eggholder.
-          Dataset persistence and training-code refactors were added. The work
-          moved from notebooks and one-off scripts to a reusable
-          Gaussian-continuation pipeline with saved datasets. The theoretical
-          background for smoothing-based curricula is reviewed in
-          Section~\ref{sec:curriculum-continuation}.
-    \item[Early Mar 2026.] After supervisor discussion, the focus shifted toward
-          stronger baselines. Input scaling, surface visualizations, common
-          model utilities and a config-driven experiment runner were added. The
-          key lesson was that curriculum gains are not convincing unless the
-          baseline is already strong; the resulting baseline sweep is documented
-          in Appendix~\ref{app:sweep-pack-v1}.
-    \item[14--16 Mar 2026.] The first full sweep pack and the first full
-          curriculum-vs-single benchmark were run and archived. The baseline
-          search succeeded. Curriculum was not a universal winner: quality wins
-          were mixed, while single-target training was faster in every benchmark
-          cell. Details are in Appendices~\ref{app:sweep-pack-v1} and
-          \ref{app:curr-vs-single-v1}.
-    \item[Late Mar--early Apr 2026.] Ratio-controlled sweeps,
-          schedule-sweep infrastructure, shared IO, MLflow utilities and shared
-          training-loop primitives were added. The codebase became more
-          reproducible and modular, although schedule-sweep experiments remained
-          less mature than the main sweep and benchmark pipeline. The v3 sweep
-          setup is summarized in Appendix~\ref{app:sweep-pack-v3-setup}.
-    \item[Apr 2026.] Meta-weighting benchmark tooling was implemented. The
-          project tested validation-guided adaptive weighting over several
-          smoothed losses. The direction became operational, but results were
-          mixed: multi-loss weighting helped in selected settings but did not
-          consistently beat a single hard-loss baseline. The literature context
-          for this adaptive weighting direction is in
-          Section~\ref{sec:meta-learning-continual}, and the most complete
-          experiment summary is Appendix~\ref{app:meta-weighting-eggholder-u1}.
-    \item[May 2026.] Meta unroll support, policy-based schedule training,
-          LLM-generated schedule search and Optuna schedule-search comparisons
-          were added. The most promising adaptive result became policy search:
-          LLM-generated schedules slightly outperformed Optuna schedules on the
-          Eggholder benchmark, but with limited completed candidates and a need
-          for confirmation. The detailed generated report is in
-          \texttt{reports/analysis/schedule\_search\_comparison/}.
-    \item[Late May--Jun 2026.] CIFAR-100 easy-vs-hard schedule search and a
-          separate coarse-to-fine curriculum reproduction were added.
-          Docker/Runpod workflows and analysis scripts were prepared. CIFAR-100
-          produced encouraging curriculum signals: LLM schedules slightly beat
-          Optuna on single-seed validation loss, and one coarse-to-fine CNN run
-          showed a strong test-accuracy gain for curriculum. Details are in
-          \texttt{reports/analysis/cifar100\_easy\_hard/} and
-          \texttt{coarse-to-fine-curriculum/runs/}.
-\end{description}
+\paragraph{Gaussian-continuation track.}
+This is the primary thesis track: synthetic non-convex regression benchmarks,
+with sweeps for baseline tuning, fixed curriculum schedules, and dynamic
+multi-loss variants.
 
-\section{Main experimental milestones}
+\paragraph{Output-space curriculum track.}
+This is a PyTorch reproduction inspired by coarse-to-fine label hierarchies in
+image classification. It serves as a large-scale stress test of schedule design,
+capacity effects, hierarchy quality, and transfer across datasets.
 
-\subsection{Baseline hyperparameter search}
+The key advantage of this two-track setup is that it separates conceptual
+questions from implementation details. If a pattern appears in both tracks, it
+is less likely to be an artifact of one dataset or one code path.
 
-The first major experiment was the sweep pack archived as
-\texttt{2026-03-14\_sweep-pack-v1}. It used the configuration files under
-\texttt{configs/sweeps/} and covered eight benchmark functions:
-\texttt{ackley}, \texttt{levy}, \texttt{bukin}, \texttt{eggholder},
-\texttt{franke}, \texttt{peaks}, \texttt{friedman1\_2d}, and
-\texttt{friedman2\_2d}. The pack executed 630 Optuna trials, of which 336
-finished and 294 were pruned or killed.
+\section{Main findings at a glance}
 
-The main purpose was to avoid comparing curriculum training against a weak
-manual baseline. The sweep showed that MLP architectures were best for most
-functions, while \texttt{peaks} preferred SIREN and \texttt{eggholder} preferred
-Fourier features. Eggholder remained the hardest benchmark by a large margin.
-This result established a stronger baseline for later curriculum comparisons.
+Table~\ref{tab:main-findings-overview} summarizes the strongest claims that can
+be made from the current experiments.
 
-\subsection{Curriculum versus single-target training}
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{0.23\textwidth}p{0.23\textwidth}p{0.42\textwidth}}
+\hline
+Question & Strongest evidence & Current verdict \\
+\hline
+Capacity sensitivity & Appendices~\ref{app:cifar100-model-size-curriculum} and \ref{app:roughness-followup-curriculum} & Supported. Gains are strongest for weaker CNNs and smaller ResNets, and they shrink for larger models. \\
+Fixed vs adaptive schedules & Appendix~\ref{app:roughness-followup-curriculum} & Fixed schedules remain stronger than the current adaptive plateau rule on CIFAR-100. \\
+Hierarchy quality (learned vs random) & Appendix~\ref{app:hierarchy-ablation-curriculum} & Supported in the main CIFAR-100 weak-CNN setting: learned hierarchy +2.24 pp vs random mean +0.53 pp. \\
+Trajectory speed (AUC) & Appendices~\ref{app:cifar100-model-size-curriculum}, \ref{app:roughness-followup-curriculum}, \ref{app:hierarchy-ablation-curriculum} & Mostly negative for curriculum. Peak accuracy can improve while early-trajectory performance drops. \\
+Cross-dataset transfer & Appendix~\ref{app:roughness-followup-curriculum} & Mixed. CIFAR-100 is strongest, CIFAR-10 gains are smaller, Fashion-MNIST is mostly neutral/negative, Tiny ImageNet is setup-sensitive. \\
+Roughness mechanism & Appendix~\ref{app:roughness-followup-curriculum} & Inconclusive. Some models support the flatter-minima interpretation, but the pattern is not consistent. \\
+\hline
+\end{tabular}
+\caption{Current evidence summary used in the main text discussion.}
+\label{tab:main-findings-overview}
+\end{table}
 
-The benchmark \texttt{curr\_vs\_single\_20260315\_175826} compared
-\texttt{single} and \texttt{curriculum} training using the best hyperparameters
-from the sweep pack. It covered eight functions, three seeds and two fairness
-regimes: equal epoch budget and equal wall-clock-time budget.
+\section{Gaussian-continuation track: what was learned}
 
-The benchmark completed successfully: 96 out of 96 planned runner jobs finished,
-and all 96 corresponding MLflow runs were marked finished. The result was
-balanced on final quality but one-sided on runtime:
+The regression sweep and benchmark stage (Appendices~\ref{app:sweep-pack-v1}
+and \ref{app:curr-vs-single-v1}) established an important baseline lesson:
+curriculum comparisons are meaningful only after strong baseline tuning. Once
+that was done, fixed curriculum was not a universal winner. In the paired
+benchmark, curriculum and single-target training split quality wins, while
+single-target training dominated runtime.
+
+The dynamic weighting stage (Appendix~\ref{app:meta-weighting-eggholder-u1})
+showed that bilevel reweighting is operationally feasible, but still unstable.
+This is scientifically useful: it narrows the claim from ``adaptive weighting
+works'' to ``adaptive weighting can work in selected regions, but robust default
+settings are still missing.''
+
+Overall, the Gaussian-continuation track supports a conditional thesis claim:
+objective curricula are valuable tools, but their effectiveness depends on
+task geometry and schedule design, and they should not be treated as a default
+replacement for a strong single-objective baseline.
+
+\section{Coarse-to-fine classification track: what was learned}
+
+The CIFAR-100 model-size sweep (Appendix~\ref{app:cifar100-model-size-curriculum})
+showed a clear capacity trend: weaker CNNs benefit most, while larger models
+benefit less or not at all. The adaptive and roughness follow-up
+(Appendix~\ref{app:roughness-followup-curriculum}) then confirmed two points:
 
 \begin{itemize}
-    \item Under equal epochs, curriculum won 5 function-level quality comparisons
-          and single-target training won 3.
-    \item Under equal time, curriculum won 3 quality comparisons and
-          single-target training won 5.
-    \item Across all function/regime cells, curriculum and single training each
-          won 8 quality comparisons.
-    \item Single-target training won all 16 runtime comparisons.
+    \item fixed schedules remain stronger than the current adaptive plateau rule,
+    \item hierarchy depth and stage allocation are first-order design choices,
+          not minor implementation details.
 \end{itemize}
 
-The strongest interpretation is therefore not that curriculum learning is always
-better. The safer conclusion is that Gaussian-continuation curriculum is useful
-for selected functions, especially \texttt{bukin}, \texttt{franke} and
-\texttt{levy}, but it is not a global default. It clearly adds runtime overhead.
+Finally, the random-hierarchy ablation (Appendix~\ref{app:hierarchy-ablation-curriculum})
+closed the main missing control experiment. In CIFAR-100 \texttt{cnn\_w0.5},
+the learned hierarchy outperformed matched random permutations on all three
+training seeds. This result supports the interpretation that hierarchy quality
+matters, not only coarse label count.
 
-\subsection{Ratio-controlled sweeps and training diagnostics}
+\section{Interpretation and limits}
 
-After the first benchmark, additional v2 and v3 ratio-controlled sweeps were
-introduced. Their goal was to control model capacity more carefully through the
-train-samples-per-parameter ratio and to log additional optimization diagnostics,
-such as gradient statistics, Hessian-trace estimates and sharpness proxies.
+Two conclusions are robust at this stage. First, curriculum gains are real but
+conditional. Second, schedule and hierarchy design matter at least as much as
+adding more curriculum stages.
 
-The v3 ratio experiments produced many MLflow runs, for example 553 recorded
-runs for \texttt{sweep-ackley-v3-ratio} and 270 for
-\texttt{sweep-levy-v3-ratio}. These experiments improved the infrastructure and
-provided useful diagnostics, but they are less clean as final headline evidence
-than the archived sweep-pack v1 and curriculum-vs-single benchmark. They should
-be used mainly for methodological discussion and internal model-selection notes.
-
-\subsection{Meta-weighting experiments}
-
-The next stage implemented validation-guided adaptive weighting over multiple
-smoothed losses. The code is in \texttt{ma\_thesis/meta\_train.py}. The method
-uses softmax-normalized loss weights and updates them using the hard-target
-validation loss after a short differentiable lookahead. This is an operational
-meta-weighting approach, but it should be described carefully: it is not yet the
-full monotonic-gradient-regularized algorithm proposed in the early design notes.
-
-Several meta-weighting campaigns were run in April and May 2026. The clearest
-Eggholder analysis is the unroll-1 campaign
-\texttt{meta\_weighting\_eggholder\_u1\_20260504\_221357}, which analyzed 288
-finished runs. The aggregate result was mixed:
-
-\begin{itemize}
-    \item \texttt{num\_losses=1} had the best average final validation loss.
-    \item Among true multi-loss variants, \texttt{num\_losses=3} was the most
-          promising aggregate setting.
-    \item Multi-loss variants had win rates below 50\% against matched
-          single-loss baselines in the paired comparison.
-    \item The most promising region was around \(\eta_{\mathrm{model}}=0.03\),
-          \(\eta_{\mathrm{meta}}=0.003\), and one-step meta lookahead.
-\end{itemize}
-
-This is an important negative or mixed result. It shows that adaptive
-meta-weighting is feasible and produces meaningful weight trajectories, but it
-also shows that the method is sensitive and cannot yet be claimed as a robust
-improvement over hard-target training.
-
-\subsection{Policy-based and LLM-generated schedules}
-
-Because direct meta-weighting was unstable, the project added a more modular
-policy-based schedule interface. Schedule policies receive a compact training
-state and output normalized loss weights. This enabled both handcrafted schedules
-and LLM-generated schedules to be evaluated with the same benchmark scripts.
-
-The strongest policy-search result so far is the canonical Eggholder LLM
-schedule study compared with the corresponding Eggholder Optuna schedule study.
-The best completed LLM candidate had mean best hard validation loss 42680.20,
-while the best Optuna trial had 43669.97.
-The absolute gap was 989.77 in favor of the LLM schedule. This is promising, but
-it should be reported with caveats: only 11 of 20 LLM candidates completed, and
-the result should be confirmed before being treated as definitive.
-
-The substantive observation is that the LLM-generated schedules often converged
-to interpretable easy-first-to-hard trajectories, whereas Optuna explored a wider
-and less stable family of schedules. This gives a useful thesis discussion point:
-schedule search can matter more than simply adding more smoothed losses.
-
-\subsection{CIFAR-100 easy-vs-hard weighting}
-
-A second adaptive-schedule track was added for CIFAR-100. The easy task is
-coarse superclass prediction, while the hard task is fine-label prediction. This
-track is implemented with PyTorch Lightning in
-\texttt{ma\_thesis/cifar100\_lightning.py}.
-
-The single-seed comparison \texttt{cifar100\_v1\_llm} versus
-\texttt{cifar100\_v1\_optuna} found that the best LLM-generated schedule reached
-best hard validation loss 1.3115, while the best Optuna schedule reached 1.3279.
-Five of the ten successful LLM candidates beat the best Optuna trial on the
-search objective. However, the comparison used only seed 42, and the best Optuna
-loss trial had slightly better test accuracy. Therefore this result is promising
-but not final.
-
-\subsection{Coarse-to-fine CIFAR-100 reproduction}
-
-In June 2026, a separate PyTorch reproduction of coarse-to-fine curriculum
-learning was added under \texttt{coarse-to-fine-curriculum/}. This experiment is
-not the original Gaussian-continuation method, but it is useful because it tests
-a related curriculum idea in a more standard vision setting.
-
-One completed CIFAR-100 CNN run showed a clear positive result:
-
-\begin{itemize}
-    \item Baseline best test accuracy: 0.3625.
-    \item Curriculum best test accuracy: 0.4128.
-    \item Absolute gain: 0.0503, or 5.03 percentage points.
-    \item Relative gain over baseline: 13.88\%.
-\end{itemize}
-
-This is currently one of the clearest positive curriculum signals in the
-repository. Since it is only one seed and one model, it should be presented as a
-promising supporting experiment unless it is repeated across additional seeds.
-
-\section{Current state of the thesis project}
-
-The implementation side of the project is now substantially developed. The
-repository contains data generation, training, sweeps, MLflow logging, analysis
-scripts, meta-weighting, policy schedules, CIFAR-100 experiments and
-coarse-to-fine reproduction tooling. The main scientific picture is also clearer
-than at the beginning of the project:
-
-\begin{itemize}
-    \item Strong baselines matter. Once hyperparameters are tuned, fixed
-          Gaussian-continuation curriculum does not automatically dominate.
-    \item Curriculum learning is task-dependent. It helps some benchmark
-          functions but hurts or slows others.
-    \item Runtime cost is a real limitation. Sequential curriculum was slower in
-          every cell of the main curriculum-vs-single benchmark.
-    \item Direct meta-weighting is feasible but unstable. The current evidence is
-          mixed, especially on Eggholder.
-    \item Policy-based schedule search is the most promising adaptive direction,
-          especially LLM-generated easy-to-hard schedules, but it still needs
-          confirmation.
-    \item CIFAR-100 experiments provide useful supporting evidence that
-          curriculum can help in output-space or hierarchical settings.
-\end{itemize}
-
-The recommended final thesis claim should therefore be cautious: curriculum
-learning is not a universal improvement, but schedule design matters, and
-adaptive or task-aware schedules can produce gains in selected regimes.
-
-\section{Remaining work before final submission}
-
-The main remaining work is not infrastructure, but consolidation. The following
-steps are the most important:
-
+Some limitations:
 \begin{enumerate}
-    \item Freeze the final set of experiments and avoid broad new sweeps.
-    \item Confirm the most promising CIFAR-100 or policy-search result across
-          additional seeds if time permits.
-    \item Convert the existing appendices and reports into the main experimental
-          chapter.
-    \item Clearly separate implemented methods from proposed but not fully
-          validated ideas, especially the monotonic meta-regularizer.
-    \item Present negative and mixed results explicitly, because they strengthen
-          the credibility of the thesis.
+    \item some promising tracks are still single-seed or low-seed and should not
+          be over-generalized,
+    \item many headline numbers use best-test-accuracy diagnostics and should be
+          complemented by validation-selected test reporting,
+    \item mechanism claims based on roughness remain suggestive rather than
+          causal.
 \end{enumerate}
+
+Given these limits, the current claims are:
+
+\begin{quote}
+Curriculum learning is not a universal improvement strategy. It is most useful
+in selected regimes where model capacity, hierarchy quality, and schedule
+choices align with dataset structure.
+\end{quote}
 
 \chapter{Conclusions}
 
-Zakończenie pracy zwane również Uwagami końcowymi lub Podsumowaniem powinno
-zawierać ustosunkowanie się autora do zadań wskazanych we wstępie do pracy, a w
-szczególności do celu i zakresu pracy oraz porównanie ich z faktycznymi
-wynikami pracy. Podejście takie umożliwia jasne określenie stopnia realizacji
-założonych celów oraz zwrócenie uwagi na wyniki osiągnięte przez autora w
-ramach jego samodzielnej pracy.
+This thesis investigated dynamic curriculum learning in objective space, with
+an emphasis on Gaussian continuation and adaptive multi-loss training. The
+central motivation was to move beyond static easy-to-hard schedules and evaluate
+when adaptive or hierarchy-based curricula provide measurable benefits.
 
-Integralną częścią pracy są również dodatki, aneksy i załączniki zawierające
-stworzone w ramach pracy programy, aplikacje i projekty.
+The results support a nuanced conclusion. Curriculum effects are reproducible in
+selected settings, but they are not universal. In both regression and image
+classification tracks, strong baselines remain difficult to beat. Where
+curriculum helps, the gain is tied to concrete conditions: model capacity,
+dataset structure, hierarchy quality, and schedule length. Where these
+conditions are not met, curriculum often increases training cost without
+improving the overall trajectory.
+
+The thesis also clarifies what can and cannot be claimed mechanistically.
+Roughness and sharpness diagnostics are informative, but current evidence does
+not justify a general statement that curriculum consistently finds flatter
+minima. The safer interpretation is empirical: curriculum can improve the best
+solution reached by training in some regimes, even when early-trajectory metrics
+remain worse.
+
+Methodologically, the work contributes a reproducible experimental workflow and
+closes a key control gap through random-hierarchy ablation. In the main CIFAR-100
+weak-CNN setting, learned hierarchies outperform matched random hierarchies,
+which supports the claim that hierarchy quality carries useful information beyond
+simple early-stage label reduction.
+
+\section{Future work}
+
+The next research step is consolidation rather than broad expansion. The most
+valuable extensions are: (1) validation-selected evaluation for all major runs,
+(2) multi-seed confirmation of the strongest adaptive-schedule candidates,
+(3) broader hierarchy-quality controls across additional architectures and
+datasets, and (4) tighter integration between continuation theory and practical
+adaptive schedule design.
+
+Taken together, the thesis provides a credible first-stage answer: dynamic
+curriculum learning is promising, but its benefit is conditional and must be
+established with careful controls, not assumed by default.
 
 %--------------------------------------
 % Literatura
@@ -761,12 +604,12 @@ AND ("All Metadata":"multi-task" OR "All Metadata":"multi-objective"
 \subsection{Google Scholar}
 
 Due to limitations in boolean logic handling, the search will be conducted
-using shorter, phrases:
+using shorter phrases:
 \begin{verbatim}
 "dynamic weighting" "multi task" "curriculum learning"
 \end{verbatim}
-due to large number of hits, I chose to only take into consideration papers
-released after 2023.
+Due to the large number of hits, only papers published after 2023 were
+considered in the Google Scholar query.
 
 \subsection{Snowballing Strategy}
 

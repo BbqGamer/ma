@@ -83,8 +83,9 @@
 @article{gupta2025efficient,
   title={Efficient Knowledge Distillation via Curriculum Extraction},
   author={Gupta, Shivam and Karmalkar, Sushrut},
-  journal={arXiv preprint arXiv:2501.xxxxx},
-  year={2025}
+  journal={arXiv preprint arXiv:2503.17494},
+  year={2025},
+  url={https://arxiv.org/abs/2503.17494}
 }
 
 @article{chen2024gradient,
@@ -226,33 +227,26 @@
 }
 
 @inproceedings{renLearningReweightExamples2018a,
-  title = {Learning to {{Reweight Examples}} for {{Robust Deep Learning}}},
-  booktitle = {Proceedings of the 35th {{International Conference}} on {{Machine Learning}}},
-  author = {Ren, Mengye and Zeng, Wenyuan and Yang, Bin and Urtasun, Raquel},
-  date = {2018-07-03},
-  pages = {4334--4343},
-  publisher = {PMLR},
-  issn = {2640-3498},
-  url = {https://proceedings.mlr.press/v80/ren18a.html},
-  urldate = {2026-05-31},
-  abstract = {Deep neural networks have been shown to be very powerful modeling tools for many supervised learning tasks involving complex input patterns. However, they can also easily overfit to training set biases and label noises. In addition to various regularizers, example reweighting algorithms are popular solutions to these problems, but they require careful tuning of additional hyperparameters, such as example mining schedules and regularization hyperparameters. In contrast to past reweighting methods, which typically consist of functions of the cost value of each example, in this work we propose a novel meta-learning algorithm that learns to assign weights to training examples based on their gradient directions. To determine the example weights, our method performs a meta gradient descent step on the current mini-batch example weights (which are initialized from zero) to minimize the loss on a clean unbiased validation set. Our proposed method can be easily implemented on any type of deep network, does not require any additional hyperparameter tuning, and achieves impressive performance on class imbalance and corrupted label problems where only a small amount of clean validation data is available.},
-  eventtitle = {International {{Conference}} on {{Machine Learning}}},
-  langid = {english},
+  title={Learning to Reweight Examples for Robust Deep Learning},
+  author={Ren, Mengye and Zeng, Wenyuan and Yang, Bin and Urtasun, Raquel},
+  booktitle={Proceedings of the 35th International Conference on Machine Learning},
+  series={Proceedings of Machine Learning Research},
+  volume={80},
+  pages={4334--4343},
+  year={2018},
+  publisher={PMLR},
+  url={https://proceedings.mlr.press/v80/ren18a.html}
 }
 
-@online{stretcuCoarsetoFineCurriculumLearning2021,
-  title = {Coarse-to-{{Fine Curriculum Learning}}},
-  author = {Stretcu, Otilia and Platanios, Emmanouil Antonios and Mitchell, Tom M. and Póczos, Barnabás},
-  date = {2021-06-08},
-  eprint = {2106.04072},
-  eprinttype = {arXiv},
-  eprintclass = {cs.AI},
-  doi = {10.48550/arXiv.2106.04072},
-  url = {http://arxiv.org/abs/2106.04072},
-  urldate = {2026-05-19},
-  abstract = {When faced with learning challenging new tasks, humans often follow sequences of steps that allow them to incrementally build up the necessary skills for performing these new tasks. However, in machine learning, models are most often trained to solve the target tasks directly.Inspired by human learning, we propose a novel curriculum learning approach which decomposes challenging tasks into sequences of easier intermediate goals that are used to pre-train a model before tackling the target task. We focus on classification tasks, and design the intermediate tasks using an automatically constructed label hierarchy. We train the model at each level of the hierarchy, from coarse labels to fine labels, transferring acquired knowledge across these levels. For instance, the model will first learn to distinguish animals from objects, and then use this acquired knowledge when learning to classify among more fine-grained classes such as cat, dog, car, and truck. Most existing curriculum learning algorithms for supervised learning consist of scheduling the order in which the training examples are presented to the model. In contrast, our approach focuses on the output space of the model. We evaluate our method on several established datasets and show significant performance gains especially on classification problems with many labels. We also evaluate on a new synthetic dataset which allows us to study multiple aspects of our method.},
-  pubstate = {prepublished},
-  keywords = {Computer Science - Artificial Intelligence,Computer Science - Machine Learning},
+@misc{stretcuCoarsetoFineCurriculumLearning2021,
+  title={Coarse-to-Fine Curriculum Learning},
+  author={Stretcu, Otilia and Platanios, Emmanouil Antonios and Mitchell, Tom M. and P{\'o}czos, Barnab{\'a}s},
+  year={2021},
+  eprint={2106.04072},
+  archiveprefix={arXiv},
+  primaryclass={cs.LG},
+  doi={10.48550/arXiv.2106.04072},
+  url={https://arxiv.org/abs/2106.04072}
 }
 
 @misc{foretSharpnessAwareMinimizationEfficiently2021,

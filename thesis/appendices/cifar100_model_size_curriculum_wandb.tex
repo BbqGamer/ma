@@ -292,11 +292,11 @@ stability. Second, it adds roughness and sharpness diagnostics for a smaller set
 of representative models. Third, it tests whether the same curriculum idea
 transfers to Fashion-MNIST, CIFAR-10, and Tiny ImageNet.
 
-The main remaining gaps are more targeted. The full model-size ladder was not
-repeated across many seeds, and the reported peak test accuracy should ideally
-be complemented by test accuracy at the best validation epoch. The hierarchy
-itself also deserves a separate ablation: learned hierarchies should be compared
-against official semantic hierarchies where available and against random
-hierarchies with matched cluster sizes. That would separate the value of a
-meaningful grouping from the simpler effect of reducing the number of labels in
-the early stage.
+The main remaining gaps are now more targeted. The full model-size ladder was
+not repeated across many seeds, and the reported peak test accuracy should be
+complemented by test accuracy at the best validation epoch. The random-hierarchy
+control is now covered in Appendix~\ref{app:hierarchy-ablation-curriculum},
+which shows that matched random coarsening explains only part of the gain in the
+main CIFAR-100 weak-CNN setting. The next open hierarchy question is broader:
+how classifier-weight hierarchies compare with semantic or dataset-defined
+hierarchies across multiple architectures.
