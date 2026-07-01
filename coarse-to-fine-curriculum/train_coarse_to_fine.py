@@ -73,8 +73,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shapes_test_ratio", type=float, default=0.2)
     parser.add_argument(
         "--distance_source",
-        choices=["classifier_weights", "confusion"],
+        choices=["classifier_weights", "confusion", "random_permutation"],
         default="classifier_weights",
+    )
+    parser.add_argument(
+        "--random-hierarchy-seed",
+        type=int,
+        default=None,
+        help="Seed for random_permutation hierarchy; defaults to the training seed.",
     )
     parser.add_argument(
         "--curriculum_target_fraction",
@@ -349,19 +355,38 @@ def save_hierarchy_artifacts(
     hierarchy_levels: list[list[list[int]]],
     class_names: list[str] | None,
     distance_source: str,
+    extra: dict[str, Any] | None = None,
 ) -> None:
-    save_json(
-        run_dir / "hierarchy.json",
-        {
-            "distance_source": distance_source,
-            "levels": hierarchy_levels,
-            "class_names": class_names,
-        },
-    )
-    title = f"Learned hierarchy ({distance_source})"
+    payload: dict[str, Any] = {
+        "distance_source": distance_source,
+        "levels": hierarchy_levels,
+        "class_names": class_names,
+    }
+    if extra:
+        payload.update(extra)
+    save_json(run_dir / "hierarchy.json", payload)
+    title = f"Hierarchy ({distance_source})"
     (run_dir / "hierarchy.md").write_text(
         hierarchy_to_markdown(hierarchy_levels, class_names, title),
     )
+
+
+def random_permutation_hierarchy(
+    template_levels: list[list[list[int]]],
+    num_classes: int,
+    seed: int,
+) -> tuple[list[list[list[int]]], list[int]]:
+    rng = np.random.default_rng(seed)
+    permutation = rng.permutation(num_classes).astype(int).tolist()
+    randomized_levels: list[list[list[int]]] = []
+    for level in template_levels:
+        randomized_level = []
+        for cluster in level:
+            randomized_level.append(
+                sorted(int(permutation[int(class_id)]) for class_id in cluster)
+            )
+        randomized_levels.append(randomized_level)
+    return randomized_levels, permutation
 
 
 def log_wandb_artifacts(run_dir: Path, name: str) -> None:
@@ -1721,6 +1746,18 @@ def load_or_train_reference(
     return reference_dir, reference_model, reference_history
 
 
+def reference_classifier_weight_distance(
+    reference_dir: Path,
+    reference_model: nn.Module | None,
+) -> np.ndarray:
+    if reference_model is not None:
+        return classifier_weight_distance(reference_model)
+    dist_path = reference_dir / "distance_matrix_classifier_weights.npy"
+    if not dist_path.exists():
+        raise FileNotFoundError(f"Missing reference distance matrix: {dist_path}")
+    return np.load(dist_path)
+
+
 def hierarchy_from_reference(
     args: argparse.Namespace,
     bundle: DatasetBundle,
@@ -1731,22 +1768,44 @@ def hierarchy_from_reference(
     reference_dir: Path,
     reference_model: nn.Module | None,
 ) -> list[list[list[int]]]:
-    if args.distance_source == "classifier_weights":
-        if reference_model is not None:
-            dist_matrix = classifier_weight_distance(reference_model)
+    hierarchy_extra: dict[str, Any] = {}
+    if args.distance_source in {"classifier_weights", "random_permutation"}:
+        dist_matrix = reference_classifier_weight_distance(reference_dir, reference_model)
+        template_levels = compute_hierarchy(dist_matrix, seed=args.seed)
+        if args.distance_source == "random_permutation":
+            random_seed = (
+                args.random_hierarchy_seed if args.random_hierarchy_seed is not None else args.seed
+            )
+            hierarchy_levels, permutation = random_permutation_hierarchy(
+                template_levels,
+                bundle.num_classes,
+                random_seed,
+            )
+            save_json(
+                run_dir / "hierarchy_template_classifier_weights.json",
+                {"distance_source": "classifier_weights", "levels": template_levels},
+            )
+            hierarchy_extra = {
+                "template_distance_source": "classifier_weights",
+                "random_hierarchy_seed": random_seed,
+                "random_permutation": permutation,
+            }
         else:
-            dist_path = reference_dir / "distance_matrix_classifier_weights.npy"
-            if not dist_path.exists():
-                raise FileNotFoundError(f"Missing reference distance matrix: {dist_path}")
-            dist_matrix = np.load(dist_path)
+            hierarchy_levels = template_levels
     else:
         if reference_model is None:
             raise RuntimeError("confusion distance requires a reference checkpoint/model")
         dist_matrix = confusion_distance(reference_model, val_loader, bundle.num_classes, device)
+        hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
     np.save(run_dir / "distance_matrix.npy", dist_matrix)
 
-    hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
-    save_hierarchy_artifacts(run_dir, hierarchy_levels, bundle.class_names, args.distance_source)
+    save_hierarchy_artifacts(
+        run_dir,
+        hierarchy_levels,
+        bundle.class_names,
+        args.distance_source,
+        extra=hierarchy_extra,
+    )
     logger.info("Built hierarchy with %d levels", len(hierarchy_levels))
     return hierarchy_levels
 
@@ -1799,22 +1858,44 @@ def curriculum_run(
         save_evaluation_artifacts(reference_model, val_loader, device, bundle, reference_dir, "val")
         save_evaluation_artifacts(reference_model, test_loader, device, bundle, reference_dir, "test")
 
-    if args.distance_source == "classifier_weights":
-        if reference_model is not None:
-            dist_matrix = classifier_weight_distance(reference_model)
+    hierarchy_extra: dict[str, Any] = {}
+    if args.distance_source in {"classifier_weights", "random_permutation"}:
+        dist_matrix = reference_classifier_weight_distance(reference_dir, reference_model)
+        template_levels = compute_hierarchy(dist_matrix, seed=args.seed)
+        if args.distance_source == "random_permutation":
+            random_seed = (
+                args.random_hierarchy_seed if args.random_hierarchy_seed is not None else args.seed
+            )
+            hierarchy_levels, permutation = random_permutation_hierarchy(
+                template_levels,
+                bundle.num_classes,
+                random_seed,
+            )
+            save_json(
+                run_dir / "hierarchy_template_classifier_weights.json",
+                {"distance_source": "classifier_weights", "levels": template_levels},
+            )
+            hierarchy_extra = {
+                "template_distance_source": "classifier_weights",
+                "random_hierarchy_seed": random_seed,
+                "random_permutation": permutation,
+            }
         else:
-            dist_path = reference_dir / "distance_matrix_classifier_weights.npy"
-            if not dist_path.exists():
-                raise FileNotFoundError(f"Missing reference distance matrix: {dist_path}")
-            dist_matrix = np.load(dist_path)
+            hierarchy_levels = template_levels
     else:
         if reference_model is None:
             raise RuntimeError("confusion distance requires a reference checkpoint/model")
         dist_matrix = confusion_distance(reference_model, val_loader, bundle.num_classes, device)
+        hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
     np.save(run_dir / "distance_matrix.npy", dist_matrix)
 
-    hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
-    save_hierarchy_artifacts(run_dir, hierarchy_levels, bundle.class_names, args.distance_source)
+    save_hierarchy_artifacts(
+        run_dir,
+        hierarchy_levels,
+        bundle.class_names,
+        args.distance_source,
+        extra=hierarchy_extra,
+    )
 
     if args.curriculum_policy == "adaptive_plateau":
         curriculum_epochs = args.epochs
@@ -1912,6 +1993,11 @@ def curriculum_run(
         "final_test_hierdist_learned": float(test_metrics["hierdist_learned"]),
         "final_test_hier_score_learned": float(test_metrics["hier_score_learned"]),
         "distance_source": args.distance_source,
+        "random_hierarchy_seed": (
+            (args.random_hierarchy_seed if args.random_hierarchy_seed is not None else args.seed)
+            if args.distance_source == "random_permutation"
+            else None
+        ),
         "reference_run_dir": str(reference_dir),
         "val_difficulty_class_accuracy_variance": float(val_artifacts["class_accuracy_variance"]),
         "test_difficulty_class_accuracy_variance": float(test_artifacts["class_accuracy_variance"]),

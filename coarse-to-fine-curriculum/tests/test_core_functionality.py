@@ -22,6 +22,7 @@ from train_coarse_to_fine import (
     hierarchy_distance_matrix_from_levels,
     marginalized_loss,
     parse_weight_list,
+    random_permutation_hierarchy,
     seed_everything,
 )
 
@@ -111,6 +112,24 @@ class LossAndMetricTests(unittest.TestCase):
         self.assertLess(dist[0, 1], dist[0, 2])
         self.assertGreaterEqual(dist.min(), 0.0)
         self.assertLessEqual(dist.max(), 1.0)
+
+    def test_random_permutation_hierarchy_preserves_shape_and_seed(self) -> None:
+        levels = [
+            [[0, 1, 2], [3]],
+            [[0, 1], [2], [3]],
+        ]
+        first, first_perm = random_permutation_hierarchy(levels, num_classes=4, seed=11)
+        second, second_perm = random_permutation_hierarchy(levels, num_classes=4, seed=11)
+        other, _ = random_permutation_hierarchy(levels, num_classes=4, seed=12)
+        self.assertEqual(first, second)
+        self.assertEqual(first_perm, second_perm)
+        self.assertNotEqual(first, other)
+        self.assertEqual(
+            [[len(cluster) for cluster in level] for level in first],
+            [[3, 1], [2, 1, 1]],
+        )
+        for level in first:
+            self.assertEqual(sorted(item for cluster in level for item in cluster), [0, 1, 2, 3])
 
     def test_parse_weight_list_pads_and_truncates(self) -> None:
         self.assertEqual(parse_weight_list("1,2", 4), [1.0, 2.0, 2.0, 2.0])

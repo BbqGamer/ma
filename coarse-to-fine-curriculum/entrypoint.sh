@@ -18,6 +18,7 @@ PATIENCE="${PATIENCE:-50}"
 VAL_RATIO="${VAL_RATIO:-0.2}"
 SHAPES_TEST_RATIO="${SHAPES_TEST_RATIO:-0.2}"
 DISTANCE_SOURCE="${DISTANCE_SOURCE:-classifier_weights}"
+RANDOM_HIERARCHY_SEED="${RANDOM_HIERARCHY_SEED:-}"
 CURRICULUM_TARGET_FRACTION="${CURRICULUM_TARGET_FRACTION:-0.9}"
 CURRICULUM_POLICY="${CURRICULUM_POLICY:-fixed}"
 CURRICULUM_MIN_CLUSTERS="${CURRICULUM_MIN_CLUSTERS:-0}"
@@ -74,6 +75,12 @@ ROUGHNESS_SUBSET_HESSIAN_SAMPLES="${ROUGHNESS_SUBSET_HESSIAN_SAMPLES:-1}"
 ROUGHNESS_SUBSET_SHARPNESS_RHO="${ROUGHNESS_SUBSET_SHARPNESS_RHO:-0.05}"
 ROUGHNESS_SUBSET_WANDB_GROUP="${ROUGHNESS_SUBSET_WANDB_GROUP:-roughness-cifar100-appendix-f}"
 ROUGHNESS_SUBSET_WANDB_TAGS="${ROUGHNESS_SUBSET_WANDB_TAGS:-runpod,roughness,cifar100,appendix-f}"
+HIERARCHY_ABLATION_SEEDS="${HIERARCHY_ABLATION_SEEDS:-42,43,44}"
+HIERARCHY_ABLATION_RANDOM_SEEDS="${HIERARCHY_ABLATION_RANDOM_SEEDS:-1001,1002,1003}"
+HIERARCHY_ABLATION_SPECS="${HIERARCHY_ABLATION_SPECS:-cifar100:cnn:0.5:1.0:20:100}"
+HIERARCHY_ABLATION_PATIENCE="${HIERARCHY_ABLATION_PATIENCE:-0}"
+HIERARCHY_ABLATION_WANDB_GROUP="${HIERARCHY_ABLATION_WANDB_GROUP:-hierarchy-ablation-final}"
+HIERARCHY_ABLATION_WANDB_TAGS="${HIERARCHY_ABLATION_WANDB_TAGS:-runpod,hierarchy-ablation,random-hierarchy}"
 
 is_truthy() {
   case "${1,,}" in
@@ -156,6 +163,9 @@ if [[ -n "$WEIGHT_DECAY" ]]; then
 fi
 if [[ -n "$CURRICULUM_EPOCHS" ]]; then
   common_args+=(--curriculum_epochs "$CURRICULUM_EPOCHS")
+fi
+if [[ -n "$RANDOM_HIERARCHY_SEED" ]]; then
+  common_args+=(--random-hierarchy-seed "$RANDOM_HIERARCHY_SEED")
 fi
 if [[ -n "$SHAPES_PATH" ]]; then
   common_args+=(--shapes_path "$SHAPES_PATH")
@@ -460,6 +470,145 @@ run_roughness_subset() {
   python scripts/analyze_pareto.py "$OUTPUT_DIR" || true
 }
 
+run_hierarchy_ablation() {
+  echo "[entrypoint] Running hierarchy-source ablation"
+  echo "[entrypoint] specs=$HIERARCHY_ABLATION_SPECS seeds=$HIERARCHY_ABLATION_SEEDS random_hierarchy_seeds=$HIERARCHY_ABLATION_RANDOM_SEEDS"
+
+  local optimizer_value="${OPTIMIZER:-adam}"
+  local scheduler_value="${SCHEDULER:-none}"
+  local lr_value="${LR:-0.001}"
+  local batch_size_value="${BATCH_SIZE:-128}"
+  local val_ratio_value="${VAL_RATIO:-0.1}"
+  local weight_decay_value="${WEIGHT_DECAY:-0.0}"
+
+  local wandb_arg=()
+  if wandb_enabled; then
+    wandb_arg+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-group "$HIERARCHY_ABLATION_WANDB_GROUP")
+    wandb_arg+=(--wandb-tags "$HIERARCHY_ABLATION_WANDB_TAGS")
+    [[ -n "$WANDB_ENTITY" ]] && wandb_arg+=(--wandb-entity "$WANDB_ENTITY")
+  fi
+
+  local deterministic_arg=()
+  if is_truthy "$DETERMINISTIC"; then
+    deterministic_arg=(--deterministic)
+  else
+    deterministic_arg=(--no-deterministic)
+  fi
+
+  local download_arg=(--download)
+  is_truthy "$DOWNLOAD" || download_arg=(--no-download)
+
+  local checkpoint_arg=(--no-save-checkpoints)
+  [[ "$SAVE_CHECKPOINTS" == "1" ]] && checkpoint_arg=(--save-checkpoints)
+
+  local amp_arg=()
+  [[ "$AMP" == "1" ]] && amp_arg=(--amp)
+
+  IFS=',' read -r -a seeds <<< "$HIERARCHY_ABLATION_SEEDS"
+  IFS=',' read -r -a random_seeds <<< "$HIERARCHY_ABLATION_RANDOM_SEEDS"
+  IFS=',' read -r -a specs <<< "$HIERARCHY_ABLATION_SPECS"
+  for spec in "${specs[@]}"; do
+    spec="$(echo "$spec" | xargs)"
+    [[ -z "$spec" ]] && continue
+    IFS=':' read -r spec_dataset spec_model spec_cnn_width spec_cifar_width spec_curr_epochs spec_epochs <<< "$spec"
+    if [[ -z "${spec_dataset:-}" || -z "${spec_model:-}" || -z "${spec_cnn_width:-}" || -z "${spec_cifar_width:-}" || -z "${spec_curr_epochs:-}" || -z "${spec_epochs:-}" ]]; then
+      echo "[entrypoint] Invalid HIERARCHY_ABLATION_SPECS item: $spec"
+      echo "[entrypoint] Expected dataset:model:cnn_width:cifar_width:curriculum_epochs:epochs"
+      exit 1
+    fi
+
+    local token
+    token="$(model_token_for_spec "$spec_model" "$spec_cnn_width" "$spec_cifar_width")"
+
+    for seed in "${seeds[@]}"; do
+      seed="$(echo "$seed" | xargs)"
+      [[ -z "$seed" ]] && continue
+      local prefix="hier-${spec_dataset}-${token}-seed${seed}"
+      local baseline_id="${prefix}-baseline"
+      local learned_id="${prefix}-learned-curr${spec_curr_epochs}"
+      local baseline_dir="$OUTPUT_DIR/$baseline_id/${spec_dataset}_${spec_model}_baseline"
+      local learned_dir="$OUTPUT_DIR/$learned_id/${spec_dataset}_${spec_model}_curriculum"
+
+      local base_args=(
+        --dataset "$spec_dataset"
+        --model "$spec_model"
+        --epochs "$spec_epochs"
+        --val_ratio "$val_ratio_value"
+        --optimizer "$optimizer_value"
+        --scheduler "$scheduler_value"
+        --lr "$lr_value"
+        --weight_decay "$weight_decay_value"
+        --batch_size "$batch_size_value"
+        --dropout "$DROPOUT"
+        --cnn-width-multiplier "$spec_cnn_width"
+        --cifar-resnet-width-multiplier "$spec_cifar_width"
+        --patience "$HIERARCHY_ABLATION_PATIENCE"
+        --curriculum-policy fixed
+        --curriculum-min-clusters "$CURRICULUM_MIN_CLUSTERS"
+        --curriculum-max-levels "$CURRICULUM_MAX_LEVELS"
+        --data_dir "$DATA_DIR"
+        --output_dir "$OUTPUT_DIR"
+        --num_workers "$NUM_WORKERS"
+        --seed "$seed"
+        "${deterministic_arg[@]}"
+        "${download_arg[@]}"
+        "${checkpoint_arg[@]}"
+        "${amp_arg[@]}"
+        "${wandb_arg[@]}"
+      )
+      [[ -n "$SHAPES_PATH" ]] && base_args+=(--shapes_path "$SHAPES_PATH")
+      [[ -n "$TINY_IMAGENET_PATH" ]] && base_args+=(--tiny_imagenet_path "$TINY_IMAGENET_PATH")
+
+      echo "[entrypoint] Hierarchy ablation baseline: dataset=$spec_dataset seed=$seed model=$token"
+      if [[ -f "$baseline_dir/results.json" ]]; then
+        echo "[entrypoint] Skipping completed baseline: $baseline_id"
+      else
+        python train_coarse_to_fine.py \
+          --mode baseline \
+          --run_id "$baseline_id" \
+          --distance_source classifier_weights \
+          "${base_args[@]}"
+      fi
+
+      echo "[entrypoint] Hierarchy ablation learned curriculum: dataset=$spec_dataset seed=$seed model=$token curr=$spec_curr_epochs"
+      if [[ -f "$learned_dir/results.json" ]]; then
+        echo "[entrypoint] Skipping completed learned curriculum: $learned_id"
+      else
+        python train_coarse_to_fine.py \
+          --mode curriculum \
+          --run_id "$learned_id" \
+          --curriculum_epochs "$spec_curr_epochs" \
+          --distance_source classifier_weights \
+          --reference_run_dir "$baseline_dir" \
+          "${base_args[@]}"
+      fi
+
+      for random_seed in "${random_seeds[@]}"; do
+        random_seed="$(echo "$random_seed" | xargs)"
+        [[ -z "$random_seed" ]] && continue
+        local random_id="${prefix}-random${random_seed}-curr${spec_curr_epochs}"
+        local random_dir="$OUTPUT_DIR/$random_id/${spec_dataset}_${spec_model}_curriculum"
+        echo "[entrypoint] Hierarchy ablation random curriculum: dataset=$spec_dataset seed=$seed model=$token curr=$spec_curr_epochs random_seed=$random_seed"
+        if [[ -f "$random_dir/results.json" ]]; then
+          echo "[entrypoint] Skipping completed random curriculum: $random_id"
+        else
+          python train_coarse_to_fine.py \
+            --mode curriculum \
+            --run_id "$random_id" \
+            --curriculum_epochs "$spec_curr_epochs" \
+            --distance_source random_permutation \
+            --random-hierarchy-seed "$random_seed" \
+            --reference_run_dir "$baseline_dir" \
+            "${base_args[@]}"
+        fi
+      done
+    done
+  done
+
+  python scripts/analyze_results.py "$OUTPUT_DIR" || true
+  python scripts/analyze_pareto.py "$OUTPUT_DIR" || true
+}
+
 run_cnn_multiloss() {
   echo "[entrypoint] Running CNN multiloss weighting comparison"
   local group="cnn-multiloss-cifar100-seed${SEED}-epochs${EPOCHS}-bs${BATCH_SIZE:-128}"
@@ -531,6 +680,9 @@ case "$EXPERIMENT" in
   roughness_subset)
     run_roughness_subset
     ;;
+  hierarchy_ablation)
+    run_hierarchy_ablation
+    ;;
   cnn_multiloss)
     run_cnn_multiloss
     ;;
@@ -563,6 +715,30 @@ if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
       archive_members+=("fig11-${archive_model_token}-${DATASET}-seed${SEED}-curr${n}")
     done
     archive_members+=("fig11-${archive_model_token}-${DATASET}-seed${SEED}-figure11-analysis")
+    [[ -d "$OUTPUT_DIR/analysis" ]] && archive_members+=("analysis")
+  elif [[ "$EXPERIMENT" == "hierarchy_ablation" ]]; then
+    archive_base="hierarchy_ablation"
+    IFS=',' read -r -a archive_hier_specs <<< "$HIERARCHY_ABLATION_SPECS"
+    IFS=',' read -r -a archive_hier_seeds <<< "$HIERARCHY_ABLATION_SEEDS"
+    IFS=',' read -r -a archive_hier_random_seeds <<< "$HIERARCHY_ABLATION_RANDOM_SEEDS"
+    for spec in "${archive_hier_specs[@]}"; do
+      spec="$(echo "$spec" | xargs)"
+      [[ -z "$spec" ]] && continue
+      IFS=':' read -r spec_dataset spec_model spec_cnn_width spec_cifar_width spec_curr_epochs _spec_epochs <<< "$spec"
+      token="$(model_token_for_spec "$spec_model" "$spec_cnn_width" "$spec_cifar_width")"
+      for seed in "${archive_hier_seeds[@]}"; do
+        seed="$(echo "$seed" | xargs)"
+        [[ -z "$seed" ]] && continue
+        prefix="hier-${spec_dataset}-${token}-seed${seed}"
+        archive_members+=("${prefix}-baseline")
+        archive_members+=("${prefix}-learned-curr${spec_curr_epochs}")
+        for random_seed in "${archive_hier_random_seeds[@]}"; do
+          random_seed="$(echo "$random_seed" | xargs)"
+          [[ -z "$random_seed" ]] && continue
+          archive_members+=("${prefix}-random${random_seed}-curr${spec_curr_epochs}")
+        done
+      done
+    done
     [[ -d "$OUTPUT_DIR/analysis" ]] && archive_members+=("analysis")
   else
     archive_members+=("$RUN_ID")
