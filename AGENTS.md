@@ -10,12 +10,15 @@
 - Thesis language: Polish
 
 Goal in one line:
-- Compare `single` vs `curriculum` (and optionally `meta`) training on Gaussian-continuation
-  targets for benchmark regression surfaces, with reproducible sweeps and MLflow tracking.
+- Study curriculum learning in two thesis tracks:
+  1. Gaussian-continuation regression in `ma_thesis/` with MLflow tracking.
+  2. Coarse-to-fine image classification in `coarse-to-fine-curriculum/` with W&B,
+     Docker/Runpod execution, hierarchy ablations, adaptive schedules, and analysis for the
+     second part of the thesis.
 
 ## What Is Core vs Optional
 
-Core training pipeline (high priority):
+Core track A — Gaussian-continuation regression (high priority):
 - `ma_thesis/experiment.py` (orchestrator CLI)
 - `ma_thesis/dataset.py` (data generation + train/test split)
 - `ma_thesis/train.py` (single/curriculum training)
@@ -26,6 +29,17 @@ Core training pipeline (high priority):
 - `ma_thesis/io.py` (shared dataset loading + train/val split)
 - `ma_thesis/mlflow_utils.py` (shared MLflow artifact/config logging)
 - `ma_thesis/training_core.py` (shared optimizer/scheduler and minibatch loop primitives)
+
+Core track B — coarse-to-fine image classification (high priority for the second
+part of the thesis):
+- `coarse-to-fine-curriculum/train_coarse_to_fine.py` (main PyTorch CLI)
+- `coarse-to-fine-curriculum/ctf/data.py` (vision dataset loading)
+- `coarse-to-fine-curriculum/ctf/hierarchy.py` (label hierarchy construction)
+- `coarse-to-fine-curriculum/ctf/models.py` (CNN/ResNet model definitions)
+- `coarse-to-fine-curriculum/entrypoint.sh` (Docker/Runpod experiment entrypoint)
+- `coarse-to-fine-curriculum/scripts/export_wandb_results.py` (W&B export)
+- `coarse-to-fine-curriculum/scripts/analyze_hierarchy_ablation.py` and related analysis scripts
+- `coarse-to-fine-curriculum/README.md` (detailed workflow)
 
 Used but secondary (research/analysis support):
 - `ma_thesis/meta_train.py` (experimental meta-curriculum / bi-level optimization)
@@ -48,7 +62,9 @@ Archival / frozen results (touch only if needed):
 - MkDocs + LaTeX for docs/thesis
 
 Note:
-- `jax` / `flax` may appear in dependencies, but the active training pipeline is PyTorch-based.
+- `jax` / `flax` may appear in dependencies, but the active training pipelines are PyTorch-based.
+- Do not treat `coarse-to-fine-curriculum/` as a side experiment or scratch folder. It is the
+  main track for the second half of the thesis evidence and feeds Appendices F--H.
 
 ## Main Commands
 
@@ -64,7 +80,7 @@ Data:
 make data
 ```
 
-Run experiments through single entrypoint:
+Run Gaussian-continuation experiments through the `ma_thesis` entrypoint:
 ```bash
 python -m ma_thesis.experiment run --method single --function ackley --sigma-level -1
 python -m ma_thesis.experiment run --method curriculum --function ackley
@@ -72,6 +88,16 @@ python -m ma_thesis.experiment run --method meta --function eggholder
 python -m ma_thesis.experiment run --method sweep --function levy --n-trials 80
 python -m ma_thesis.experiment run --method schedule_sweep --function ackley
 ```
+
+Run coarse-to-fine image-classification experiments:
+```bash
+cd coarse-to-fine-curriculum
+python train_coarse_to_fine.py --mode baseline --dataset cifar100 --model cnn --output_dir ./runs
+python train_coarse_to_fine.py --mode curriculum --dataset cifar100 --model cnn --output_dir ./runs
+```
+
+For Runpod/Docker execution, use `coarse-to-fine-curriculum/entrypoint.sh` and the
+workflow documented in `coarse-to-fine-curriculum/README.md`.
 
 Run from YAML:
 ```bash
@@ -92,11 +118,15 @@ make lint
 make format
 ```
 
-## MLflow Setup (Important)
+## Experiment Tracking (Important)
 
-Tracking defaults are repository-local:
+Gaussian-continuation tracking defaults are repository-local MLflow:
 - Backend DB: `sqlite:////home/adam/studies/ma/code/mlflow.db`
 - Artifact root: `/home/adam/studies/ma/code/mlruns`
+
+Coarse-to-fine image-classification experiments use W&B as the source of truth.
+Local `coarse-to-fine-curriculum/wandb_export_*` and `wandb_analysis_*` folders are
+scratch exports unless a specific thesis figure/table is intentionally copied into `thesis/`.
 
 Start UI with explicit paths:
 ```bash
@@ -114,10 +144,11 @@ If runs seem missing:
 
 ## Repo Conventions
 
-- Use paths from `ma_thesis.config` where possible.
-- Keep generated datasets in `data/processed/*.parquet`.
+- Use paths from `ma_thesis.config` where possible for the Gaussian-continuation track.
+- For `coarse-to-fine-curriculum/`, prefer its local CLI/env conventions and README.
+- Keep generated Gaussian-continuation datasets in `data/processed/*.parquet`.
 - Keep reproducible plans in `configs/sweeps/*.yaml` and `configs/experiments/*.yaml`.
-- Do not hardcode machine-specific paths outside central config.
+- Do not hardcode machine-specific paths outside central config or documented env variables.
 - Ruff max line length is 99.
 
 ## Refactor Status
@@ -145,3 +176,7 @@ Design / method docs:
 Thesis sources:
 - `thesis/main.tex`
 - `thesis/appendices/*`
+- Later coarse-to-fine results are currently summarized mainly in:
+  - `thesis/appendices/cifar100_model_size_curriculum_wandb.tex`
+  - `thesis/appendices/roughness_followup_curriculum.tex`
+  - `thesis/appendices/hierarchy_ablation_curriculum.tex`

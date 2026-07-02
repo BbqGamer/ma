@@ -3,6 +3,13 @@
 PyTorch rewrite of the code for the paper:
 - Otilia Stretcu et al., *Coarse-to-Fine Curriculum Learning* (2021)
 
+This directory is a **primary thesis experiment track**, not an auxiliary
+sandbox. It contains the main second-stage experiments of the thesis: CIFAR-100
+model-capacity studies, Fashion-MNIST/CIFAR-10/Tiny ImageNet controls,
+adaptive plateau schedules, hierarchy inspection, roughness diagnostics, and the
+random-vs-learned hierarchy ablation. W&B runs from this track are the source of
+truth for Appendices F--H in `thesis/`.
+
 ## What is included
 
 - paper-faithful **continuous** curriculum training by default

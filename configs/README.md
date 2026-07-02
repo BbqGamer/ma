@@ -1,5 +1,10 @@
 # Experiment Configs
 
+These YAML configs are for the `ma_thesis/` Gaussian-continuation regression
+track. The second-stage image-classification experiments live in
+`coarse-to-fine-curriculum/` and are configured mainly through CLI flags and
+Runpod/Docker environment variables documented in that directory's README.
+
 Run a config with:
 
 ```bash
