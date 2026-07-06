@@ -168,7 +168,10 @@ tackle more complex aspects of the problem.
 Weinshall et al. \cite{weinshall2018curriculum} give a complementary argument
 for instance-based curriculum learning. In a linear-regression setting with SGD,
 they define example difficulty using the loss under the optimal hypothesis
-rather than the loss under the current model. Under this definition, easier
+rather than the loss under the current model. This is a theoretical device, not
+a directly usable training signal: the optimal hypothesis is unknown during
+learning, and if it were already available the original supervised-learning
+problem would essentially have been solved. Under this oracle definition, easier
 examples yield larger expected progress toward the optimum, especially early in
 training when the model is still far from a good solution. Their analysis also
 separates inherent difficulty from current loss: among examples of equal
@@ -178,19 +181,19 @@ intrinsically noisy or ambiguous. This distinction is useful for this thesis
 because it clarifies why curriculum learning and hard-example mining are not the
 same strategy.
 
-The practical contribution of Weinshall et al. is equally relevant. Because the
-ideal difficulty score depends on the unknown optimum, they estimate example
-ordering with a separate pretrained teacher model and use that ranking to drive
-an easy-to-hard schedule. Their CNN experiments show the strongest gains in
-early optimization, with more conditional improvements in final accuracy when
-the task is harder, the student network is smaller, or regularization is
-stronger. The paper therefore supports a cautious interpretation that aligns
-with this thesis: curricula often act by stabilizing the early optimization
-trajectory, but their final generalization benefit depends on regime and design
-choices. At the same time, their theory is still limited to convex linear
-regression and the teacher-derived difficulty score is only a proxy, so the
-result is best treated as motivation rather than a complete explanation of
-curriculum effects in deep networks.
+The practical contribution of Weinshall et al. is therefore to replace the
+unobservable oracle ordering with a proxy. They estimate example difficulty with
+a separate pretrained teacher model and use that ranking to drive an
+easy-to-hard schedule. Their CNN experiments show the strongest gains in early
+optimization, with more conditional improvements in final accuracy when the task
+is harder, the student network is smaller, or regularization is stronger. The
+paper therefore supports a cautious interpretation that aligns with this thesis:
+curricula often act by stabilizing the early optimization trajectory, but their
+final generalization benefit depends on regime and design choices. At the same
+time, their theory is still limited to convex linear regression and the
+teacher-derived difficulty score is only a proxy, so the result is best treated
+as motivation rather than a complete explanation of curriculum effects in deep
+networks.
 
 \subsection{Gaussian Continuation}
 One practical way to apply continuation methods in deep learning is through
@@ -202,9 +205,15 @@ always finds the global optimum. Instead, it bounds the value reached by the
 continuation path using an ``optimization complexity'' term of the objective.
 This is important for this thesis because it gives a formal reason why smoothing
 can help: objectives with lower continuation complexity have better worst-case
-bounds under this procedure. They also show that this complexity can be computed
-analytically for functions represented with Gaussian radial basis functions,
-which connects directly to the use of Gaussian kernels as smoothing operators.
+bounds under this procedure. However, the calculable part of this theory is
+narrow. Mobahi and Fisher compute the complexity analytically for objectives
+represented with Gaussian radial basis functions. That function family is useful
+for theory and for illustrating Gaussian smoothing, but it is much less general
+than modern neural-network training objectives. In particular, there is no
+straightforward way to compute the same complexity measure for a stochastic,
+high-dimensional neural-network loss. The result is therefore used here as a
+conceptual justification for continuation, not as a practical diagnostic that can
+be evaluated for the neural models in this thesis.
 
 Later work by Ilersich et al. \cite{ilersich2025deep} provided further evidence
 that Gaussian continuation can transform difficult non-convex landscapes into
@@ -254,6 +263,35 @@ chosen manually and do not adapt to the model's progress \cite{wang2021survey}.
 This limitation motivates the development of automated, data-driven scheduling
 methods, which is a central focus of this thesis.
 
+\subsection{Curriculum Learning versus Continual Learning}
+
+The abbreviation ``CL'' is overloaded: it can mean \emph{curriculum learning}
+or \emph{continual learning}. To avoid this ambiguity, this thesis writes both
+terms in full in the prose and uses only short table labels such as ``curr.''
+when space is limited.
+
+The distinction is important. Curriculum learning is a training strategy for a
+chosen target objective: the learner is deliberately exposed to easier examples,
+auxiliary tasks, smoother objectives, or coarser labels before returning to the
+final target. The intermediate stages are scaffolding. They do not necessarily
+need to remain independently solved after the final stage. Continual learning,
+by contrast, is usually a problem setting in which the data distribution,
+classes, or tasks arrive over time and the learner must acquire new competence
+without catastrophically forgetting earlier competence
+\cite{kirkpatrick2017overcoming,lopezpaz2017gradient,parisi2019continual}.
+
+The two ideas nevertheless connect naturally. Both involve non-i.i.d. training
+trajectories and both raise questions about transfer between tasks, ordering,
+and stability versus plasticity. In reinforcement learning, for example,
+curriculum learning is often formulated explicitly as the design of a sequence
+of source tasks that should improve learning on a target task
+\cite{narvekar2020curriculum}. Teacher--student curriculum methods similarly
+select tasks according to the learner's progress \cite{matiisen2020teacher}.
+This thesis is closer to curriculum learning than to continual learning because
+the final target objective is fixed in advance, but continual-learning language
+is useful for discussing when the model should preserve or abandon information
+from earlier stages.
+
 \section{Multi-Task and Multi-Objective Optimization}
 
 To move between objectives of different difficulty, the problem can be set up
@@ -278,10 +316,13 @@ Curriculum learning requires the model to focus on easier tasks first and
 gradually shift to harder ones, rather than balancing all tasks equally.
 Standard balancing methods often fail here because they might upweight the hard
 task too early if its gradient magnitude is small, or maintain the easy task's
-weight indefinitely. \cite{lanzillotta2025multitask} recently challenged the
-assumption that standard MTL objectives are optimal for continual learning,
-arguing that static multi-task solutions fail to account for distributional
-drift and that dynamic adaptation of the loss landscape is required.
+weight indefinitely. This is also where curriculum learning differs from
+continual learning. A continual learner is usually evaluated on whether it
+retains old tasks while learning new ones; a curriculum learner may instead need
+to reduce or abandon the auxiliary easy task once it has served its purpose.
+The relevant design problem is therefore not only gradient balancing, but
+controlled disequilibrium: when should the optimizer be pushed away from the
+easy objective and toward the final target?
 
 \subsection{Pareto Continual Learning}
 Bridging this gap, \cite{lai2025pareto} introduced \textbf{Pareto Continual
@@ -506,12 +547,15 @@ therefore designed to separate these explanations where possible.
 \section{Evaluation protocol}
 
 The primary metrics are final validation or test performance, best achieved
-performance during training, and trajectory-based diagnostics such as area under
-the accuracy curve. For the regression track, the main quality measure is
-prediction error on held-out samples. For the classification track, the main
-quality measure is top-1 accuracy. Additional classification metrics, including
-macro-F1, top-5 accuracy, calibration error, and hierarchy-aware scores, are used
-where they clarify whether accuracy gains reflect broader improvements.
+performance during training, and trajectory-based diagnostics such as the area
+under the test-accuracy-over-epoch curve. When this thesis writes AUC, it means
+this normalized area under a learning trajectory, computed with the trapezoidal
+rule over epochs; it does \emph{not} mean ROC AUC. For the regression track, the
+main quality measure is prediction error on held-out samples. For the
+classification track, the main quality measure is top-1 accuracy. Additional
+classification metrics, including macro-F1, top-5 accuracy, calibration error,
+and hierarchy-aware scores, are used where they clarify whether accuracy gains
+reflect broader improvements.
 
 Best achieved test performance is useful for understanding training dynamics,
 but it is retrospective. It should not be confused with a deployment protocol in
@@ -842,7 +886,8 @@ Best random hierarchy & 36.34 & +1.05 & -- & -- \\
 \bottomrule
 \end{tabular}
 \caption{CIFAR-100 \texttt{cnn\_w0.5} hierarchy ablation. The learned hierarchy
-beats matched random hierarchies, but both curriculum variants pay an AUC cost.}
+beats matched random hierarchies, but both curriculum variants pay a trajectory
+AUC cost.}
 \label{tab:main-hierarchy-ablation}
 \end{table}
 

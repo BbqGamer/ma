@@ -76,7 +76,7 @@ and the corresponding AUC gain. Accuracy gains are shown in percentage points.
 \small
 \begin{tabular}{lrrrrrr}
 \hline
-Model & Params & Base & Best CL & CL acc. & Gain & AUC gain \\
+Model & Params & Base & Best curr. & Curr. acc. & Gain & AUC gain \\
 \hline
 \texttt{cnn\_w0.5} & 65,636 & 0.3478 & 20 & 0.3796 & +3.18 & -4.08 \\
 \texttt{cifar\_resnet8} & 83,892 & 0.5268 & 20 & 0.5449 & +1.81 & -5.94 \\
@@ -135,7 +135,7 @@ curriculum lengths. The baseline is represented as length 0.
 \small
 \begin{tabular}{lrrrrrr}
 \hline
-Model & Base & CL5 & CL10 & CL20 & CL30 & CL40 \\
+Model & Base & Curr5 & Curr10 & Curr20 & Curr30 & Curr40 \\
 \hline
 \texttt{cnn\_w0.5} & 0.3478 & 0.3757 & 0.3783 & 0.3796 & 0.3729 & 0.3634 \\
 \texttt{cifar\_resnet8} & 0.5268 & 0.5243 & 0.5321 & 0.5449 & 0.5228 & 0.5318 \\

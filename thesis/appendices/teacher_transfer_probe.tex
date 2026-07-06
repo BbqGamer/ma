@@ -31,20 +31,10 @@ The run used CIFAR-100 \cite{krizhevsky2009learning} with a ResNet-18
 main thesis ResNet-18 baseline from Appendix~\ref{app:cifar100-model-size-curriculum},
 this probe used a transfer-learning style setup: SGD, learning rate 0.01,
 weight decay $5\times 10^{-4}$, augmentation enabled, and a 30-epoch budget.
-The run was tracked in Weights \& Biases \cite{biewald2020experiment} under ID
-\texttt{yg05hkl9}. The hierarchy export was enabled and the training log confirms
-that a teacher-embedding hierarchy was written to:
-
-\begin{verbatim}
-/runpod-volume/teachers/teacher-cifar100-resnet18-imagenet30-hierarchy
-\end{verbatim}
-
-The hierarchy was exported from the validation split embeddings after the run
-finished. The run log confirms the export path and the resulting files were
-later recovered from the Runpod object store:
-\texttt{hierarchy.json}, \texttt{hierarchy.md}, and
-\texttt{distance\_matrix\_teacher\_embeddings.npy}. This makes it possible to
-analyze the teacher hierarchy directly rather than treating the run only as a
+The hierarchy was exported from validation-split teacher embeddings after the
+run finished. The exported artifacts included a readable hierarchy description
+and the corresponding distance matrix, which made it possible to analyze the
+teacher hierarchy directly rather than treating the run only as a
 teacher-accuracy probe.
 
 \section{Training trajectory}
@@ -65,12 +55,12 @@ from-scratch CIFAR-100 training schedule.
 
 Table~\ref{tab:teacher-probe-comparison} compares this teacher probe against the
 main thesis CIFAR-100 ResNet-18 results from
-Appendix~\ref{app:cifar100-model-size-curriculum}. The comparison is not
-strictly apples-to-apples, because the protocols differ: the earlier appendix
-used an uninitialized ResNet-18 with Adam, no scheduler, and a 100-epoch budget,
-while the present run used ImageNet initialization, SGD, augmentation, and only
-30 epochs. Even with that caveat, the magnitude of the improvement is large
-enough to be informative.
+Appendix~\ref{app:cifar100-model-size-curriculum}. This comparison does not
+isolate a single causal factor, because the protocols differ: the earlier
+appendix used an uninitialized ResNet-18 with Adam, no scheduler, and a
+100-epoch budget, while the present run used ImageNet initialization, SGD,
+augmentation, and only 30 epochs. Even with that caveat, the magnitude of the
+improvement is large enough to be informative.
 
 \begin{table}[h]
 \centering
@@ -144,12 +134,18 @@ curriculum, and there the structure becomes much stronger. The recovered
 This second-level structure is exactly the kind of evidence that was missing
 from the weaker self-derived hierarchies. In the earlier appendix, the learned
 clusters were often visually or semantically mixed enough to explain why the
-curriculum gains were limited or unstable. The teacher-derived hierarchy still
-contains imperfections---for example, \texttt{lamp, mushroom, rocket, snail} is
-an awkward group, and some broad mammal clusters remain heterogeneous---but its
-overall organization is markedly more plausible. That makes it a credible
-candidate for testing whether hierarchy quality, rather than output-space
-curriculum as such, was the limiting factor in the earlier experiments.
+curriculum gains were limited or unstable. At the same time, the teacher-derived
+hierarchy should not be judged only as a human taxonomy. Some groupings that
+look semantically loose to a human reader may still be meaningful for a CNN
+because they reflect image-distribution properties such as shape, texture,
+background, object scale, or typical viewpoint. Conversely, a human-semantic
+category such as ``vehicles'' can group classes that look quite different in
+CIFAR-100 images. The hierarchy is therefore best interpreted as a
+representation-induced class partition, not as an ontology. Under that criterion,
+its overall organization is markedly more plausible than the weaker
+self-derived alternatives. That makes it a credible candidate for testing
+whether hierarchy quality, rather than output-space curriculum as such, was the
+limiting factor in the earlier experiments.
 
 A second practical observation is that the teacher hierarchy is also much deeper
 than the official CIFAR-100 superclass taxonomy. Instead of one manually defined
@@ -157,13 +153,6 @@ than the official CIFAR-100 superclass taxonomy. Instead of one manually defined
 23 intermediate groups and finally the singleton fine classes. This is useful
 for follow-up experiments because it enables both a direct coarse-to-fine test
 and a more controlled anti-curriculum test on the same learned structure.
-
-The next version of this appendix should add image-grid visualizations analogous
-to Figures~\ref{fig:hierarchy-examples-fashionmnist},
-\ref{fig:hierarchy-examples-cifar10}, and
-\ref{fig:hierarchy-examples-cifar100}, using representative examples from the
-teacher-derived clusters. The recovered hierarchy files are now available for
-that step.
 
 \section{Why this matters for the curriculum experiments}
 
@@ -299,7 +288,8 @@ an average gain of +0.97 percentage points, and the best random hierarchy among
 three random seeds per training seed gives +1.20 points. The anti-curriculum is
 stronger still at +2.06 points. The regular self hierarchy and the corrected
 teacher hierarchy remain higher, at +2.39 and +2.31 points respectively, but the
-random and anti controls are not failures.
+random and anti controls are not failures. In this table, AUC refers to the
+normalized test-accuracy trajectory over epochs.
 
 \begin{table}[h]
 \centering
@@ -317,7 +307,8 @@ Teacher hierarchy & 37.69 & +2.31 & -3.52 & corrected transfer teacher \\
 \end{tabular}
 \caption{CIFAR-100 \texttt{cnn\_w0.5} hierarchy-control comparison. Values are
 means over seeds 42, 43, and 44. Gains are percentage points relative to the
-matching baseline. The teacher row uses the corrected 77.65\% transfer teacher.}
+matching baseline. AUC gain is the change in normalized test-accuracy trajectory
+area. The teacher row uses the corrected 77.65\% transfer teacher.}
 \label{tab:teacher-hierarchy-controls-aggregate}
 \end{table}
 

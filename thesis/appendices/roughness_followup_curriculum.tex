@@ -237,10 +237,10 @@ entry has the best absolute curriculum accuracy but a slightly negative gain.
 
 CIFAR-10 is more favorable to curriculum than Fashion-MNIST, but the effect is
 still much smaller than CIFAR-100. The adaptive policy gives a useful gain for
-\texttt{cnn\_w1} and a small gain for \texttt{cnn\_w0.5}; however, AUC remains
-negative, so the curriculum delays early fine-label learning. Fashion-MNIST is
-essentially a negative control: neither fixed nor adaptive curricula produce a
-meaningful improvement.
+\texttt{cnn\_w1} and a small gain for \texttt{cnn\_w0.5}; however, trajectory
+AUC remains negative, so the curriculum delays early fine-label learning.
+Fashion-MNIST is essentially a negative control: neither fixed nor adaptive
+curricula produce a meaningful improvement.
 
 This contrast is important. A weak model alone is not sufficient for curriculum
 learning to help. The dataset must also have enough class structure and task
