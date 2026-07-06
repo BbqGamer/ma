@@ -5,9 +5,10 @@
 \section{Purpose}
 
 Appendix~\ref{app:cifar100-model-size-curriculum} showed that fixed
-coarse-to-fine curriculum learning helped smaller CIFAR-100 models, especially
-weaker CNNs, but helped less as model capacity increased. This appendix extends
-that result in three directions:
+coarse-to-fine curriculum learning helped smaller CIFAR-100
+\cite{krizhevsky2009learning} models, especially weaker CNNs, but helped less
+as model capacity increased. This appendix extends that result in three
+directions:
 
 \begin{enumerate}
     \item multi-seed roughness follow-up runs on CIFAR-100,
@@ -35,9 +36,10 @@ The adaptive policy starts at a coarse hierarchy level and monitors fine-label
 validation accuracy. It advances to the next finer level when the validation
 score plateaus after a minimum number of stage epochs, or when a maximum stage
 length is reached. The CIFAR-100 runs used a slower rule: at least 10 epochs per
-stage, at most 40, patience 5, and minimum improvement 0.002. The CIFAR-10 and
-Fashion-MNIST runs used a shorter rule: at least 5 epochs per stage, at most 20,
-patience 3, and minimum improvement 0.001.
+stage, at most 40, patience 5, and minimum improvement 0.002. The CIFAR-10
+\cite{krizhevsky2009learning} and Fashion-MNIST \cite{xiao2017fashion} runs
+used a shorter rule: at least 5 epochs per stage, at most 20, patience 3, and
+minimum improvement 0.001.
 
 For CIFAR-100, two hierarchy-depth variants were tested:
 
@@ -53,8 +55,9 @@ not enough to replace the fixed schedule.
 \section{Run summary}
 
 Table~\ref{tab:appg-run-summary} lists the completed run families used in this
-appendix. All runs finished except one early Tiny ImageNet \texttt{cnn\_w1}
-baseline, which was excluded because a later finished baseline was available.
+appendix. All runs finished except one early Tiny ImageNet
+\cite{tinyimagenet,deng2009imagenet} \texttt{cnn\_w1} baseline, which was
+excluded because a later finished baseline was available.
 
 \begin{table}[h]
 \centering
@@ -245,9 +248,10 @@ complexity for coarse labels to be useful.
 
 \section{Tiny ImageNet pilot}
 
-The Tiny ImageNet results are mixed but more informative after adding the
-ResNet-18 SGD/cosine pilot. Table~\ref{tab:appg-tinyimagenet-policy} includes
-both the earlier small-model pilot and the newer ResNet-18 runs.
+The Tiny ImageNet \cite{tinyimagenet,deng2009imagenet} results are mixed but
+more informative after adding the ResNet-18 \cite{he2016deep} SGD/cosine
+\cite{loshchilov2017sgdr} pilot. Table~\ref{tab:appg-tinyimagenet-policy}
+includes both the earlier small-model pilot and the newer ResNet-18 runs.
 
 \begin{table}[h]
 \centering

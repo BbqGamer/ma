@@ -20,15 +20,17 @@ choices rather than the curriculum method itself.
 
 \section{What was done}
 
-The sweep pack executed eight Optuna studies in sequence
-(\texttt{ackley, levy, bukin, eggholder, franke, peaks, friedman1\_2d, friedman2\_2d}).
-For each function:
+The sweep pack executed eight Optuna \cite{akiba2019optuna} studies in
+sequence (\texttt{ackley, levy, bukin, eggholder, franke, peaks,
+friedman1\_2d, friedman2\_2d}). For each function:
 
 \begin{itemize}
     \item the method was \texttt{sweep},
-    \item model families searched: MLP, SIREN, Fourier,
+    \item model families searched: MLP, SIREN \cite{sitzmann2020implicit}, Fourier
+          \cite{tancik2020fourier},
     \item objective optimized: validation MSE (\texttt{best\_val\_loss}),
-    \item all trials were logged to MLflow with per-trial configuration and metrics.
+    \item all trials were logged to MLflow \cite{zaharia2018accelerating} with
+          per-trial configuration and metrics.
 \end{itemize}
 
 Run window: 2026-03-14T15:15:21+01:00 to 2026-03-15T02:41:45+01:00.

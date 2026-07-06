@@ -226,6 +226,18 @@
   url={https://proceedings.neurips.cc/paper_files/paper/2020/file/2cfa8f9e50e0f510ede9d12338a5f564-Paper.pdf}
 }
 
+@inproceedings{weinshall2018curriculum,
+  title={Curriculum Learning by Transfer Learning: Theory and Experiments with Deep Networks},
+  author={Weinshall, Daphna and Cohen, Gad and Amir, Dan},
+  booktitle={Proceedings of the 35th International Conference on Machine Learning},
+  series={Proceedings of Machine Learning Research},
+  volume={80},
+  pages={5238--5246},
+  year={2018},
+  publisher={PMLR},
+  url={https://proceedings.mlr.press/v80/weinshall18a.html}
+}
+
 @inproceedings{renLearningReweightExamples2018a,
   title={Learning to Reweight Examples for Robust Deep Learning},
   author={Ren, Mengye and Zeng, Wenyuan and Yang, Bin and Urtasun, Raquel},
@@ -263,5 +275,142 @@
   abstract = {In today's heavily overparameterized models, the value of the training loss provides few guarantees on model generalization ability. Indeed, optimizing only the training loss value, as is commonly done, can easily lead to suboptimal model quality. Motivated by prior work connecting the geometry of the loss landscape and generalization, we introduce a novel, effective procedure for instead simultaneously minimizing loss value and loss sharpness. In particular, our procedure, Sharpness-Aware Minimization (SAM), seeks parameters that lie in neighborhoods having uniformly low loss; this formulation results in a min-max optimization problem on which gradient descent can be performed efficiently. We present empirical results showing that SAM improves model generalization across a variety of benchmark datasets (e.g., CIFAR-10, CIFAR-100, ImageNet, finetuning tasks) and models, yielding novel state-of-the-art performance for several. Additionally, we find that SAM natively provides robustness to label noise on par with that provided by state-of-the-art procedures that specifically target learning with noisy labels. We open source our code at \textbackslash url\textbraceleft https://github.com/google-research/sam\textbraceright.},
   archiveprefix = {arXiv},
   keywords = {Computer Science - Machine Learning,Statistics - Machine Learning},
+}
+
+@techreport{krizhevsky2009learning,
+  title={Learning Multiple Layers of Features from Tiny Images},
+  author={Krizhevsky, Alex},
+  institution={University of Toronto},
+  year={2009}
+}
+
+@article{xiao2017fashion,
+  title={Fashion-MNIST: A Novel Image Dataset for Benchmarking Machine Learning Algorithms},
+  author={Xiao, Han and Rasul, Kashif and Vollgraf, Roland},
+  journal={arXiv preprint arXiv:1708.07747},
+  year={2017},
+  doi={10.48550/arXiv.1708.07747}
+}
+
+@inproceedings{deng2009imagenet,
+  title={ImageNet: A Large-Scale Hierarchical Image Database},
+  author={Deng, Jia and Dong, Wei and Socher, Richard and Li, Li-Jia and Li, Kai and Fei-Fei, Li},
+  booktitle={2009 IEEE Conference on Computer Vision and Pattern Recognition},
+  pages={248--255},
+  year={2009},
+  doi={10.1109/CVPR.2009.5206848}
+}
+
+@misc{tinyimagenet,
+  title={Tiny ImageNet Challenge},
+  author={{Stanford Vision Lab}},
+  year={2015},
+  howpublished={\url{http://cs231n.stanford.edu/tiny-imagenet-200.zip}},
+  note={Stanford CS231N dataset release}
+}
+
+@article{he2016deep,
+  title={Deep Residual Learning for Image Recognition},
+  author={He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing and Sun, Jian},
+  journal={Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition},
+  pages={770--778},
+  year={2016},
+  doi={10.1109/CVPR.2016.90}
+}
+
+@misc{kingma2015adam,
+  title={Adam: A Method for Stochastic Optimization},
+  author={Kingma, Diederik P and Ba, Jimmy},
+  year={2015},
+  eprint={1412.6980},
+  archiveprefix={arXiv},
+  primaryclass={cs.LG},
+  doi={10.48550/arXiv.1412.6980}
+}
+
+@inproceedings{akiba2019optuna,
+  title={Optuna: A Next-Generation Hyperparameter Optimization Framework},
+  author={Akiba, Takuya and Sano, Shotaro and Yanase, Toshihiko and Ohta, Takeru and Koyama, Masanori},
+  booktitle={Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery \& Data Mining},
+  pages={2623--2631},
+  year={2019},
+  doi={10.1145/3292500.3330701}
+}
+
+@article{zaharia2018accelerating,
+  title={Accelerating the Machine Learning Lifecycle with MLflow},
+  author={Zaharia, Matei and Chen, Andrew and Davidson, Aaron and Ghodsi, Ali and Hong, Sue Ann and Konwinski, Andy and Murching, Siddharth and Nykodym, Tomas and Ogilvie, Paul and Parkhe, Mani and Xie, Fen and Zumar, Corey},
+  journal={IEEE Data Engineering Bulletin},
+  volume={41},
+  number={4},
+  pages={39--45},
+  year={2018}
+}
+
+@misc{biewald2020experiment,
+  title={Experiment Tracking with Weights and Biases},
+  author={Biewald, Lukas},
+  year={2020},
+  note={Software available from wandb.com},
+  url={https://www.wandb.com/}
+}
+
+@inproceedings{paszke2019pytorch,
+  title={PyTorch: An Imperative Style, High-Performance Deep Learning Library},
+  author={Paszke, Adam and Gross, Sam and Massa, Francisco and Lerer, Adam and Bradbury, James and Chanan, Gregory and Killeen, Trevor and Lin, Zeming and Gimelshein, Natalia and Antiga, Luca and others},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={32},
+  year={2019}
+}
+
+@inproceedings{sitzmann2020implicit,
+  title={Implicit Neural Representations with Periodic Activation Functions},
+  author={Sitzmann, Vincent and Martel, Julien N P and Bergman, Alexander W and Lindell, David B and Wetzstein, Gordon},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={33},
+  pages={7462--7473},
+  year={2020}
+}
+
+@inproceedings{tancik2020fourier,
+  title={Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains},
+  author={Tancik, Matthew and Srinivasan, Pratul P and Mildenhall, Ben and Fridovich-Keil, Sara and Raghavan, Nithin and Singhal, Utkarsh and Ramamoorthi, Ravi and Barron, Jonathan T and Ng, Ren},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={33},
+  pages={7537--7547},
+  year={2020}
+}
+
+@article{page2021prisma,
+  title={The PRISMA 2020 Statement: An Updated Guideline for Reporting Systematic Reviews},
+  author={Page, Matthew J and McKenzie, Joanne E and Bossuyt, Patrick M and Boutron, Isabelle and Hoffmann, Tammy C and Mulrow, Cynthia D and Shamseer, Larissa and Tetzlaff, Jennifer M and Akl, Elie A and Brennan, Sue E and others},
+  journal={BMJ},
+  volume={372},
+  pages={n71},
+  year={2021},
+  doi={10.1136/bmj.n71}
+}
+
+@techreport{kitchenham2007guidelines,
+  title={Guidelines for Performing Systematic Literature Reviews in Software Engineering},
+  author={Kitchenham, Barbara and Charters, Stuart},
+  institution={EBSE Technical Report, Keele University and Durham University},
+  year={2007}
+}
+
+@inproceedings{wohlin2014guidelines,
+  title={Guidelines for Snowballing in Systematic Literature Studies and a Replication in Software Engineering},
+  author={Wohlin, Claes},
+  booktitle={Proceedings of the 18th International Conference on Evaluation and Assessment in Software Engineering},
+  pages={1--10},
+  year={2014},
+  doi={10.1145/2601248.2601268}
+}
+
+@article{loshchilov2017sgdr,
+  title={SGDR: Stochastic Gradient Descent with Warm Restarts},
+  author={Loshchilov, Ilya and Hutter, Frank},
+  journal={International Conference on Learning Representations},
+  year={2017}
 }
 

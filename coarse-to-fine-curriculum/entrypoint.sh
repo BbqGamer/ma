@@ -21,6 +21,7 @@ DISTANCE_SOURCE="${DISTANCE_SOURCE:-classifier_weights}"
 RANDOM_HIERARCHY_SEED="${RANDOM_HIERARCHY_SEED:-}"
 CURRICULUM_TARGET_FRACTION="${CURRICULUM_TARGET_FRACTION:-0.9}"
 CURRICULUM_POLICY="${CURRICULUM_POLICY:-fixed}"
+CURRICULUM_ORDER="${CURRICULUM_ORDER:-easy_to_hard}"
 CURRICULUM_MIN_CLUSTERS="${CURRICULUM_MIN_CLUSTERS:-0}"
 CURRICULUM_MAX_LEVELS="${CURRICULUM_MAX_LEVELS:-0}"
 CURRICULUM_STAGE_MIN_EPOCHS="${CURRICULUM_STAGE_MIN_EPOCHS:-10}"
@@ -31,6 +32,16 @@ DATA_DIR="${DATA_DIR:-/workspace/data}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/runs}"
 SHAPES_PATH="${SHAPES_PATH:-}"
 TINY_IMAGENET_PATH="${TINY_IMAGENET_PATH:-}"
+TEACHER_RUN_DIR="${TEACHER_RUN_DIR:-}"
+TEACHER_CHECKPOINT_PATH="${TEACHER_CHECKPOINT_PATH:-}"
+TEACHER_MODEL="${TEACHER_MODEL:-}"
+TEACHER_CNN_WIDTH_MULTIPLIER="${TEACHER_CNN_WIDTH_MULTIPLIER:-}"
+TEACHER_CIFAR_RESNET_WIDTH_MULTIPLIER="${TEACHER_CIFAR_RESNET_WIDTH_MULTIPLIER:-}"
+TEACHER_EMBEDDING_SPLIT="${TEACHER_EMBEDDING_SPLIT:-val}"
+TEACHER_PRETRAINED_SOURCE="${TEACHER_PRETRAINED_SOURCE:-none}"
+EXPORT_TEACHER_HIERARCHY="${EXPORT_TEACHER_HIERARCHY:-0}"
+EXPORT_TEACHER_HIERARCHY_SPLIT="${EXPORT_TEACHER_HIERARCHY_SPLIT:-val}"
+EXPORT_TEACHER_HIERARCHY_DIR="${EXPORT_TEACHER_HIERARCHY_DIR:-}"
 if [[ -z "${NUM_WORKERS:-}" ]]; then
   CPU_COUNT="${RUNPOD_CPU_COUNT:-$(nproc 2>/dev/null || echo 4)}"
   NUM_WORKERS="$(( CPU_COUNT / 2 ))"
@@ -45,6 +56,7 @@ DETERMINISTIC="${DETERMINISTIC:-1}"
 export PYTHONHASHSEED="$SEED"
 export CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-:4096:8}"
 AMP="${AMP:-1}"
+PRETRAINED_BACKBONE="${PRETRAINED_BACKBONE:-0}"
 DOWNLOAD="${DOWNLOAD:-1}"
 AUGMENTATION="${AUGMENTATION:-auto}"
 FIG11_METRIC="${FIG11_METRIC:-test_acc}"
@@ -81,6 +93,30 @@ HIERARCHY_ABLATION_SPECS="${HIERARCHY_ABLATION_SPECS:-cifar100:cnn:0.5:1.0:20:10
 HIERARCHY_ABLATION_PATIENCE="${HIERARCHY_ABLATION_PATIENCE:-0}"
 HIERARCHY_ABLATION_WANDB_GROUP="${HIERARCHY_ABLATION_WANDB_GROUP:-hierarchy-ablation-final}"
 HIERARCHY_ABLATION_WANDB_TAGS="${HIERARCHY_ABLATION_WANDB_TAGS:-runpod,hierarchy-ablation,random-hierarchy}"
+TEACHER_HIERARCHY_SPECS="${TEACHER_HIERARCHY_SPECS:-cifar100:cnn:0.5:1.0:20:100,cifar100:cnn:1.0:1.0:10:100,cifar100:cifar_resnet8:1.0:1.0:20:100}"
+TEACHER_HIERARCHY_SEEDS="${TEACHER_HIERARCHY_SEEDS:-42,43,44}"
+TEACHER_HIERARCHY_RANDOM_SEEDS="${TEACHER_HIERARCHY_RANDOM_SEEDS:-1001,1002,1003}"
+TEACHER_HIERARCHY_WANDB_GROUP="${TEACHER_HIERARCHY_WANDB_GROUP:-teacher-hierarchy-suite}"
+TEACHER_HIERARCHY_WANDB_TAGS="${TEACHER_HIERARCHY_WANDB_TAGS:-runpod,teacher-hierarchy,anti-curriculum}"
+TEACHER_HIERARCHY_OUTPUT_PREFIX="${TEACHER_HIERARCHY_OUTPUT_PREFIX:-teacher}"
+TEACHER_HIERARCHY_REFERENCE_PREFIX="${TEACHER_HIERARCHY_REFERENCE_PREFIX:-teacher}"
+TEACHER_HIERARCHY_RUN_CONDITIONS="${TEACHER_HIERARCHY_RUN_CONDITIONS:-baseline,self,teacher,teacher_anti,random}"
+TEACHER_BOOTSTRAP_RUN_ID="${TEACHER_BOOTSTRAP_RUN_ID:-teacher-cifar100-resnet18-bootstrap}"
+TEACHER_BOOTSTRAP_DATASET="${TEACHER_BOOTSTRAP_DATASET:-cifar100}"
+TEACHER_BOOTSTRAP_MODEL="${TEACHER_BOOTSTRAP_MODEL:-resnet18}"
+TEACHER_BOOTSTRAP_EPOCHS="${TEACHER_BOOTSTRAP_EPOCHS:-30}"
+TEACHER_BOOTSTRAP_BATCH_SIZE="${TEACHER_BOOTSTRAP_BATCH_SIZE:-128}"
+TEACHER_BOOTSTRAP_OPTIMIZER="${TEACHER_BOOTSTRAP_OPTIMIZER:-sgd}"
+TEACHER_BOOTSTRAP_SCHEDULER="${TEACHER_BOOTSTRAP_SCHEDULER:-step}"
+TEACHER_BOOTSTRAP_LR="${TEACHER_BOOTSTRAP_LR:-0.1}"
+TEACHER_BOOTSTRAP_WEIGHT_DECAY="${TEACHER_BOOTSTRAP_WEIGHT_DECAY:-0.0005}"
+TEACHER_BOOTSTRAP_VAL_RATIO="${TEACHER_BOOTSTRAP_VAL_RATIO:-0.1}"
+TEACHER_BOOTSTRAP_SEED="${TEACHER_BOOTSTRAP_SEED:-42}"
+TEACHER_BOOTSTRAP_PRETRAINED_BACKBONE="${TEACHER_BOOTSTRAP_PRETRAINED_BACKBONE:-1}"
+TEACHER_BOOTSTRAP_EXPORT_HIERARCHY="${TEACHER_BOOTSTRAP_EXPORT_HIERARCHY:-1}"
+TEACHER_BOOTSTRAP_EXPORT_SPLIT="${TEACHER_BOOTSTRAP_EXPORT_SPLIT:-val}"
+TEACHER_BOOTSTRAP_WANDB_GROUP="${TEACHER_BOOTSTRAP_WANDB_GROUP:-teacher-bootstrap}"
+TEACHER_BOOTSTRAP_WANDB_TAGS="${TEACHER_BOOTSTRAP_WANDB_TAGS:-runpod,teacher-bootstrap,cifar100,resnet18}"
 
 is_truthy() {
   case "${1,,}" in
@@ -97,6 +133,14 @@ wandb_enabled() {
     return 0
   fi
   return 1
+}
+
+teacher_condition_enabled() {
+  local condition="$1"
+  case ",${TEACHER_HIERARCHY_RUN_CONDITIONS}," in
+    *,"$condition",*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 auto_stop_pod() {
@@ -134,6 +178,7 @@ common_args=(
   --distance_source "$DISTANCE_SOURCE"
   --curriculum_target_fraction "$CURRICULUM_TARGET_FRACTION"
   --curriculum-policy "$CURRICULUM_POLICY"
+  --curriculum-order "$CURRICULUM_ORDER"
   --curriculum-min-clusters "$CURRICULUM_MIN_CLUSTERS"
   --curriculum-max-levels "$CURRICULUM_MAX_LEVELS"
   --curriculum-stage-min-epochs "$CURRICULUM_STAGE_MIN_EPOCHS"
@@ -173,8 +218,33 @@ fi
 if [[ -n "$TINY_IMAGENET_PATH" ]]; then
   common_args+=(--tiny_imagenet_path "$TINY_IMAGENET_PATH")
 fi
+if [[ -n "$TEACHER_RUN_DIR" ]]; then
+  common_args+=(--teacher_run_dir "$TEACHER_RUN_DIR")
+fi
+if [[ -n "$TEACHER_CHECKPOINT_PATH" ]]; then
+  common_args+=(--teacher_checkpoint_path "$TEACHER_CHECKPOINT_PATH")
+fi
+if [[ -n "$TEACHER_MODEL" ]]; then
+  common_args+=(--teacher_model "$TEACHER_MODEL")
+fi
+common_args+=(--teacher_pretrained_source "$TEACHER_PRETRAINED_SOURCE")
+if [[ -n "$TEACHER_CNN_WIDTH_MULTIPLIER" ]]; then
+  common_args+=(--teacher_cnn_width_multiplier "$TEACHER_CNN_WIDTH_MULTIPLIER")
+fi
+if [[ -n "$TEACHER_CIFAR_RESNET_WIDTH_MULTIPLIER" ]]; then
+  common_args+=(--teacher_cifar_resnet_width_multiplier "$TEACHER_CIFAR_RESNET_WIDTH_MULTIPLIER")
+fi
+common_args+=(--teacher_embedding_split "$TEACHER_EMBEDDING_SPLIT")
 if [[ "$AMP" == "1" ]]; then
   common_args+=(--amp)
+fi
+if is_truthy "$PRETRAINED_BACKBONE"; then
+  common_args+=(--pretrained-backbone)
+fi
+if is_truthy "$EXPORT_TEACHER_HIERARCHY"; then
+  common_args+=(--export-teacher-hierarchy)
+  common_args+=(--export-teacher-hierarchy-split "$EXPORT_TEACHER_HIERARCHY_SPLIT")
+  [[ -n "$EXPORT_TEACHER_HIERARCHY_DIR" ]] && common_args+=(--export-teacher-hierarchy-dir "$EXPORT_TEACHER_HIERARCHY_DIR")
 fi
 if is_truthy "$ROUGHNESS_PROBES"; then
   common_args+=(--roughness-probes)
@@ -609,6 +679,284 @@ run_hierarchy_ablation() {
   python scripts/analyze_pareto.py "$OUTPUT_DIR" || true
 }
 
+run_teacher_hierarchy_suite() {
+  echo "[entrypoint] Running teacher hierarchy suite"
+  if [[ -z "$TEACHER_RUN_DIR" && -z "$TEACHER_CHECKPOINT_PATH" && "$TEACHER_PRETRAINED_SOURCE" != "torchvision_imagenet" ]]; then
+    echo "[entrypoint] TEACHER_RUN_DIR, TEACHER_CHECKPOINT_PATH, or TEACHER_PRETRAINED_SOURCE=torchvision_imagenet is required for EXPERIMENT=teacher_hierarchy_suite"
+    exit 1
+  fi
+
+  local optimizer_value="${OPTIMIZER:-adam}"
+  local scheduler_value="${SCHEDULER:-none}"
+  local lr_value="${LR:-0.001}"
+  local batch_size_value="${BATCH_SIZE:-128}"
+  local val_ratio_value="${VAL_RATIO:-0.1}"
+  local weight_decay_value="${WEIGHT_DECAY:-0.0}"
+
+  local wandb_arg=()
+  if wandb_enabled; then
+    wandb_arg+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-group "$TEACHER_HIERARCHY_WANDB_GROUP")
+    wandb_arg+=(--wandb-tags "$TEACHER_HIERARCHY_WANDB_TAGS")
+    [[ -n "$WANDB_ENTITY" ]] && wandb_arg+=(--wandb-entity "$WANDB_ENTITY")
+  fi
+
+  local deterministic_arg=()
+  if is_truthy "$DETERMINISTIC"; then
+    deterministic_arg=(--deterministic)
+  else
+    deterministic_arg=(--no-deterministic)
+  fi
+
+  local download_arg=(--download)
+  is_truthy "$DOWNLOAD" || download_arg=(--no-download)
+
+  local checkpoint_arg=(--no-save-checkpoints)
+  [[ "$SAVE_CHECKPOINTS" == "1" ]] && checkpoint_arg=(--save-checkpoints)
+
+  local amp_arg=()
+  [[ "$AMP" == "1" ]] && amp_arg=(--amp)
+
+  IFS=',' read -r -a seeds <<< "$TEACHER_HIERARCHY_SEEDS"
+  IFS=',' read -r -a random_seeds <<< "$TEACHER_HIERARCHY_RANDOM_SEEDS"
+  IFS=',' read -r -a specs <<< "$TEACHER_HIERARCHY_SPECS"
+  for spec in "${specs[@]}"; do
+    spec="$(echo "$spec" | xargs)"
+    [[ -z "$spec" ]] && continue
+    IFS=':' read -r spec_dataset spec_model spec_cnn_width spec_cifar_width spec_curr_epochs spec_epochs <<< "$spec"
+    if [[ -z "${spec_dataset:-}" || -z "${spec_model:-}" || -z "${spec_cnn_width:-}" || -z "${spec_cifar_width:-}" || -z "${spec_curr_epochs:-}" || -z "${spec_epochs:-}" ]]; then
+      echo "[entrypoint] Invalid TEACHER_HIERARCHY_SPECS item: $spec"
+      echo "[entrypoint] Expected dataset:model:cnn_width:cifar_width:curriculum_epochs:epochs"
+      exit 1
+    fi
+
+    local token
+    token="$(model_token_for_spec "$spec_model" "$spec_cnn_width" "$spec_cifar_width")"
+
+    for seed in "${seeds[@]}"; do
+      seed="$(echo "$seed" | xargs)"
+      [[ -z "$seed" ]] && continue
+      local reference_prefix="${TEACHER_HIERARCHY_REFERENCE_PREFIX}-${spec_dataset}-${token}-seed${seed}"
+      local output_prefix="${TEACHER_HIERARCHY_OUTPUT_PREFIX}-${spec_dataset}-${token}-seed${seed}"
+      local reference_baseline_id="${reference_prefix}-baseline"
+      local baseline_id="${output_prefix}-baseline"
+      local learned_id="${output_prefix}-self-curr${spec_curr_epochs}"
+      local teacher_id="${output_prefix}-teacher-curr${spec_curr_epochs}"
+      local anti_id="${output_prefix}-teacher-anti-curr${spec_curr_epochs}"
+      local baseline_output_dir="$OUTPUT_DIR/$baseline_id/${spec_dataset}_${spec_model}_baseline"
+      local baseline_dir="$OUTPUT_DIR/$reference_baseline_id/${spec_dataset}_${spec_model}_baseline"
+      local learned_dir="$OUTPUT_DIR/$learned_id/${spec_dataset}_${spec_model}_curriculum"
+      local teacher_dir="$OUTPUT_DIR/$teacher_id/${spec_dataset}_${spec_model}_curriculum"
+      local anti_dir="$OUTPUT_DIR/$anti_id/${spec_dataset}_${spec_model}_curriculum"
+
+      local base_args=(
+        --dataset "$spec_dataset"
+        --model "$spec_model"
+        --epochs "$spec_epochs"
+        --val_ratio "$val_ratio_value"
+        --optimizer "$optimizer_value"
+        --scheduler "$scheduler_value"
+        --lr "$lr_value"
+        --weight_decay "$weight_decay_value"
+        --batch_size "$batch_size_value"
+        --dropout "$DROPOUT"
+        --patience "$PATIENCE"
+        --cnn-width-multiplier "$spec_cnn_width"
+        --cifar-resnet-width-multiplier "$spec_cifar_width"
+        --curriculum-policy fixed
+        --curriculum-min-clusters "$CURRICULUM_MIN_CLUSTERS"
+        --curriculum-max-levels "$CURRICULUM_MAX_LEVELS"
+        --curriculum-stage-min-epochs "$CURRICULUM_STAGE_MIN_EPOCHS"
+        --curriculum-stage-max-epochs "$CURRICULUM_STAGE_MAX_EPOCHS"
+        --curriculum-stage-patience "$CURRICULUM_STAGE_PATIENCE"
+        --curriculum-stage-min-delta "$CURRICULUM_STAGE_MIN_DELTA"
+        --data_dir "$DATA_DIR"
+        --output_dir "$OUTPUT_DIR"
+        --num_workers "$NUM_WORKERS"
+        --seed "$seed"
+        --teacher_embedding_split "$TEACHER_EMBEDDING_SPLIT"
+        "${deterministic_arg[@]}"
+        "${download_arg[@]}"
+        "${checkpoint_arg[@]}"
+        "${amp_arg[@]}"
+        "${wandb_arg[@]}"
+      )
+      [[ -n "$SHAPES_PATH" ]] && base_args+=(--shapes_path "$SHAPES_PATH")
+      [[ -n "$TINY_IMAGENET_PATH" ]] && base_args+=(--tiny_imagenet_path "$TINY_IMAGENET_PATH")
+      [[ -n "$TEACHER_RUN_DIR" ]] && base_args+=(--teacher_run_dir "$TEACHER_RUN_DIR")
+      [[ -n "$TEACHER_CHECKPOINT_PATH" ]] && base_args+=(--teacher_checkpoint_path "$TEACHER_CHECKPOINT_PATH")
+      [[ -n "$TEACHER_MODEL" ]] && base_args+=(--teacher_model "$TEACHER_MODEL")
+      base_args+=(--teacher_pretrained_source "$TEACHER_PRETRAINED_SOURCE")
+      [[ -n "$TEACHER_CNN_WIDTH_MULTIPLIER" ]] && base_args+=(--teacher_cnn_width_multiplier "$TEACHER_CNN_WIDTH_MULTIPLIER")
+      [[ -n "$TEACHER_CIFAR_RESNET_WIDTH_MULTIPLIER" ]] && base_args+=(--teacher_cifar_resnet_width_multiplier "$TEACHER_CIFAR_RESNET_WIDTH_MULTIPLIER")
+
+      if teacher_condition_enabled baseline; then
+        echo "[entrypoint] Teacher suite baseline: dataset=$spec_dataset seed=$seed model=$token"
+        if [[ -f "$baseline_output_dir/results.json" ]]; then
+          echo "[entrypoint] Skipping completed baseline: $baseline_id"
+        else
+          python train_coarse_to_fine.py --mode baseline --run_id "$baseline_id" --distance_source classifier_weights "${base_args[@]}"
+        fi
+        baseline_dir="$baseline_output_dir"
+      else
+        echo "[entrypoint] Teacher suite baseline disabled; using reference baseline: $baseline_dir"
+        if [[ ! -f "$baseline_dir/history.json" ]]; then
+          echo "[entrypoint] Missing reference baseline history: $baseline_dir/history.json"
+          exit 1
+        fi
+      fi
+
+      if teacher_condition_enabled self; then
+        echo "[entrypoint] Teacher suite self hierarchy curriculum: dataset=$spec_dataset seed=$seed model=$token curr=$spec_curr_epochs"
+        if [[ -f "$learned_dir/results.json" ]]; then
+          echo "[entrypoint] Skipping completed self hierarchy curriculum: $learned_id"
+        else
+          python train_coarse_to_fine.py \
+            --mode curriculum \
+            --run_id "$learned_id" \
+            --curriculum_epochs "$spec_curr_epochs" \
+            --distance_source classifier_weights \
+            --reference_run_dir "$baseline_dir" \
+            --curriculum-order easy_to_hard \
+            "${base_args[@]}"
+        fi
+      fi
+
+      if teacher_condition_enabled teacher; then
+        echo "[entrypoint] Teacher suite teacher hierarchy curriculum: dataset=$spec_dataset seed=$seed model=$token curr=$spec_curr_epochs"
+        if [[ -f "$teacher_dir/results.json" ]]; then
+          echo "[entrypoint] Skipping completed teacher hierarchy curriculum: $teacher_id"
+        else
+          python train_coarse_to_fine.py \
+            --mode curriculum \
+            --run_id "$teacher_id" \
+            --curriculum_epochs "$spec_curr_epochs" \
+            --distance_source teacher_embeddings \
+            --reference_run_dir "$baseline_dir" \
+            --curriculum-order easy_to_hard \
+            "${base_args[@]}"
+        fi
+      fi
+
+      if teacher_condition_enabled teacher_anti; then
+        echo "[entrypoint] Teacher suite anti-curriculum: dataset=$spec_dataset seed=$seed model=$token curr=$spec_curr_epochs"
+        if [[ -f "$anti_dir/results.json" ]]; then
+          echo "[entrypoint] Skipping completed anti-curriculum: $anti_id"
+        else
+          python train_coarse_to_fine.py \
+            --mode curriculum \
+            --run_id "$anti_id" \
+            --curriculum_epochs "$spec_curr_epochs" \
+            --distance_source teacher_embeddings \
+            --reference_run_dir "$baseline_dir" \
+            --curriculum-order hard_to_easy \
+            "${base_args[@]}"
+        fi
+      fi
+
+      if teacher_condition_enabled random; then
+        for random_seed in "${random_seeds[@]}"; do
+          random_seed="$(echo "$random_seed" | xargs)"
+          [[ -z "$random_seed" ]] && continue
+          local random_id="${output_prefix}-random${random_seed}-curr${spec_curr_epochs}"
+          local random_dir="$OUTPUT_DIR/$random_id/${spec_dataset}_${spec_model}_curriculum"
+          echo "[entrypoint] Teacher suite random hierarchy curriculum: dataset=$spec_dataset seed=$seed model=$token curr=$spec_curr_epochs random_seed=$random_seed"
+          if [[ -f "$random_dir/results.json" ]]; then
+            echo "[entrypoint] Skipping completed random hierarchy curriculum: $random_id"
+          else
+            python train_coarse_to_fine.py \
+              --mode curriculum \
+              --run_id "$random_id" \
+              --curriculum_epochs "$spec_curr_epochs" \
+              --distance_source random_permutation \
+              --random-hierarchy-seed "$random_seed" \
+              --reference_run_dir "$baseline_dir" \
+              --curriculum-order easy_to_hard \
+              "${base_args[@]}"
+          fi
+        done
+      fi
+    done
+  done
+
+  python scripts/analyze_pareto.py "$OUTPUT_DIR" || true
+  python scripts/analyze_teacher_hierarchy_suite.py "$OUTPUT_DIR" || true
+}
+
+run_teacher_bootstrap_suite() {
+  echo "[entrypoint] Running teacher bootstrap + hierarchy suite"
+
+  local bootstrap_dir="$OUTPUT_DIR/$TEACHER_BOOTSTRAP_RUN_ID/${TEACHER_BOOTSTRAP_DATASET}_${TEACHER_BOOTSTRAP_MODEL}_baseline"
+  local bootstrap_wandb_arg=()
+  if wandb_enabled; then
+    bootstrap_wandb_arg+=(--wandb --wandb-project "$WANDB_PROJECT" --wandb-group "$TEACHER_BOOTSTRAP_WANDB_GROUP")
+    bootstrap_wandb_arg+=(--wandb-tags "$TEACHER_BOOTSTRAP_WANDB_TAGS")
+    [[ -n "$WANDB_ENTITY" ]] && bootstrap_wandb_arg+=(--wandb-entity "$WANDB_ENTITY")
+  fi
+
+  local deterministic_arg=()
+  if is_truthy "$DETERMINISTIC"; then
+    deterministic_arg=(--deterministic)
+  else
+    deterministic_arg=(--no-deterministic)
+  fi
+
+  local download_arg=(--download)
+  is_truthy "$DOWNLOAD" || download_arg=(--no-download)
+
+  local amp_arg=()
+  [[ "$AMP" == "1" ]] && amp_arg=(--amp)
+
+  local pretrained_arg=()
+  if is_truthy "$TEACHER_BOOTSTRAP_PRETRAINED_BACKBONE"; then
+    pretrained_arg=(--pretrained-backbone)
+  fi
+
+  local export_teacher_args=()
+  if is_truthy "$TEACHER_BOOTSTRAP_EXPORT_HIERARCHY"; then
+    export_teacher_args=(--export-teacher-hierarchy --export-teacher-hierarchy-split "$TEACHER_BOOTSTRAP_EXPORT_SPLIT")
+  fi
+
+  local dataset_path_args=()
+  [[ -n "$SHAPES_PATH" ]] && dataset_path_args+=(--shapes_path "$SHAPES_PATH")
+  [[ -n "$TINY_IMAGENET_PATH" ]] && dataset_path_args+=(--tiny_imagenet_path "$TINY_IMAGENET_PATH")
+
+  if [[ -f "$bootstrap_dir/config.json" && -f "$bootstrap_dir/best_model.pt" ]]; then
+    echo "[entrypoint] Skipping completed teacher bootstrap: $bootstrap_dir"
+  else
+    python train_coarse_to_fine.py \
+      --mode baseline \
+      --dataset "$TEACHER_BOOTSTRAP_DATASET" \
+      --model "$TEACHER_BOOTSTRAP_MODEL" \
+      --epochs "$TEACHER_BOOTSTRAP_EPOCHS" \
+      --batch_size "$TEACHER_BOOTSTRAP_BATCH_SIZE" \
+      --optimizer "$TEACHER_BOOTSTRAP_OPTIMIZER" \
+      --scheduler "$TEACHER_BOOTSTRAP_SCHEDULER" \
+      --lr "$TEACHER_BOOTSTRAP_LR" \
+      --weight_decay "$TEACHER_BOOTSTRAP_WEIGHT_DECAY" \
+      --val_ratio "$TEACHER_BOOTSTRAP_VAL_RATIO" \
+      --data_dir "$DATA_DIR" \
+      --output_dir "$OUTPUT_DIR" \
+      --run_id "$TEACHER_BOOTSTRAP_RUN_ID" \
+      --num_workers "$NUM_WORKERS" \
+      --seed "$TEACHER_BOOTSTRAP_SEED" \
+      --distance_source classifier_weights \
+      --save-checkpoints \
+      "${deterministic_arg[@]}" \
+      "${download_arg[@]}" \
+      "${amp_arg[@]}" \
+      "${pretrained_arg[@]}" \
+      "${export_teacher_args[@]}" \
+      "${dataset_path_args[@]}" \
+      "${bootstrap_wandb_arg[@]}"
+  fi
+
+  export TEACHER_RUN_DIR="$bootstrap_dir"
+  export TEACHER_CHECKPOINT_PATH=""
+  export TEACHER_MODEL=""
+  export TEACHER_PRETRAINED_SOURCE="none"
+  run_teacher_hierarchy_suite
+}
+
 run_cnn_multiloss() {
   echo "[entrypoint] Running CNN multiloss weighting comparison"
   local group="cnn-multiloss-cifar100-seed${SEED}-epochs${EPOCHS}-bs${BATCH_SIZE:-128}"
@@ -637,6 +985,9 @@ run_cnn_multiloss() {
   fi
   if [[ "$AMP" == "1" ]]; then
     base_common+=(--amp)
+  fi
+  if is_truthy "$PRETRAINED_BACKBONE"; then
+    base_common+=(--pretrained-backbone)
   fi
   if is_truthy "$ROUGHNESS_PROBES"; then
     base_common+=(--roughness-probes)
@@ -682,6 +1033,12 @@ case "$EXPERIMENT" in
     ;;
   hierarchy_ablation)
     run_hierarchy_ablation
+    ;;
+  teacher_hierarchy_suite)
+    run_teacher_hierarchy_suite
+    ;;
+  teacher_bootstrap_suite)
+    run_teacher_bootstrap_suite
     ;;
   cnn_multiloss)
     run_cnn_multiloss
@@ -737,6 +1094,37 @@ if [[ "$ARCHIVE_OUTPUTS" == "1" ]]; then
           [[ -z "$random_seed" ]] && continue
           archive_members+=("${prefix}-random${random_seed}-curr${spec_curr_epochs}")
         done
+      done
+    done
+    [[ -d "$OUTPUT_DIR/analysis" ]] && archive_members+=("analysis")
+  elif [[ "$EXPERIMENT" == "teacher_hierarchy_suite" || "$EXPERIMENT" == "teacher_bootstrap_suite" ]]; then
+    archive_base="$EXPERIMENT"
+    if [[ "$EXPERIMENT" == "teacher_bootstrap_suite" ]]; then
+      archive_members+=("$TEACHER_BOOTSTRAP_RUN_ID")
+    fi
+    IFS=',' read -r -a archive_teacher_specs <<< "$TEACHER_HIERARCHY_SPECS"
+    IFS=',' read -r -a archive_teacher_seeds <<< "$TEACHER_HIERARCHY_SEEDS"
+    IFS=',' read -r -a archive_teacher_random_seeds <<< "$TEACHER_HIERARCHY_RANDOM_SEEDS"
+    for spec in "${archive_teacher_specs[@]}"; do
+      spec="$(echo "$spec" | xargs)"
+      [[ -z "$spec" ]] && continue
+      IFS=':' read -r spec_dataset spec_model spec_cnn_width spec_cifar_width spec_curr_epochs _spec_epochs <<< "$spec"
+      token="$(model_token_for_spec "$spec_model" "$spec_cnn_width" "$spec_cifar_width")"
+      for seed in "${archive_teacher_seeds[@]}"; do
+        seed="$(echo "$seed" | xargs)"
+        [[ -z "$seed" ]] && continue
+        prefix="${TEACHER_HIERARCHY_OUTPUT_PREFIX}-${spec_dataset}-${token}-seed${seed}"
+        teacher_condition_enabled baseline && archive_members+=("${prefix}-baseline")
+        teacher_condition_enabled self && archive_members+=("${prefix}-self-curr${spec_curr_epochs}")
+        teacher_condition_enabled teacher && archive_members+=("${prefix}-teacher-curr${spec_curr_epochs}")
+        teacher_condition_enabled teacher_anti && archive_members+=("${prefix}-teacher-anti-curr${spec_curr_epochs}")
+        if teacher_condition_enabled random; then
+          for random_seed in "${archive_teacher_random_seeds[@]}"; do
+            random_seed="$(echo "$random_seed" | xargs)"
+            [[ -z "$random_seed" ]] && continue
+            archive_members+=("${prefix}-random${random_seed}-curr${spec_curr_epochs}")
+          done
+        fi
       done
     done
     [[ -d "$OUTPUT_DIR/analysis" ]] && archive_members+=("analysis")

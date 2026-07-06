@@ -6,21 +6,20 @@ import csv
 import json
 import logging
 import os
-import random
 from pathlib import Path
+import random
 from typing import Any
 
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
-import numpy as np
-import torch
-import torch.nn.functional as F
-from torch import nn, optim
-from torch.utils.data import DataLoader
-
 from ctf.data import DatasetBundle, load_dataset, seed_worker
 from ctf.hierarchy import compute_hierarchy, singleton_clusters
 from ctf.models import build_model
+import numpy as np
+import torch
+from torch import nn, optim
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shapes_test_ratio", type=float, default=0.2)
     parser.add_argument(
         "--distance_source",
-        choices=["classifier_weights", "confusion", "random_permutation"],
+        choices=["classifier_weights", "confusion", "random_permutation", "teacher_embeddings"],
         default="classifier_weights",
     )
     parser.add_argument(
@@ -93,6 +92,12 @@ def parse_args() -> argparse.Namespace:
         choices=["fixed", "adaptive_plateau"],
         default="fixed",
         help="Use fixed stage lengths or advance curriculum stages on validation plateau.",
+    )
+    parser.add_argument(
+        "--curriculum-order",
+        choices=["easy_to_hard", "hard_to_easy"],
+        default="easy_to_hard",
+        help="Order hierarchy stages from coarse-to-fine (default) or reverse them for an anti-curriculum control.",
     )
     parser.add_argument(
         "--curriculum-min-clusters",
@@ -156,6 +161,48 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated initial fine,coarse1,coarse2,coarse3 weights for adaptive multiloss.",
     )
     parser.add_argument("--reference_run_dir", type=str, default=None)
+    parser.add_argument(
+        "--teacher_run_dir",
+        type=str,
+        default=None,
+        help="Optional external teacher run directory with best_model.pt and config.json for teacher_embeddings.",
+    )
+    parser.add_argument(
+        "--teacher_checkpoint_path",
+        type=str,
+        default=None,
+        help="Optional external teacher checkpoint path for teacher_embeddings.",
+    )
+    parser.add_argument(
+        "--teacher_model",
+        choices=[
+            "cnn",
+            "cifar_resnet8",
+            "cifar_resnet14",
+            "cifar_resnet20",
+            "cifar_resnet32",
+            "cifar_resnet44",
+            "cifar_resnet56",
+            "resnet18",
+            "resnet50",
+        ],
+        default=None,
+        help="Teacher model architecture when loading a teacher checkpoint directly.",
+    )
+    parser.add_argument("--teacher_cnn_width_multiplier", type=float, default=None)
+    parser.add_argument("--teacher_cifar_resnet_width_multiplier", type=float, default=None)
+    parser.add_argument(
+        "--teacher_embedding_split",
+        choices=["train", "val", "test"],
+        default="val",
+        help="Dataset split used to compute teacher class prototypes for teacher_embeddings.",
+    )
+    parser.add_argument(
+        "--teacher_pretrained_source",
+        choices=["none", "torchvision_imagenet"],
+        default="none",
+        help="Optional built-in teacher source when no external checkpoint is available.",
+    )
     parser.add_argument("--shapes_path", type=str, default=None)
     parser.add_argument("--tiny_imagenet_path", type=str, default=None)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -176,6 +223,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-download", action="store_false", dest="download")
     parser.set_defaults(download=True)
     parser.add_argument("--amp", action="store_true")
+    parser.add_argument(
+        "--pretrained-backbone",
+        action="store_true",
+        help="Initialize ResNet backbones from torchvision ImageNet weights.",
+    )
+    parser.add_argument(
+        "--export-teacher-hierarchy",
+        action="store_true",
+        help="After a baseline run, export a hierarchy built from the trained model's embeddings.",
+    )
+    parser.add_argument(
+        "--export-teacher-hierarchy-split",
+        choices=["train", "val", "test"],
+        default="val",
+        help="Dataset split used for automatic teacher hierarchy export.",
+    )
+    parser.add_argument(
+        "--export-teacher-hierarchy-dir",
+        type=str,
+        default=None,
+        help="Optional output directory for automatic teacher hierarchy export.",
+    )
     parser.add_argument("--augmentation", action="store_true", default=None)
     parser.add_argument("--no-augmentation", action="store_false", dest="augmentation")
     parser.set_defaults(save_checkpoints=False, wandb=False)
@@ -711,6 +780,44 @@ def confusion_distance(
     return 1.0 - confusion
 
 
+@torch.inference_mode()
+def teacher_embedding_distance(
+    model: nn.Module,
+    loader: DataLoader,
+    num_classes: int,
+    device: torch.device,
+) -> np.ndarray:
+    feature_sums: torch.Tensor | None = None
+    class_counts = torch.zeros(num_classes, dtype=torch.long)
+    was_training = model.training
+    model.eval()
+    for inputs, labels in loader:
+        inputs = inputs.to(device, non_blocking=True)
+        features = model.forward_features(inputs).detach().cpu().to(dtype=torch.float32)
+        if feature_sums is None:
+            feature_sums = torch.zeros((num_classes, features.shape[1]), dtype=torch.float32)
+        for class_idx in range(num_classes):
+            class_mask = labels == class_idx
+            if not torch.any(class_mask):
+                continue
+            feature_sums[class_idx] += features[class_mask].sum(dim=0)
+            class_counts[class_idx] += int(class_mask.sum().item())
+    if feature_sums is None:
+        raise RuntimeError("Teacher embedding distance could not be computed because the loader is empty")
+    prototypes = feature_sums / class_counts.clamp_min(1).unsqueeze(1)
+    prototypes = F.normalize(prototypes, p=2, dim=1)
+    sim = prototypes @ prototypes.T
+    dist = 1.0 - sim.numpy()
+    missing = class_counts == 0
+    if torch.any(missing):
+        dist[missing.numpy(), :] = 1.0
+        dist[:, missing.numpy()] = 1.0
+    np.fill_diagonal(dist, 0.0)
+    if was_training:
+        model.train()
+    return dist
+
+
 def clusters_to_membership(
     clusters: list[list[int]],
     num_classes: int,
@@ -1000,6 +1107,7 @@ def build_curriculum_schedule(
     max_levels: int = 0,
     policy: str = "fixed",
     stage_max_epochs: int = 50,
+    curriculum_order: str = "easy_to_hard",
 ) -> list[dict[str, Any]]:
     schedule: list[dict[str, Any]] = []
     effective_levels = filtered_curriculum_levels(
@@ -1008,6 +1116,8 @@ def build_curriculum_schedule(
         min_clusters=min_clusters,
         max_levels=max_levels,
     )
+    if curriculum_order == "hard_to_easy":
+        effective_levels = list(reversed(effective_levels))
     num_levels = len(effective_levels)
     if policy == "adaptive_plateau":
         for level_idx, clusters in enumerate(effective_levels):
@@ -1285,11 +1395,104 @@ def load_reference_model(
         dropout=args.dropout,
         cnn_width_multiplier=args.cnn_width_multiplier,
         cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
+        pretrained_backbone=args.pretrained_backbone,
     ).to(device)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     history = json.loads(history_path.read_text())
     return model, history
+
+
+def load_checkpoint_state_dict(checkpoint_path: Path, device: torch.device) -> dict[str, torch.Tensor]:
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        return checkpoint["model_state_dict"]
+    if isinstance(checkpoint, dict):
+        return checkpoint
+    raise TypeError(f"Unsupported checkpoint format at {checkpoint_path}")
+
+
+def teacher_model_spec_from_run_dir(run_dir: Path) -> dict[str, Any]:
+    config_path = run_dir / "config.json"
+    if not config_path.exists():
+        raise FileNotFoundError(f"Teacher run directory is missing config.json: {run_dir}")
+    config = json.loads(config_path.read_text())
+    return {
+        "model": config.get("model"),
+        "cnn_width_multiplier": config.get("cnn_width_multiplier", 1.0),
+        "cifar_resnet_width_multiplier": config.get("cifar_resnet_width_multiplier", 1.0),
+    }
+
+
+def load_teacher_model(
+    args: argparse.Namespace,
+    bundle: DatasetBundle,
+    device: torch.device,
+) -> tuple[nn.Module, dict[str, Any]]:
+    teacher_run_dir = Path(args.teacher_run_dir) if args.teacher_run_dir else None
+    if teacher_run_dir is not None:
+        checkpoint_path = teacher_run_dir / "best_model.pt"
+        spec = teacher_model_spec_from_run_dir(teacher_run_dir)
+        source = {"teacher_run_dir": str(teacher_run_dir)}
+    elif args.teacher_checkpoint_path:
+        checkpoint_path = Path(args.teacher_checkpoint_path)
+        spec = {
+            "model": args.teacher_model,
+            "cnn_width_multiplier": args.teacher_cnn_width_multiplier,
+            "cifar_resnet_width_multiplier": args.teacher_cifar_resnet_width_multiplier,
+        }
+        source = {"teacher_checkpoint_path": str(checkpoint_path)}
+    elif args.teacher_pretrained_source == "torchvision_imagenet":
+        checkpoint_path = None
+        spec = {
+            "model": args.teacher_model,
+            "cnn_width_multiplier": args.teacher_cnn_width_multiplier,
+            "cifar_resnet_width_multiplier": args.teacher_cifar_resnet_width_multiplier,
+        }
+        source = {"teacher_pretrained_source": args.teacher_pretrained_source}
+    else:
+        raise ValueError(
+            "teacher_embeddings requires --teacher_run_dir, --teacher_checkpoint_path, or --teacher_pretrained_source torchvision_imagenet"
+        )
+
+    model_name = spec.get("model") or args.teacher_model
+    if model_name is None:
+        raise ValueError("Teacher model architecture is required to load teacher_embeddings")
+    teacher_cnn_width = spec.get("cnn_width_multiplier")
+    if teacher_cnn_width is None:
+        teacher_cnn_width = args.teacher_cnn_width_multiplier if args.teacher_cnn_width_multiplier is not None else 1.0
+    teacher_cifar_width = spec.get("cifar_resnet_width_multiplier")
+    if teacher_cifar_width is None:
+        teacher_cifar_width = (
+            args.teacher_cifar_resnet_width_multiplier
+            if args.teacher_cifar_resnet_width_multiplier is not None
+            else 1.0
+        )
+
+    if checkpoint_path is not None and not checkpoint_path.exists():
+        raise FileNotFoundError(f"Teacher checkpoint not found: {checkpoint_path}")
+
+    pretrained_backbone = args.teacher_pretrained_source == "torchvision_imagenet" and checkpoint_path is None
+    if pretrained_backbone and model_name not in {"resnet18", "resnet50"}:
+        raise ValueError("torchvision_imagenet teacher source currently supports only resnet18 or resnet50")
+
+    model = build_model(
+        model_name=model_name,
+        input_shape=bundle.input_shape,
+        num_classes=bundle.num_classes,
+        dropout=0.0,
+        cnn_width_multiplier=float(teacher_cnn_width),
+        cifar_resnet_width_multiplier=float(teacher_cifar_width),
+        pretrained_backbone=pretrained_backbone,
+    ).to(device)
+    if checkpoint_path is not None:
+        model.load_state_dict(load_checkpoint_state_dict(checkpoint_path, device))
+    return model, {
+        **source,
+        "teacher_model": model_name,
+        "teacher_cnn_width_multiplier": float(teacher_cnn_width),
+        "teacher_cifar_resnet_width_multiplier": float(teacher_cifar_width),
+    }
 
 
 def train_loop(
@@ -1581,7 +1784,7 @@ def train_loop(
             break
 
     if args.save_checkpoints and best_path.exists():
-        best_checkpoint = torch.load(best_path, map_location=device)
+        best_checkpoint = torch.load(best_path, map_location=device, weights_only=False)
         model.load_state_dict(best_checkpoint["model_state_dict"])
     final_test_metrics = evaluate(
         model,
@@ -1617,6 +1820,7 @@ def baseline_run(
         dropout=args.dropout,
         cnn_width_multiplier=args.cnn_width_multiplier,
         cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
+        pretrained_backbone=args.pretrained_backbone,
     ).to(device)
     _, history, test_metrics = train_loop(
         model=model,
@@ -1644,6 +1848,62 @@ def baseline_run(
         baseline_hierarchy,
         bundle.num_classes,
     )
+
+    if args.export_teacher_hierarchy:
+        teacher_loader = {
+            "train": loaders[0],
+            "val": loaders[1],
+            "test": loaders[2],
+        }[args.export_teacher_hierarchy_split]
+        teacher_export_dir = (
+            Path(args.export_teacher_hierarchy_dir)
+            if args.export_teacher_hierarchy_dir
+            else run_dir.parent / f"{bundle.name}_{args.model}_teacher_hierarchy_{args.export_teacher_hierarchy_split}"
+        )
+        teacher_export_dir.mkdir(parents=True, exist_ok=True)
+        teacher_dist_matrix = teacher_embedding_distance(model, teacher_loader, bundle.num_classes, device)
+        np.save(teacher_export_dir / "distance_matrix_teacher_embeddings.npy", teacher_dist_matrix)
+        teacher_hierarchy = compute_hierarchy(teacher_dist_matrix, seed=args.seed)
+        save_hierarchy_artifacts(
+            teacher_export_dir,
+            teacher_hierarchy,
+            bundle.class_names,
+            "teacher_embeddings",
+            extra={
+                "teacher_source": "trained_baseline",
+                "teacher_run_dir": str(run_dir),
+                "teacher_embedding_split": args.export_teacher_hierarchy_split,
+                "pretrained_backbone": bool(args.pretrained_backbone),
+            },
+        )
+        save_json(
+            run_dir / "teacher_hierarchy_export.json",
+            {
+                "teacher_export_dir": str(teacher_export_dir),
+                "teacher_embedding_split": args.export_teacher_hierarchy_split,
+                "pretrained_backbone": bool(args.pretrained_backbone),
+            },
+        )
+        logger.info("Exported teacher embedding hierarchy to %s", teacher_export_dir)
+        if args.wandb:
+            try:
+                import wandb
+                if wandb.run is not None:
+                    artifact = wandb.Artifact(
+                        name=f"{args.run_id}-{bundle.name}-{args.model}-teacher-hierarchy",
+                        type="teacher_hierarchy",
+                    )
+                    for filename in [
+                        "hierarchy.json",
+                        "hierarchy.md",
+                        "distance_matrix_teacher_embeddings.npy",
+                    ]:
+                        path = teacher_export_dir / filename
+                        if path.exists():
+                            artifact.add_file(str(path), name=filename)
+                    wandb.log_artifact(artifact)
+            except ImportError:
+                pass
     final_learned_hier_metrics = evaluate(
         model,
         loaders[2],
@@ -1726,6 +1986,7 @@ def load_or_train_reference(
         dropout=args.dropout,
         cnn_width_multiplier=args.cnn_width_multiplier,
         cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
+        pretrained_backbone=args.pretrained_backbone,
     ).to(device)
     reference_model, reference_history, _ = train_loop(
         model=reference_model,
@@ -1761,7 +2022,9 @@ def reference_classifier_weight_distance(
 def hierarchy_from_reference(
     args: argparse.Namespace,
     bundle: DatasetBundle,
+    train_loader: DataLoader,
     val_loader: DataLoader,
+    test_loader: DataLoader,
     device: torch.device,
     logger: logging.Logger,
     run_dir: Path,
@@ -1792,11 +2055,24 @@ def hierarchy_from_reference(
             }
         else:
             hierarchy_levels = template_levels
-    else:
+    elif args.distance_source == "confusion":
         if reference_model is None:
             raise RuntimeError("confusion distance requires a reference checkpoint/model")
         dist_matrix = confusion_distance(reference_model, val_loader, bundle.num_classes, device)
         hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
+    else:
+        teacher_model, teacher_meta = load_teacher_model(args, bundle, device)
+        teacher_loader = {
+            "train": train_loader,
+            "val": val_loader,
+            "test": test_loader,
+        }[args.teacher_embedding_split]
+        dist_matrix = teacher_embedding_distance(teacher_model, teacher_loader, bundle.num_classes, device)
+        hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
+        hierarchy_extra = {
+            **teacher_meta,
+            "teacher_embedding_split": args.teacher_embedding_split,
+        }
     np.save(run_dir / "distance_matrix.npy", dist_matrix)
 
     save_hierarchy_artifacts(
@@ -1820,81 +2096,25 @@ def curriculum_run(
 ) -> dict[str, Any]:
     train_loader, val_loader, test_loader = loaders
 
-    reference_model: nn.Module | None
-    if args.reference_run_dir is not None:
-        reference_dir = Path(args.reference_run_dir)
-        logger.info("Loading reference baseline from %s", reference_dir)
-        if (reference_dir / "best_model.pt").exists():
-            reference_model, reference_history = load_reference_model(reference_dir, args, bundle, device)
-        else:
-            reference_model = None
-            reference_history = json.loads((reference_dir / "history.json").read_text())
-    else:
-        reference_dir = run_dir / "reference_baseline"
-        reference_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Training reference baseline for hierarchy construction")
-        reference_logger = setup_logger(reference_dir, "training_log_reference.txt")
-        reference_model = build_model(
-            model_name=args.model,
-            input_shape=bundle.input_shape,
-            num_classes=bundle.num_classes,
-            dropout=args.dropout,
-            cnn_width_multiplier=args.cnn_width_multiplier,
-            cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
-        ).to(device)
-        reference_model, reference_history, _ = train_loop(
-            model=reference_model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            test_loader=test_loader,
-            num_classes=bundle.num_classes,
-            args=args,
-            device=device,
-            logger=reference_logger,
-            run_dir=reference_dir,
-            schedule=None,
-        )
-        np.save(reference_dir / "distance_matrix_classifier_weights.npy", classifier_weight_distance(reference_model))
-        save_evaluation_artifacts(reference_model, val_loader, device, bundle, reference_dir, "val")
-        save_evaluation_artifacts(reference_model, test_loader, device, bundle, reference_dir, "test")
-
-    hierarchy_extra: dict[str, Any] = {}
-    if args.distance_source in {"classifier_weights", "random_permutation"}:
-        dist_matrix = reference_classifier_weight_distance(reference_dir, reference_model)
-        template_levels = compute_hierarchy(dist_matrix, seed=args.seed)
-        if args.distance_source == "random_permutation":
-            random_seed = (
-                args.random_hierarchy_seed if args.random_hierarchy_seed is not None else args.seed
-            )
-            hierarchy_levels, permutation = random_permutation_hierarchy(
-                template_levels,
-                bundle.num_classes,
-                random_seed,
-            )
-            save_json(
-                run_dir / "hierarchy_template_classifier_weights.json",
-                {"distance_source": "classifier_weights", "levels": template_levels},
-            )
-            hierarchy_extra = {
-                "template_distance_source": "classifier_weights",
-                "random_hierarchy_seed": random_seed,
-                "random_permutation": permutation,
-            }
-        else:
-            hierarchy_levels = template_levels
-    else:
-        if reference_model is None:
-            raise RuntimeError("confusion distance requires a reference checkpoint/model")
-        dist_matrix = confusion_distance(reference_model, val_loader, bundle.num_classes, device)
-        hierarchy_levels = compute_hierarchy(dist_matrix, seed=args.seed)
-    np.save(run_dir / "distance_matrix.npy", dist_matrix)
-
-    save_hierarchy_artifacts(
+    reference_dir, reference_model, reference_history = load_or_train_reference(
+        args,
+        bundle,
+        loaders,
+        device,
+        logger,
         run_dir,
-        hierarchy_levels,
-        bundle.class_names,
-        args.distance_source,
-        extra=hierarchy_extra,
+    )
+    hierarchy_levels = hierarchy_from_reference(
+        args,
+        bundle,
+        train_loader,
+        val_loader,
+        test_loader,
+        device,
+        logger,
+        run_dir,
+        reference_dir,
+        reference_model,
     )
 
     if args.curriculum_policy == "adaptive_plateau":
@@ -1929,6 +2149,7 @@ def curriculum_run(
         max_levels=args.curriculum_max_levels,
         policy=args.curriculum_policy,
         stage_max_epochs=args.curriculum_stage_max_epochs,
+        curriculum_order=args.curriculum_order,
     )
     save_json(run_dir / "schedule.json", schedule)
     learned_hierdist_matrix = hierarchy_distance_matrix_from_levels(hierarchy_levels, bundle.num_classes)
@@ -1940,6 +2161,7 @@ def curriculum_run(
         dropout=args.dropout,
         cnn_width_multiplier=args.cnn_width_multiplier,
         cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
+        pretrained_backbone=args.pretrained_backbone,
     ).to(device)
     _, history, test_metrics = train_loop(
         model=model,
@@ -1969,6 +2191,7 @@ def curriculum_run(
         "epochs_completed": len(history),
         "curriculum_epochs": curriculum_epochs,
         "curriculum_policy": args.curriculum_policy,
+        "curriculum_order": args.curriculum_order,
         "curriculum_min_clusters": args.curriculum_min_clusters,
         "curriculum_max_levels": args.curriculum_max_levels,
         "curriculum_stage_min_epochs": args.curriculum_stage_min_epochs,
@@ -2036,7 +2259,9 @@ def multiloss_run(
     hierarchy_levels = hierarchy_from_reference(
         args,
         bundle,
+        train_loader,
         val_loader,
+        test_loader,
         device,
         logger,
         run_dir,
@@ -2064,6 +2289,7 @@ def multiloss_run(
         dropout=args.dropout,
         cnn_width_multiplier=args.cnn_width_multiplier,
         cifar_resnet_width_multiplier=args.cifar_resnet_width_multiplier,
+        pretrained_backbone=args.pretrained_backbone,
     ).to(device)
     _, history, test_metrics = train_loop(
         model=model,

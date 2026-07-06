@@ -85,16 +85,23 @@ hierarchy variants, and places equal emphasis on positive and negative outcomes.
 
 \section{Research questions}
 
-The empirical part is organized around the following questions:
+The empirical part is organized around four research questions. They are phrased
+so that both positive and negative outcomes are informative.
 
-\begin{enumerate}
-    \item Under what conditions does curriculum learning improve final model quality?
-    \item How strongly does the effect depend on model capacity, hierarchy depth,
-          and dataset difficulty?
-    \item Can adaptive scheduling reliably outperform fixed hand-tuned schedules?
-    \item Do roughness and sharpness diagnostics support a clear optimization
-          mechanism, or only correlate with selected positive cases?
-\end{enumerate}
+\begin{description}
+    \item[RQ1.] Does objective-space continuation improve regression on
+          non-convex target functions after the direct single-target baseline is
+          strongly tuned?
+    \item[RQ2.] Does output-space coarse-to-fine supervision improve image
+          classification, and how does the effect depend on model capacity,
+          dataset structure, curriculum length, and hierarchy depth?
+    \item[RQ3.] Can adaptive or meta-optimized schedules replace fixed
+          hand-designed curricula, or do they introduce new failure modes such
+          as staying too long on easy objectives?
+    \item[RQ4.] Do trajectory, roughness, and sharpness diagnostics support a
+          clear optimization mechanism, or do they only provide correlational
+          evidence in selected positive cases?
+\end{description}
 
 \section{Contributions}
 
@@ -157,6 +164,33 @@ global optimization. In these methods, training starts with a smoothed, convex
 version of the objective function, making it easier to find a good solution. As
 training continues, the smoothing is gradually reduced, allowing the model to
 tackle more complex aspects of the problem.
+
+Weinshall et al. \cite{weinshall2018curriculum} give a complementary argument
+for instance-based curriculum learning. In a linear-regression setting with SGD,
+they define example difficulty using the loss under the optimal hypothesis
+rather than the loss under the current model. Under this definition, easier
+examples yield larger expected progress toward the optimum, especially early in
+training when the model is still far from a good solution. Their analysis also
+separates inherent difficulty from current loss: among examples of equal
+inherent difficulty, high current-loss points can still be informative, but
+blindly prioritizing all high-loss examples can be harmful because some are
+intrinsically noisy or ambiguous. This distinction is useful for this thesis
+because it clarifies why curriculum learning and hard-example mining are not the
+same strategy.
+
+The practical contribution of Weinshall et al. is equally relevant. Because the
+ideal difficulty score depends on the unknown optimum, they estimate example
+ordering with a separate pretrained teacher model and use that ranking to drive
+an easy-to-hard schedule. Their CNN experiments show the strongest gains in
+early optimization, with more conditional improvements in final accuracy when
+the task is harder, the student network is smaller, or regularization is
+stronger. The paper therefore supports a cautious interpretation that aligns
+with this thesis: curricula often act by stabilizing the early optimization
+trajectory, but their final generalization benefit depends on regime and design
+choices. At the same time, their theory is still limited to convex linear
+regression and the teacher-derived difficulty score is only a proxy, so the
+result is best treated as motivation rather than a complete explanation of
+curriculum effects in deep networks.
 
 \subsection{Gaussian Continuation}
 One practical way to apply continuation methods in deep learning is through
@@ -357,13 +391,16 @@ choices are responsible.
 This chapter defines the common methodological frame used in both empirical
 tracks. Dataset-specific details are presented together with the corresponding
 results in Chapters~\ref{chap:regression-curriculum} and
-\ref{chap:vision-curriculum}.
+\ref{chap:vision-curriculum}. The chapter also separates algorithmic choices
+from engineering choices. Infrastructure details such as experiment tracking or
+container execution are included only where they affect reproducibility,
+provenance, or the feasibility of running comparable experiments.
 
 \section{Research design}
 
 The thesis treats curriculum learning as a controlled modification of the
 training objective. A curriculum method is considered useful only if it improves
-final model quality or optimization behavior relative to a strong non-curriculum
+model quality or optimization behavior relative to a strong non-curriculum
 baseline trained under comparable conditions. This requirement is important
 because weak baselines can make curriculum effects appear larger than they are.
 
@@ -375,6 +412,28 @@ The second track is motivated by the limitations of the first: smoothing can mak
 optimization easier, but it may also remove information that is needed by the
 final task.
 
+The design is deliberately comparative rather than purely constructive. The goal
+is not only to show that a curriculum can work, but also to identify when it does
+not work. For this reason, negative results, runtime costs, trajectory penalties,
+and ablations are treated as part of the evidence rather than as failed
+experiments.
+
+\section{Evidence hierarchy}
+
+The experiments are interpreted using an explicit hierarchy of evidence. The
+strongest claims require matched baselines, comparable training budgets, and at
+least a small amount of seed replication. Single-seed sweeps are used primarily
+for screening and for selecting promising regions of the design space. Diagnostic
+plots, roughness probes, and best-run examples are treated as explanatory
+support, not as standalone evidence.
+
+This distinction matters because several results in the thesis use best test
+accuracy along a trajectory. Such a metric is useful for understanding whether a
+training procedure ever reaches a better solution, but it is weaker than a
+validation-selected test result. Consequently, the thesis separates claims about
+\emph{peak quality} from claims about deployable model selection or training
+speed.
+
 \section{Curriculum learning as dynamic loss optimization}
 
 Both tracks can be interpreted as dynamic loss optimization. At training step
@@ -382,19 +441,67 @@ $t$, the model parameters $\theta$ are updated using a loss
 \begin{equation}
     \mathcal{L}_t(\theta) = \sum_{k=1}^{K} w_k(t)\mathcal{L}_k(\theta),
 \end{equation}
-where $\mathcal{L}_k$ are task or resolution-specific losses and $w_k(t)$ are
+where $\mathcal{L}_k$ are task- or resolution-specific losses and $w_k(t)$ are
 schedule weights. In fixed curricula, these weights are predefined. In adaptive
 or meta-optimized variants, they depend on training progress or validation
 performance.
 
-\section{Baselines and comparisons}
+In the regression track, the component losses correspond to different smoothed
+versions of the same target function. In the classification track, the component
+losses correspond to different levels of label granularity. This shared view is
+useful because it makes the two tracks comparable: both ask whether an easier
+objective can guide optimization toward a better solution on the final objective.
 
-The main baseline is direct training on the final target objective or final label
-space. Curriculum variants are compared against this baseline using matched
-architectures, training budgets, and, where possible, hyperparameter tuning. The
-experiments also include ablations such as random label hierarchies, because an
-observed gain from a curriculum may come from reduced early-task complexity
-rather than from meaningful task structure.
+\section{Regression track}
+
+The regression experiments use synthetic benchmark functions with non-convex
+structure. For each function, the training data contain the original target and a
+sequence of Gaussian-smoothed targets. The main baseline is direct training on
+the final, least-smoothed target. Curriculum variants train on a sequence or a
+weighted mixture of smoothed objectives before emphasizing the final target.
+
+Hyperparameter sweeps are part of the methodology rather than an implementation
+detail. They reduce the risk of comparing curriculum methods against an
+under-tuned single-target baseline. The regression track therefore first
+establishes strong baseline configurations and only then evaluates curriculum or
+multi-loss variants against them.
+
+\section{Vision track}
+
+The image-classification track uses output-space curricula inspired by
+coarse-to-fine label hierarchies. Instead of smoothing the input or target
+surface, the method replaces the final label set with coarser label groups early
+in training. Later stages introduce finer labels until the original
+classification problem is restored.
+
+The hierarchy is learned from model-derived class information, primarily the
+geometry of classifier weights after baseline training. The main comparison is
+between direct fine-label training and curriculum training with the learned
+hierarchy. Additional controls test whether the effect depends on schedule
+length, model capacity, dataset difficulty, hierarchy depth, and hierarchy
+quality. The random-hierarchy ablation is especially important because it keeps
+the amount of early label coarsening fixed while destroying the learned class
+grouping.
+
+\section{Baselines and controls}
+
+The main baseline in both tracks is direct training on the final target objective
+or final label space. Curriculum variants are compared against this baseline
+using matched architectures, training budgets, data splits, and, where possible,
+hyperparameter search. The experiments also include several controls:
+
+\begin{itemize}
+    \item model-capacity comparisons, especially in the CIFAR-100 vision track,
+    \item fixed versus adaptive curriculum schedules,
+    \item shallow versus deeper hierarchy usage,
+    \item cross-dataset checks on easier and harder datasets,
+    \item random hierarchy controls with matched cluster sizes.
+\end{itemize}
+
+These controls are necessary because a curriculum can help for several different
+reasons: it may provide meaningful structure, reduce early-task complexity,
+regularize optimization, or simply delay hard-label training. The methodology is
+therefore designed to separate these explanations where possible.
 
 \section{Evaluation protocol}
 
@@ -402,17 +509,52 @@ The primary metrics are final validation or test performance, best achieved
 performance during training, and trajectory-based diagnostics such as area under
 the accuracy curve. For the regression track, the main quality measure is
 prediction error on held-out samples. For the classification track, the main
-quality measure is accuracy. Additional diagnostics, including roughness and
-sharpness probes, are used only as suggestive evidence about optimization
-mechanisms, not as causal proof.
+quality measure is top-1 accuracy. Additional classification metrics, including
+macro-F1, top-5 accuracy, calibration error, and hierarchy-aware scores, are used
+where they clarify whether accuracy gains reflect broader improvements.
 
-\section{Reproducibility}
+Best achieved test performance is useful for understanding training dynamics,
+but it is retrospective. It should not be confused with a deployment protocol in
+which the epoch is selected using validation data and the test set is evaluated
+once. For this reason, the discussion distinguishes peak-accuracy evidence from
+trajectory evidence. A curriculum that reaches a higher peak but has lower AUC is
+interpreted as improving the best solution found, not as accelerating training.
 
-The implementation uses scripted experiment entry points, Optuna sweeps for
-hyperparameter search, and MLflow tracking for parameters, metrics, and
-artifacts. Detailed run reports are kept in the appendices so that the main text
-can focus on the research claims while preserving the connection to the actual
-experiments.
+Roughness, Hessian, and sharpness probes are treated as diagnostics rather than
+as proof of mechanism. They can support or weaken a flattening interpretation,
+but they do not by themselves establish that curriculum causes the optimizer to
+find flatter minima.
+
+\section{Experiment tracking and reproducibility}
+
+The implementation uses scripted experiment entry points, explicit configuration
+files or command-line arguments, fixed random seeds where possible, and stored
+run metadata. Optuna \cite{akiba2019optuna} is used for several
+hyperparameter and schedule searches. The regression track uses MLflow
+\cite{zaharia2018accelerating} to record parameters, metrics, artifacts, and
+run structure. The vision track uses Weights \& Biases \cite{biewald2020experiment}
+for the same purpose; W\&B is the source of truth for the later CIFAR-100
+\cite{krizhevsky2009learning}, Fashion-MNIST \cite{xiao2017fashion}, CIFAR-10
+\cite{krizhevsky2009learning}, and Tiny ImageNet \cite{tinyimagenet,deng2009imagenet}
+analyses. Tables and figures in the appendices are derived from exported
+tracking data rather than from manually copied console logs.
+
+The large vision experiments were executed in a containerized environment. The
+Docker image included the PyTorch \cite{paszke2019pytorch} and CUDA-related
+dependencies required by the training code, was versioned and pushed to Docker
+Hub, and was then used on Runpod GPU instances to run consecutive experiment
+batches. This is not an algorithmic contribution, and it is not used as
+evidence that the method works.
+It is reported because it makes the compute environment and dependency set more
+stable across long-running experiments, which is important for reproducibility
+and for interpreting failed or repeated runs.
+
+Detailed run reports are kept in the appendices so that the main text can focus
+on the research claims while preserving the connection to the actual
+experiments. Local analysis folders and raw tracking exports are treated as
+scratch material unless a figure or table is intentionally incorporated into the
+thesis.
+
 
 \chapter{Objective-Space Curriculum for Regression}
 \label{chap:regression-curriculum}
@@ -420,35 +562,135 @@ experiments.
 This chapter presents the original empirical track of the thesis: curriculum
 learning through objective-space continuation on synthetic non-convex regression
 surfaces. The goal was to test whether Gaussian-inspired smoothing and dynamic
-multi-loss schedules make difficult target functions easier to learn.
+multi-loss schedules make difficult target functions easier to learn. The main
+question for this track is RQ1: whether continuation still helps after the direct
+single-target baseline has been tuned carefully.
 
-\section{Experimental setup}
+\section{Research question and experimental logic}
 
-The regression experiments use benchmark functions with non-convex structure.
-For each function, the model is trained either directly on the final target or
-through a sequence of smoothed targets. The curriculum variants include fixed
-schedules and dynamic multi-loss weighting. Hyperparameter sweeps are used to
-avoid comparing curriculum methods against under-tuned single-target baselines.
+The regression track evaluates a narrow hypothesis: if a target surface is hard
+because of non-convex local structure, then training first on smoother versions
+of the same surface may guide the optimizer toward better final solutions. This
+hypothesis is tested against a direct hard-target baseline, not against an
+untuned default model. The track therefore proceeds in three steps:
 
-\section{Results}
+\begin{enumerate}
+    \item tune model and optimizer hyperparameters for each benchmark function,
+    \item compare direct single-target training with fixed continuation
+          schedules under matched conditions,
+    \item test whether adaptive multi-loss weighting can improve on fixed or
+          single-target training in a difficult representative case.
+\end{enumerate}
 
-The regression sweep and benchmark stage (Appendices~\ref{app:sweep-pack-v1}
-and \ref{app:curr-vs-single-v1}) established an important baseline lesson:
-curriculum comparisons are meaningful only after strong baseline tuning. Once
-that was done, fixed curriculum was not a universal winner. In the paired
-benchmark, curriculum and single-target training split quality wins, while
-single-target training dominated runtime.
+\section{Benchmark functions and continuation targets}
 
-The dynamic weighting stage (Appendix~\ref{app:meta-weighting-eggholder-u1})
-showed that bilevel reweighting is operationally feasible, but still unstable.
-This is scientifically useful: it narrows the claim from ``adaptive weighting
-works'' to ``adaptive weighting can work in selected regions, but robust default
-settings are still missing.''
+The experiments use eight two-dimensional synthetic regression functions:
+\texttt{ackley}, \texttt{levy}, \texttt{bukin}, \texttt{eggholder},
+\texttt{franke}, \texttt{peaks}, \texttt{friedman1\_2d}, and
+\texttt{friedman2\_2d}. For each function, data are generated from the
+analytical target and stored as train and test parquet files. The continuation
+variants use multiple target columns corresponding to different Gaussian
+smoothing levels. The hardest level is the original or least-smoothed target and
+is the metric used for final comparison.
 
-Overall, the Gaussian-continuation track supports a conditional thesis claim:
-objective curricula are valuable tools, but their effectiveness depends on
-task geometry and schedule design, and they should not be treated as a default
-replacement for a strong single-objective baseline.
+The later v3 setting introduced a stricter protocol: 20,000 generated samples
+per function, a 10,000/10,000 train--test split, an internal 80/20 train--validation
+split inside the training file, additive Gaussian label noise, three smoothing
+levels, and an explicit parameter-to-training-samples constraint. These details
+are kept in Appendix~\ref{app:sweep-pack-v3-setup}, while the main text uses
+them to motivate why baseline strength and model capacity are treated as
+methodological variables.
+
+\section{Baseline tuning protocol}
+
+Before comparing curricula, the first sweep pack optimized architecture and
+training hyperparameters separately for each function. The search covered MLP,
+SIREN \cite{sitzmann2020implicit}, and Fourier-feature networks
+\cite{tancik2020fourier} and optimized validation MSE. The result was not a
+single universal model family: MLPs were strongest overall, Fourier features
+were best on \texttt{eggholder}, and SIREN was best on \texttt{peaks}. This
+justified using per-function best configurations in the subsequent curriculum
+comparison instead of imposing one manual architecture on all functions.
+
+\section{Fixed continuation versus direct training}
+
+The main fixed-schedule comparison used a factorial design with two methods
+(single and curriculum), two budget regimes (equal epochs and equal time), eight
+functions, and three seeds, for 96 completed runs. Table~\ref{tab:main-regression-wins}
+summarizes the result in the main text; the full report is given in
+Appendix~\ref{app:curr-vs-single-v1}.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Regime & Quality wins: curriculum & Quality wins: single & Runtime wins: single & Runtime wins: curriculum \\
+\midrule
+equal epochs & 5 & 3 & 8 & 0 \\
+equal time & 3 & 5 & 8 & 0 \\
+\bottomrule
+\end{tabular}
+\caption{Main regression benchmark summary. Quality wins count functions where
+the median hard-validation loss favored the method. Runtime wins count median
+runtime winners.}
+\label{tab:main-regression-wins}
+\end{table}
+
+The result is mixed. Curriculum helped quality on selected functions such as
+\texttt{bukin}, \texttt{franke}, and \texttt{levy}, but it did not help on
+\texttt{ackley}, \texttt{eggholder}, or \texttt{peaks}. It also never won on
+runtime. This means that continuation cannot be treated as a default replacement
+for direct hard-target training. Its value is conditional on task geometry and
+must be weighed against extra computation.
+
+\section{Adaptive multi-loss weighting}
+
+The adaptive weighting follow-up tested whether gradient-based loss weighting
+over multiple continuation targets could overcome the limitations of fixed
+schedules. The most stable completed benchmark used \texttt{eggholder}, a
+one-step meta lookahead, four random seeds, three noise levels, multiple model
+and meta learning rates, and \texttt{1, 2, 3, 5} losses. All 288 runs completed,
+which shows that the one-step formulation is operationally feasible.
+
+However, the direct hard-target baseline remained strongest on average.
+Table~\ref{tab:main-meta-eggholder-summary} integrates the central result from
+Appendix~\ref{app:meta-weighting-eggholder-u1}.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+Losses & Mean improvement vs. one-loss baseline & Median improvement & Win rate \\
+\midrule
+2 & -1259.72 & -1089.23 & 0.458 \\
+3 &  -324.00 &  -549.98 & 0.472 \\
+5 & -1777.98 & -1305.75 & 0.417 \\
+\bottomrule
+\end{tabular}
+\caption{Adaptive meta-weighting on \texttt{eggholder}. Positive improvement
+would mean that adaptive weighting beats the direct hard-target baseline; all
+mean improvements are negative.}
+\label{tab:main-meta-eggholder-summary}
+\end{table}
+
+Adaptive weighting occasionally produced very strong individual runs, especially
+with two or three losses and higher model learning rates, but this was not stable
+across seeds and noise settings. The result narrows the claim: adaptive
+multi-loss continuation is feasible and interpretable, but it is not yet a robust
+replacement for a tuned single-target baseline.
+
+\section{Track-level conclusion}
+
+The regression track answers RQ1 cautiously. Objective-space continuation can
+improve final quality on some non-convex surfaces, but the effect is not general
+and comes with runtime cost. The strongest methodological lesson is that
+curriculum claims are fragile unless the direct baseline is strong. This finding
+motivated the second track: if simple smoothing is not reliably beneficial, a
+more structured curriculum may be needed, where intermediate tasks preserve
+semantic information rather than merely removing high-frequency detail.
+
 
 \chapter{Output-Space Hierarchical Curriculum for Vision}
 \label{chap:vision-curriculum}
@@ -457,34 +699,167 @@ This chapter presents the second empirical track of the thesis. It moves from
 smoothing regression targets to coarse-to-fine supervision in image
 classification. The goal is to test whether curriculum learning is more useful
 when intermediate tasks preserve semantic structure instead of only reducing
-objective roughness.
+objective roughness. This chapter addresses RQ2 and RQ3 most directly.
 
-\section{Experimental setup}
+\section{Research question and experimental logic}
 
-The experiments use output-space curricula inspired by label hierarchies. During
-early training, the model predicts coarse labels; later stages introduce finer
-labels until the final classification task is reached. The track includes fixed
-schedules, an adaptive plateau schedule, model-capacity comparisons, cross-dataset
-checks, and a random-hierarchy ablation.
+The vision track tests a different form of easy-to-hard training. Instead of
+changing the input data or smoothing a regression target, the model first learns
+a coarser output space and later returns to the original fine-label problem. The
+central hypothesis is that coarse labels can provide useful intermediate
+structure when the final label space is large enough and the model has limited
+capacity.
 
-\section{Results}
+This track was designed as a sequence of increasingly strict controls:
 
-The CIFAR-100 model-size sweep (Appendix~\ref{app:cifar100-model-size-curriculum})
-showed a clear capacity trend: weaker CNNs benefit most, while larger models
-benefit less or not at all. The adaptive and roughness follow-up
-(Appendix~\ref{app:roughness-followup-curriculum}) then confirmed two points:
+\begin{enumerate}
+    \item a CIFAR-100 model-size screening sweep,
+    \item multi-seed fixed and adaptive schedule follow-ups,
+    \item dataset controls on CIFAR-10, Fashion-MNIST, and Tiny ImageNet,
+    \item hierarchy inspection and a matched random-hierarchy ablation.
+\end{enumerate}
 
-\begin{itemize}
-    \item fixed schedules remain stronger than the current adaptive plateau rule,
-    \item hierarchy depth and stage allocation are first-order design choices,
-          not minor implementation details.
-\end{itemize}
+\section{Coarse-to-fine training method}
 
-Finally, the random-hierarchy ablation (Appendix~\ref{app:hierarchy-ablation-curriculum})
-closed the main missing control experiment. In CIFAR-100 \texttt{cnn\_w0.5},
-the learned hierarchy outperformed matched random permutations on all three
-training seeds. This result supports the interpretation that hierarchy quality
-matters, not only coarse label count.
+The implementation follows the continuous coarse-to-fine formulation: the model
+keeps a fine-class classifier head, but the training loss is evaluated after
+marginalizing fine-label probabilities into the active coarse clusters. The
+hierarchy is generated from model-derived class similarity, primarily the
+classifier-weight geometry of a baseline model. Thus, the hierarchy is not a
+manual taxonomy; it is a model-specific estimate of which classes are close in
+the learned representation.
+
+A fixed curriculum allocates a predetermined number of epochs to coarse labels
+before fine-label training. The adaptive plateau curriculum starts at a coarse
+level and advances when fine-label validation accuracy stops improving after a
+minimum number of epochs or when a maximum stage length is reached. This rule is
+intended to reduce manual curriculum-length tuning, but the experiments below
+show that it can also stay too long in coarse stages.
+
+\section{CIFAR-100 model-size study}
+
+The first screening study used 80 completed CIFAR-100 runs
+\cite{krizhevsky2009learning}: one baseline and five curriculum lengths for
+each model configuration, mostly with seed 42. The training budget was 100
+epochs with Adam \cite{kingma2015adam}, learning rate 0.001, and curriculum
+lengths 5, 10, 20, 30, and 40. The full table is in
+Appendix~\ref{app:cifar100-model-size-curriculum}; Table~\ref{tab:main-cifar100-capacity}
+keeps the core pattern in the main text.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Model & Parameters & Baseline & Best curriculum & Gain \\
+\midrule
+\texttt{cnn\_w0.5} & 65,636 & 34.78 & 37.96 & +3.18 \\
+\texttt{cnn\_w1} & 158,820 & 38.49 & 42.11 & +3.62 \\
+\texttt{cnn\_w2} & 428,132 & 42.56 & 44.72 & +2.16 \\
+\texttt{cnn\_w4} & 1,298,532 & 44.63 & 44.47 & -0.16 \\
+\texttt{cifar\_resnet8} & 83,892 & 52.68 & 54.49 & +1.81 \\
+\texttt{cifar\_resnet56} & 861,620 & 63.14 & 62.33 & -0.81 \\
+\texttt{resnet18} & 11,220,132 & 68.76 & 69.37 & +0.61 \\
+\bottomrule
+\end{tabular}
+\caption{Selected CIFAR-100 model-size results. Accuracies are percentages and
+gains are percentage points relative to the matching baseline.}
+\label{tab:main-cifar100-capacity}
+\end{table}
+
+The strongest gains occur for smaller CNNs. Within the CNN family, increasing
+width changes the best schedule from moderate length to short length and finally
+to no useful curriculum. This supports a capacity-conditioned interpretation:
+coarse supervision helps most when the model is not already strong enough to
+learn the fine task directly.
+
+The same screening study also showed that curriculum did not improve the whole
+training trajectory. AUC gains were negative even for models whose peak accuracy
+improved. Therefore, the curriculum effect should be described as a possible
+improvement in the best solution reached, not as faster training.
+
+\section{Fixed schedules, adaptive schedules, and hierarchy depth}
+
+The follow-up repeated important CIFAR-100 cases over seeds 42, 43, and 44 and
+added adaptive plateau schedules. Table~\ref{tab:main-cifar100-policy} summarizes
+the central comparison from Appendix~\ref{app:roughness-followup-curriculum}.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+Model & Fixed best & Adaptive all levels & Adaptive first level \\
+\midrule
+\texttt{cnn\_w0.5} & \textbf{37.58 (+2.54)} & 37.19 (+1.75) & 37.22 (+2.24) \\
+\texttt{cnn\_w1} & \textbf{40.60 (+1.98)} & 39.35 (+0.79) & 40.23 (+1.59) \\
+\texttt{cnn\_w2} & \textbf{44.15 (+1.72)} & 39.80 (-2.70) & -- \\
+\texttt{cnn\_w4} & \textbf{44.85 (+0.34)} & 39.71 (-4.55) & -- \\
+\texttt{cifar\_resnet8} & \textbf{56.60 (+1.33)} & 55.77 (+0.09) & 55.64 (+0.72) \\
+\bottomrule
+\end{tabular}
+\caption{CIFAR-100 policy comparison. Entries are mean best test accuracy over
+available seeds, with gain over the matching baseline in parentheses.}
+\label{tab:main-cifar100-policy}
+\end{table}
+
+Fixed schedules remain stronger than the current adaptive plateau rule. The
+adaptive method is not useless, but it often allocates too many epochs to coarse
+levels, especially for larger CNNs whose best fixed schedule is very short. The
+first-level-only adaptive variant is consistently better than using all generated
+levels where both were tested, showing that hierarchy depth is a first-order
+design choice rather than a harmless implementation detail.
+
+\section{Dataset controls}
+
+The same curriculum idea was tested on easier or different datasets. CIFAR-10
+\cite{krizhevsky2009learning} shows small positive gains for weak CNNs,
+Fashion-MNIST \cite{xiao2017fashion} is essentially neutral or negative, and
+Tiny ImageNet \cite{tinyimagenet,deng2009imagenet} is mixed: small Adam-trained
+models were negative, while a stronger ResNet-18 \cite{he2016deep} with
+SGD/cosine \cite{loshchilov2017sgdr} achieved a modest positive gain. The
+important conclusion is that weak model capacity alone is not sufficient. The
+dataset must also contain class structure that is useful at coarse granularity.
+
+\section{Hierarchy-quality ablation}
+
+The final control asks whether the learned hierarchy matters, or whether any
+coarse label reduction would have produced a similar gain. The ablation compares
+the learned CIFAR-100 hierarchy for \texttt{cnn\_w0.5} with random hierarchies
+that preserve the same tree shape and cluster sizes. This keeps the amount of
+early label coarsening fixed while destroying the learned class grouping.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Condition & Best accuracy & Accuracy gain & AUC & AUC gain \\
+\midrule
+Learned hierarchy & 37.53 & +2.24 & 32.75 & -3.83 \\
+Random hierarchy mean & 35.81 & +0.53 & 31.75 & -5.39 \\
+Best random hierarchy & 36.34 & +1.05 & -- & -- \\
+\bottomrule
+\end{tabular}
+\caption{CIFAR-100 \texttt{cnn\_w0.5} hierarchy ablation. The learned hierarchy
+beats matched random hierarchies, but both curriculum variants pay an AUC cost.}
+\label{tab:main-hierarchy-ablation}
+\end{table}
+
+The learned hierarchy outperforms the random mean for all three training seeds
+and also beats the best-of-three random diagnostic. This supports the claim that
+hierarchy quality matters: the curriculum gain is not explained only by reducing
+the number of labels early in training.
+
+\section{Track-level conclusion}
+
+The vision track answers RQ2 positively but conditionally. Coarse-to-fine
+curriculum learning can improve peak accuracy for lower-capacity models on
+structured many-class datasets, especially CIFAR-100. The effect weakens on
+larger models, easier datasets, and poorly matched hierarchies. It also answers
+RQ3 negatively for the current adaptive rule: adaptive plateau scheduling reduces
+manual tuning in principle, but in these experiments it does not outperform
+well-chosen fixed schedules.
 
 \chapter{Discussion}
 \label{chap:discussion}
@@ -528,6 +903,32 @@ learning is not beneficial merely because training starts with an easier task;
 it is beneficial when the easier task provides information that transfers to the
 final task.
 
+\section{Answers to the research questions}
+
+\paragraph{RQ1: objective-space continuation.}
+Gaussian-inspired continuation helps on selected regression functions, but it is
+not reliable after strong baseline tuning. The direct hard-target baseline wins
+on several functions and always wins on runtime. The answer is therefore
+conditional rather than affirmative.
+
+\paragraph{RQ2: output-space hierarchy.}
+Coarse-to-fine supervision is more promising in structured many-class vision
+settings. The strongest evidence is CIFAR-100 with lower-capacity models, where
+peak accuracy improves and learned hierarchies outperform matched random
+hierarchies. The effect weakens for larger models and easier datasets.
+
+\paragraph{RQ3: adaptive scheduling.}
+The current adaptive methods do not replace fixed schedules. Meta-weighting in
+the regression track is feasible but not better on average, and adaptive plateau
+scheduling in the vision track often stays too long in coarse stages. Adaptive
+scheduling remains a direction for future work rather than a completed solution.
+
+\paragraph{RQ4: optimization mechanism.}
+The diagnostic evidence is inconclusive. AUC often decreases, so curriculum does
+not generally accelerate training. Roughness and sharpness probes sometimes
+support a flatter-minima interpretation, especially for selected ResNet cases,
+but the pattern is not consistent enough to claim a general mechanism.
+
 \section{Limitations and threats to validity}
 
 Some limitations:
@@ -558,12 +959,13 @@ static easy-to-hard schedules and evaluate when adaptive or hierarchy-based
 curricula provide measurable benefits.
 
 The results support a nuanced conclusion. Curriculum effects are reproducible in
-selected settings, but they are not universal. In both regression and image
-classification tracks, strong baselines remain difficult to beat. Where
-curriculum helps, the gain is tied to concrete conditions: model capacity,
-dataset structure, hierarchy quality, and schedule length. Where these
-conditions are not met, curriculum often increases training cost without
-improving the overall trajectory.
+selected settings, but they are not universal. In the regression track,
+objective-space continuation improves selected functions but does not reliably
+beat tuned single-target training. In the vision track, hierarchical curricula
+are more promising, especially for lower-capacity CIFAR-100 models, but the gain
+still depends on dataset structure, hierarchy quality, and schedule length.
+Where these conditions are not met, curriculum often increases training cost
+without improving the overall trajectory.
 
 The thesis also clarifies what can and cannot be claimed mechanistically.
 Roughness and sharpness diagnostics are informative, but current evidence does
@@ -609,7 +1011,8 @@ established with careful controls, not assumed by default.
 This chapter presents the protocol for the Systematic Literature Review
 (\acronym{SLR}) which serves as the foundation for the research component of
 this thesis. The protocol has been developed in accordance with the
-\acronym{PRISMA} guidelines and the \acronym{PICOC} framework.
+\acronym{PRISMA} guidelines \cite{page2021prisma} and the \acronym{PICOC}
+framework \cite{kitchenham2007guidelines}.
 
 \section{Review Identification}
 
@@ -621,8 +1024,8 @@ approximation, smoothing, or auxiliary objectives) in deep learning scenarios.
 \section{The PICOC Framework}
 
 To precisely define the scope of the search, the \acronym{PICOC} framework
-(Population, Intervention, Comparison, Outcome, Context) was utilized. Details
-are presented in Table~\ref{tab:picoc}.
+(Population, Intervention, Comparison, Outcome, Context) was utilized
+\cite{kitchenham2007guidelines}. Details are presented in Table~\ref{tab:picoc}.
 
 \begin{table}[ht]
 	\fcmtcaption{Definition of the review scope using the PICOC framework.}\label{tab:picoc}
@@ -706,7 +1109,7 @@ considered in the Google Scholar query.
 \subsection{Snowballing Strategy}
 
 To complement the database search and ensure comprehensive coverage, a
-snowballing procedure will be applied:
+snowballing procedure will be applied \cite{wohlin2014guidelines}:
 \begin{itemize}
 	\item \textbf{Forward Snowballing:} Reviewing papers that cite seminal works identified in the supervisor's recommendations (e.g., \emph{GradNorm}, \emph{MAML}, \emph{Self-Paced Learning}) to identify recent advancements.
 	\item \textbf{Backward Snowballing:} Examining the reference lists of included primary studies to identify foundational papers or missed relevant studies.
@@ -750,7 +1153,9 @@ followed by full-text review.
 \input{appendices/meta_weighting_eggholder_u1}
 \input{appendices/cifar100_model_size_curriculum_wandb}
 \input{appendices/roughness_followup_curriculum}
+\input{appendices/teacher_transfer_probe}
 \input{appendices/hierarchy_ablation_curriculum}
+\input{appendices/deep_dive_experiments}
 
 \ppcolophon
 

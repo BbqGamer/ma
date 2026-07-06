@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
-from torchvision.models import resnet18, resnet50
+from torchvision.models import ResNet18_Weights, ResNet50_Weights, resnet18, resnet50
 
 
 @dataclass(frozen=True)
@@ -136,12 +136,14 @@ class CifarResNet(nn.Module):
 
 
 class ResNetClassifier(nn.Module):
-    def __init__(self, arch: str, num_classes: int) -> None:
+    def __init__(self, arch: str, num_classes: int, pretrained_backbone: bool = False) -> None:
         super().__init__()
         if arch == "resnet18":
-            base = resnet18(weights=None)
+            weights = ResNet18_Weights.DEFAULT if pretrained_backbone else None
+            base = resnet18(weights=weights)
         elif arch == "resnet50":
-            base = resnet50(weights=None)
+            weights = ResNet50_Weights.DEFAULT if pretrained_backbone else None
+            base = resnet50(weights=weights)
         else:
             raise ValueError(f"Unsupported ResNet architecture: {arch}")
 
@@ -172,6 +174,7 @@ def build_model(
     dropout: float = 0.0,
     cnn_width_multiplier: float = 1.0,
     cifar_resnet_width_multiplier: float = 1.0,
+    pretrained_backbone: bool = False,
 ) -> nn.Module:
     if model_name == "cnn":
         return SmallCNN(
@@ -188,5 +191,9 @@ def build_model(
             width_multiplier=cifar_resnet_width_multiplier,
         )
     if model_name in {"resnet18", "resnet50"}:
-        return ResNetClassifier(arch=model_name, num_classes=num_classes)
+        return ResNetClassifier(
+            arch=model_name,
+            num_classes=num_classes,
+            pretrained_backbone=pretrained_backbone,
+        )
     raise ValueError(f"Unsupported model: {model_name}")

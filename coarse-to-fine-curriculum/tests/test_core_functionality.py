@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
-
-import numpy as np
-import pandas as pd
-import torch
 
 from ctf.hierarchy import compute_hierarchy
 from ctf.models import build_model
+import numpy as np
+import pandas as pd
 from scripts.analyze_pareto import add_baseline_thresholds, add_pareto_columns, normalized_auc
-from scripts.plan_figure11_resnet18 import parse_args as parse_plan_args
+from scripts.analyze_teacher_hierarchy_suite import condition_label, summarize_suite
 from scripts.plan_figure11_resnet18 import build_command
+from scripts.plan_figure11_resnet18 import parse_args as parse_plan_args
+from scripts.plan_teacher_hierarchy_suite import build_plan
+from scripts.plan_teacher_hierarchy_suite import parse_args as parse_teacher_plan_args
+import torch
 from train_coarse_to_fine import (
     build_curriculum_schedule,
     classification_metrics_from_confusion,
@@ -24,6 +26,7 @@ from train_coarse_to_fine import (
     parse_weight_list,
     random_permutation_hierarchy,
     seed_everything,
+    teacher_embedding_distance,
 )
 
 
@@ -137,6 +140,32 @@ class LossAndMetricTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_weight_list("1,0", 2)
 
+    def test_teacher_embedding_distance_uses_class_prototypes(self) -> None:
+        class DummyTeacher(torch.nn.Module):
+            def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+                return x
+
+        features = torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.9, 0.1],
+                [0.0, 1.0],
+                [0.1, 0.9],
+            ]
+        )
+        labels = torch.tensor([0, 0, 1, 1])
+        loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(features, labels), batch_size=2)
+        dist = teacher_embedding_distance(DummyTeacher(), loader, num_classes=2, device=torch.device("cpu"))
+        self.assertEqual(dist.shape, (2, 2))
+        self.assertAlmostEqual(float(dist[0, 0]), 0.0)
+        self.assertAlmostEqual(float(dist[1, 1]), 0.0)
+        self.assertGreater(float(dist[0, 1]), 0.8)
+
+    def test_build_model_supports_pretrained_resnet_backbone(self) -> None:
+        model = build_model("resnet18", (3, 32, 32), 10, pretrained_backbone=True)
+        output = model(torch.randn(2, 3, 32, 32))
+        self.assertEqual(output.shape, (2, 10))
+
 
 class RoughnessProbeTests(unittest.TestCase):
     def test_roughness_probe_returns_expected_keys(self) -> None:
@@ -235,6 +264,65 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in schedule], ["level_1_2clusters", "fine_tune"])
         self.assertEqual(schedule[0]["epochs"], 7)
         self.assertTrue(schedule[0]["adaptive"])
+
+    def test_hard_to_easy_schedule_reverses_intermediate_levels(self) -> None:
+        levels = [
+            [[0, 1, 2, 3]],
+            [[0, 1], [2, 3]],
+            [[0], [1], [2], [3]],
+        ]
+        schedule = build_curriculum_schedule(
+            num_classes=4,
+            hierarchy_levels=levels,
+            curriculum_epochs=12,
+            total_epochs=20,
+            policy="fixed",
+            curriculum_order="hard_to_easy",
+        )
+        self.assertEqual(schedule[0]["name"], "level_1_2clusters")
+        self.assertEqual(schedule[-1]["name"], "fine_tune")
+
+
+class TeacherHierarchySuiteTests(unittest.TestCase):
+    def test_teacher_suite_condition_label_detects_all_conditions(self) -> None:
+        self.assertEqual(condition_label("teacher-cifar100-cnn-w0.5-seed42-baseline", {"mode": "baseline"}), "baseline")
+        self.assertEqual(condition_label("teacher-cifar100-cnn-w0.5-seed42-self-curr20", {"mode": "curriculum", "distance_source": "classifier_weights"}), "self")
+        self.assertEqual(condition_label("teacher-cifar100-cnn-w0.5-seed42-teacher-curr20", {"mode": "curriculum", "distance_source": "teacher_embeddings"}), "teacher")
+        self.assertEqual(condition_label("teacher-cifar100-cnn-w0.5-seed42-teacher-anti-curr20", {"mode": "curriculum", "distance_source": "teacher_embeddings", "curriculum_order": "hard_to_easy"}), "teacher_anti")
+        self.assertEqual(condition_label("teacher-cifar100-cnn-w0.5-seed42-random1001-curr20", {"mode": "curriculum", "distance_source": "random_permutation"}), "random")
+
+    def test_teacher_suite_summary_aggregates_random_and_teacher_rows(self) -> None:
+        runs = pd.DataFrame(
+            [
+                {"dataset": "cifar100", "model_label": "cnn_w0.5", "seed": 42, "condition": "baseline", "curriculum_epochs": np.nan, "best_test_acc": 0.35, "final_test_acc": 0.32, "auc_test_acc": 0.30},
+                {"dataset": "cifar100", "model_label": "cnn_w0.5", "seed": 42, "condition": "self", "curriculum_epochs": 20, "best_test_acc": 0.375, "final_test_acc": 0.33, "auc_test_acc": 0.28},
+                {"dataset": "cifar100", "model_label": "cnn_w0.5", "seed": 42, "condition": "teacher", "curriculum_epochs": 20, "best_test_acc": 0.392, "final_test_acc": 0.35, "auc_test_acc": 0.31},
+                {"dataset": "cifar100", "model_label": "cnn_w0.5", "seed": 42, "condition": "teacher_anti", "curriculum_epochs": 20, "best_test_acc": 0.36, "final_test_acc": 0.325, "auc_test_acc": 0.27},
+                {"dataset": "cifar100", "model_label": "cnn_w0.5", "seed": 42, "condition": "random", "curriculum_epochs": 20, "best_test_acc": 0.356, "final_test_acc": 0.321, "auc_test_acc": 0.26},
+                {"dataset": "cifar100", "model_label": "cnn_w0.5", "seed": 42, "condition": "random", "curriculum_epochs": 20, "best_test_acc": 0.362, "final_test_acc": 0.324, "auc_test_acc": 0.265},
+            ]
+        )
+        curriculum, paired, aggregate = summarize_suite(runs)
+        self.assertEqual(len(curriculum), 5)
+        self.assertEqual(len(paired), 1)
+        pair = paired.iloc[0]
+        self.assertAlmostEqual(pair["teacher_best_gain"], 0.042)
+        self.assertAlmostEqual(pair["random_mean_best_gain"], 0.009)
+        self.assertAlmostEqual(pair["teacher_minus_random_mean_best_gain"], 0.033)
+        methods = set(aggregate["method"])
+        self.assertIn("Teacher hierarchy", methods)
+        self.assertIn("Random hierarchy mean", methods)
+
+    def test_teacher_plan_builds_expected_run_ids(self) -> None:
+        args = parse_teacher_plan_args([])
+        script_lines, manifest_rows = build_plan(args)
+        script = "\n".join(script_lines)
+        self.assertIn("EXPERIMENT=teacher_hierarchy_suite", script)
+        self.assertIn("TEACHER_HIERARCHY_SPECS=cifar100:cnn:0.5:1.0:20:100", script)
+        run_ids = {row["run_id"] for row in manifest_rows}
+        self.assertIn("teacher-cifar100-cnn-w0.5-seed42-baseline", run_ids)
+        self.assertIn("teacher-cifar100-cnn-w0.5-seed42-teacher-curr20", run_ids)
+        self.assertIn("teacher-cifar100-cnn-w0.5-seed44-random1003-curr20", run_ids)
 
 
 class ParetoAnalysisTests(unittest.TestCase):

@@ -106,7 +106,13 @@ python train_coarse_to_fine.py \
 --model cnn|resnet18|resnet50
 --epochs INT
 --curriculum_epochs INT
---distance_source classifier_weights|confusion
+--distance_source classifier_weights|confusion|random_permutation|teacher_embeddings
+--teacher_run_dir PATH
+--teacher_checkpoint_path PATH
+--teacher_model cnn|cifar_resnet8|...|resnet18|resnet50
+--teacher_pretrained_source none|torchvision_imagenet
+--teacher_embedding_split train|val|test
+--curriculum_order easy_to_hard|hard_to_easy
 --batch_size INT
 --lr FLOAT
 --weight_decay FLOAT
@@ -287,6 +293,104 @@ capped to `[2, 12]`. Set `NUM_WORKERS` explicitly to override.
 
 The entrypoint always attempts to stop the Runpod pod at exit when `RUNPOD_POD_ID` is set,
 using `runpodctl stop pod $RUNPOD_POD_ID`.
+
+### Teacher hierarchy suite (external teacher + anti-curriculum control)
+
+To compare:
+- self-derived hierarchy,
+- teacher-embedding hierarchy,
+- random hierarchy,
+- teacher anti-curriculum,
+
+set:
+
+```bash
+EXPERIMENT=teacher_hierarchy_suite
+TEACHER_RUN_DIR=/runpod-volume/teachers/cifar100_resnet18_strong
+# or TEACHER_CHECKPOINT_PATH + TEACHER_MODEL
+# or TEACHER_PRETRAINED_SOURCE=torchvision_imagenet with TEACHER_MODEL=resnet18
+TEACHER_EMBEDDING_SPLIT=val
+TEACHER_HIERARCHY_SPECS=cifar100:cnn:0.5:1.0:20:100,cifar100:cnn:1.0:1.0:10:100,cifar100:cifar_resnet8:1.0:1.0:20:100
+TEACHER_HIERARCHY_SEEDS=42,43,44
+TEACHER_HIERARCHY_RANDOM_SEEDS=1001,1002,1003
+WANDB=1
+WANDB_PROJECT=coarse-to-fine-curriculum
+WANDB_GROUP=teacher-hierarchy-suite
+WANDB_TAGS=runpod,teacher-hierarchy,anti-curriculum
+```
+
+For a one-off teacher probe where the container will stop immediately afterward,
+you can auto-export the hierarchy directly inside the baseline run itself:
+
+```bash
+EXPORT_TEACHER_HIERARCHY=1
+EXPORT_TEACHER_HIERARCHY_SPLIT=val
+# optional explicit destination:
+# EXPORT_TEACHER_HIERARCHY_DIR=/runpod-volume/teachers/cifar100_resnet18_teacher_hierarchy
+```
+
+This suite runs baseline, self hierarchy, teacher hierarchy, random hierarchy,
+and teacher anti-curriculum for each configured spec.
+
+For the strongest apples-to-apples follow-up against the previous weak-hierarchy
+appendix, use the known CIFAR-100 `cnn_w0.5` setup:
+
+```bash
+python scripts/plan_teacher_hierarchy_suite.py
+bash teacher_hierarchy_suite_w0_5.sh
+```
+
+This generates a 3-seed suite with:
+- baseline,
+- self hierarchy (previous weak hierarchy source),
+- teacher hierarchy,
+- teacher anti-curriculum,
+- three random hierarchies per seed,
+
+all on `cifar100:cnn:0.5:1.0:20:100`.
+
+After the runs finish, write the comparison table with:
+
+```bash
+python scripts/analyze_teacher_hierarchy_suite.py /runpod-volume/runs
+```
+
+This produces `analysis/teacher_hierarchy_suite/comparison_table.csv` and a
+matching `REPORT.md` with thesis-friendly best-accuracy / final-accuracy / AUC
+comparisons.
+
+If you do not already have a saved CIFAR-100 teacher checkpoint, use a
+single-container bootstrap run:
+
+```bash
+EXPERIMENT=teacher_bootstrap_suite
+TEACHER_BOOTSTRAP_RUN_ID=teacher-cifar100-resnet18-bootstrap
+TEACHER_BOOTSTRAP_DATASET=cifar100
+TEACHER_BOOTSTRAP_MODEL=resnet18
+TEACHER_BOOTSTRAP_EPOCHS=30
+TEACHER_BOOTSTRAP_PRETRAINED_BACKBONE=1
+TEACHER_HIERARCHY_SPECS=cifar100:cnn:0.5:1.0:20:100
+TEACHER_HIERARCHY_SEEDS=42,43,44
+TEACHER_HIERARCHY_RANDOM_SEEDS=1001,1002,1003
+```
+
+This first trains and saves a ResNet-18 teacher baseline with checkpoints,
+optionally exports its hierarchy, then immediately reuses that saved run as the
+teacher source for the full multi-seed comparison suite. The whole workflow stays
+inside `entrypoint.sh`, so it is suitable for a single Runpod env file.
+
+If you do not have a CIFAR-100 teacher yet and want the simplest fallback
+without a learned teacher run, use:
+
+```bash
+TEACHER_PRETRAINED_SOURCE=torchvision_imagenet
+TEACHER_MODEL=resnet18
+```
+
+This uses an ImageNet-pretrained torchvision backbone as the teacher for
+embedding-based hierarchy construction. It is convenient, but less direct than a
+strong CIFAR-100 teacher, so treat it as a pragmatic baseline rather than an
+ideal match to Weinshall.
 
 For shapes:
 

@@ -4,11 +4,12 @@
 
 \section{Purpose}
 
-This appendix summarizes the first CIFAR-100 model-size study for the
-coarse-to-fine curriculum learning reproduction. The main question was whether
-the curriculum remains useful as the model becomes larger or architecturally
-stronger. A secondary goal was to check whether macro-F1, top-5 accuracy,
-hierarchy-aware scores, and calibration tell the same story as top-1 accuracy.
+This appendix summarizes the first CIFAR-100 \cite{krizhevsky2009learning}
+model-size study for the coarse-to-fine curriculum learning reproduction. The
+main question was whether the curriculum remains useful as the model becomes
+larger or architecturally stronger. A secondary goal was to check whether
+macro-F1, top-5 accuracy, hierarchy-aware scores, and calibration tell the same
+story as top-1 accuracy.
 
 The runs are best read as a screening study. They show where the curriculum is
 promising and where it is not, but they do not by themselves settle questions of
@@ -25,9 +26,9 @@ aggregation.
 The common training protocol was:
 
 \begin{itemize}
-    \item dataset: CIFAR-100,
+    \item dataset: CIFAR-100 \cite{krizhevsky2009learning},
     \item seed: 42,
-    \item optimizer: Adam,
+    \item optimizer: Adam \cite{kingma2015adam},
     \item learning rate: 0.001,
     \item scheduler: none,
     \item batch size: 128,
@@ -37,8 +38,9 @@ The common training protocol was:
 \end{itemize}
 
 Each model configuration was run as a Figure-11-style sweep consisting of one
-baseline and five curriculum runs. The omitted length 50 was intentionally not
-used in this study, because earlier runs suggested that very long hard curricula
+baseline and five curriculum runs tracked in Weights \& Biases
+\cite{biewald2020experiment}. The omitted length 50 was intentionally not used
+in this study, because earlier runs suggested that very long hard curricula
 mostly delay fine-label specialization.
 
 The analyzed model ladder consisted of:
@@ -46,8 +48,9 @@ The analyzed model ladder consisted of:
 \begin{itemize}
     \item width-scaled CNNs: \texttt{cnn\_w0.5}, \texttt{cnn\_w1},
           \texttt{cnn\_w2}, and \texttt{cnn\_w4},
-    \item CIFAR-style ResNets with depths 8, 20, 32, and 56,
-    \item ImageNet-style ResNet adapted to CIFAR: \texttt{resnet18}.
+    \item CIFAR-style ResNets with depths 8, 20, 32, and 56 \cite{he2016deep},
+    \item ImageNet-style ResNet adapted to CIFAR: \texttt{resnet18}
+          \cite{he2016deep}.
 \end{itemize}
 
 The \texttt{cnn\_w0.5} job appears to have been restarted several times on
