@@ -1,0 +1,141 @@
+\chapter{Systematic Literature Review Protocol}
+\chaptermark{SLR Protocol}{}
+
+This chapter presents the protocol for the Systematic Literature Review
+(\acronym{SLR}) which serves as the foundation for the research component of
+this thesis. The protocol has been developed in accordance with the
+\acronym{PRISMA} guidelines \cite{page2021prisma} and the \acronym{PICOC}
+framework \cite{kitchenham2007guidelines}.
+
+\section{Review Identification}
+
+The objective of this review is to synthesize current methodologies that
+utilize \termdef{Meta-Optimization} to dynamically schedule loss functions
+representing decomposed sub-tasks of varying difficulty (e.g., via function
+approximation, smoothing, or auxiliary objectives) in deep learning scenarios.
+
+\section{The PICOC Framework}
+
+To precisely define the scope of the search, the \acronym{PICOC} framework
+(Population, Intervention, Comparison, Outcome, Context) was utilized
+\cite{kitchenham2007guidelines}. Details are presented in Table~\ref{tab:picoc}.
+
+\begin{table}[ht]
+	\fcmtcaption{Definition of the review scope using the PICOC framework.}\label{tab:picoc}
+	\centering\footnotesize%
+	\begin{tabular}{l >{\rightskip\fill}p{10cm}}
+		\toprule
+		Component             & Definition                                                                                                                                                               \\
+		\midrule
+		\textbf{P}opulation   & Deep Neural Networks (\acronym{DNN}) in Multi-Task Learning (\acronym{MTL}) settings, considering both hard and soft parameter sharing architectures.                    \\
+		\textbf{I}ntervention & Adaptive Curriculum Learning (e.g., Self-Paced Learning, RL-based teachers) and Meta-Learning based loss reweighting (e.g., MAML, Learning to Reweight).                 \\
+		\textbf{C}omparison   & 1. Static heuristics (Predefined curricula). \newline 2. Standard \acronym{MTL} baselines (Uniform weighting). \newline 3. Heuristic dynamic weighting (e.g., GradNorm). \\
+		\textbf{O}utcome      & \textbf{Primary:} Mitigation of Negative Transfer, Generalization performance. \newline \textbf{Secondary:} Optimization stability, Convergence speed.                   \\
+		\textbf{C}ontext      & Machine Learning research (excluding purely psychological curriculum studies without algorithmic implementation).                                                        \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\section{Research Questions (RQs)}
+
+The following research questions have been defined to guide the data extraction
+process:
+
+\begin{description}
+	\item[RQ1 (Curriculum)] How do adaptive approaches (e.g., Self-Paced Learning,
+	      RL-based teachers) differ from static heuristics in defining training
+	      schedules?
+	\item[RQ2 (Multi-Task)] What strategies are employed to mitigate negative transfer
+	      (e.g., gradient conflict resolution) in hard vs. soft parameter sharing
+	      architectures?
+	\item[RQ3 (Meta-Optimization)] How are meta-learning algorithms (e.g., MAML,
+	      reweighting) applied to optimize loss weights or data selection dynamically?
+\end{description}
+
+\section{Search Strategy}
+
+The search strategy relies on the intersection of three conceptual blocks:
+\emph{Curriculum Learning}, \emph{Meta-Optimization}, and \emph{Multi-Task
+	Learning}. Below are the specific queries designed for scientific databases.
+
+\subsection{Scopus / Web of Science}
+
+This is the primary source due to its broad indexing coverage.
+
+\begin{verbatim}
+TITLE-ABS-KEY (
+  ("curriculum learning" OR "self-paced learning" OR "loss weighting"
+   OR "adaptive weighting" OR "dynamic weighting")
+  AND ("meta-learning" OR "meta-optimization" OR "learning to weight"
+   OR "gradient-based" OR "differentiable" OR "automated")
+  AND ("multi-task" OR "multi-objective" OR "auxiliary learning"
+   OR "multi-loss" OR "negative transfer")
+) AND ( DOCTYPE(ar) OR DOCTYPE(cp) ) AND NOT ( "reinforcement learning" )
+\end{verbatim}
+
+\subsection{IEEE Xplore}
+
+A stricter syntax is required here (using the \texttt{"All Metadata"}
+operator).
+
+\begin{verbatim}
+("All Metadata":"curriculum learning" OR "All Metadata":"self-paced learning"
+ OR "All Metadata":"loss weighting" OR "All Metadata":"adaptive weighting"
+ OR "All Metadata":"dynamic weighting")
+AND ("All Metadata":"meta-learning" OR "All Metadata":"meta-optimization"
+ OR "All Metadata":"learning to weight" OR "All Metadata":"gradient-based"
+ OR "All Metadata":"differentiable" OR "All Metadata":"automated")
+AND ("All Metadata":"multi-task" OR "All Metadata":"multi-objective"
+ OR "All Metadata":"auxiliary learning" OR "All Metadata":"multi-loss")
+\end{verbatim}
+
+\subsection{Google Scholar}
+
+Due to limitations in boolean logic handling, the search will be conducted
+using shorter phrases:
+\begin{verbatim}
+"dynamic weighting" "multi task" "curriculum learning"
+\end{verbatim}
+Due to the large number of hits, only papers published after 2023 were
+considered in the Google Scholar query.
+
+\subsection{Snowballing Strategy}
+
+To complement the database search and ensure comprehensive coverage, a
+snowballing procedure will be applied \cite{wohlin2014guidelines}:
+\begin{itemize}
+	\item \textbf{Forward Snowballing:} Reviewing papers that cite seminal works identified in the supervisor's recommendations (e.g., \emph{GradNorm}, \emph{MAML}, \emph{Self-Paced Learning}) to identify recent advancements.
+	\item \textbf{Backward Snowballing:} Examining the reference lists of included primary studies to identify foundational papers or missed relevant studies.
+\end{itemize}
+
+\section{Selection Criteria and Data Extraction}
+
+The selection process will be conducted in two stages: title/abstract screening
+followed by full-text review.
+
+\begin{figure}[t]
+	\centering
+	\resizebox{0.95\textwidth}{!}{
+		\input{figures/prisma_flow.tex}
+	}
+	\fcmfcaption{Schematic of the PRISMA selection process.}\label{rys:prisma}
+\end{figure}
+
+\paragraph{Inclusion Criteria.} The review will include papers that:
+\begin{enumerate}
+	\item Propose a method for \emph{automating} the training process (adaptive
+	      curriculum or loss weighting).
+	\item Address Multi-Task Learning challenges, specifically Negative Transfer or
+	      parameter sharing.
+	\item Utilize Meta-Learning, Self-Paced Learning, or Reinforcement Learning
+	      approaches.
+	\item Were published between 2017 and 2025.
+\end{enumerate}
+
+\paragraph{Data Extraction.} The following information will be extracted from selected papers:
+\begin{itemize}
+	\item \textbf{Metadata:} Title, year, publication venue.
+	\item \textbf{Methodology:} Type of Curriculum (Static/Adaptive/SPL) and Optimization strategy.
+	\item \textbf{Architecture:} Hard vs. Soft parameter sharing.
+	\item \textbf{Results:} Mitigation of negative transfer and generalization improvements.
+\end{itemize}

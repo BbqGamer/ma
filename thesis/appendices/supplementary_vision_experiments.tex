@@ -1,0 +1,89 @@
+\chapter{Supplementary Vision Experiments}
+\label{app:supplementary-vision-experiments}
+
+This appendix keeps the vision-track details that are useful for reproducibility
+and auditability but are too detailed for the main argument. The main empirical
+claims are presented in Chapter~\ref{chap:vision-curriculum}; this appendix
+records the protocol choices and secondary diagnostics behind them.
+
+\section{CIFAR-100 model-size study}
+\label{app:cifar100-model-size-curriculum}
+
+The screening study used CIFAR-100 with one baseline and five fixed curriculum
+lengths for each model configuration. Most runs used seed 42, with repeated
+baseline runs averaged where available. The common training budget was 100
+epochs, Adam with learning rate 0.001, and curriculum lengths of 5, 10, 20, 30,
+and 40 epochs.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+Model & Base & Curr5 & Curr10 & Curr20 & Curr30 & Curr40 \\
+\midrule
+\texttt{cnn\_w0.5} & 34.78 & 37.57 & 37.83 & 37.96 & 37.29 & 36.34 \\
+\texttt{cnn\_w1} & 38.49 & 41.88 & 42.11 & 40.70 & 38.20 & 37.08 \\
+\texttt{cnn\_w2} & 42.56 & 44.72 & 42.50 & 40.30 & 38.24 & 38.28 \\
+\texttt{cnn\_w4} & 44.63 & 44.47 & 43.19 & 40.41 & 39.50 & 38.25 \\
+\texttt{resnet18} & 68.76 & 68.84 & 69.15 & 69.37 & 68.49 & 68.71 \\
+\bottomrule
+\end{tabular}
+\caption{Selected CIFAR-100 curriculum-length results. Values are best test
+accuracies in percent. The table supports the main-text claim that the best
+curriculum length shortens as model capacity grows.}
+\label{tab:app-cifar100-lengths-compact}
+\end{table}
+
+Secondary metrics such as macro-F1, top-5 accuracy, calibration error, and
+hierarchy-aware scores generally followed the accuracy result only loosely.
+Therefore the main thesis treats top-1 accuracy as the primary measure and uses
+secondary metrics only as diagnostics.
+
+\section{Adaptive schedules, dataset controls, and roughness}
+\label{app:roughness-followup-curriculum}
+
+The follow-up repeated important CIFAR-100 configurations over seeds 42, 43, and
+44 and added adaptive plateau schedules. The adaptive rule advanced from a
+coarse stage when fine-label validation accuracy stopped improving after a
+minimum stage length or when a maximum stage length was reached. This rule was
+stable to run, but it often spent too many epochs in coarse stages.
+
+Dataset controls used CIFAR-10, Fashion-MNIST, and Tiny ImageNet. CIFAR-10
+showed smaller gains than CIFAR-100, Fashion-MNIST was mostly neutral or
+negative, and Tiny ImageNet depended strongly on model and optimizer setup. The
+roughness and sharpness probes were treated as diagnostics only. They sometimes
+supported a flatter-minima interpretation, but the pattern was not consistent
+enough to establish a mechanism.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+Diagnostic & Main observation & Thesis use \\
+\midrule
+Adaptive schedule & often too much coarse training & explains fixed-schedule advantage \\
+Dataset controls & CIFAR-100 strongest & shows structure matters \\
+Trajectory AUC & usually negative & peak gain is not faster training \\
+Sharpness/Hessian & mixed signs & no strong mechanism claim \\
+\bottomrule
+\end{tabular}
+\caption{Supplementary interpretation of the vision follow-up diagnostics.}
+\label{tab:app-vision-diagnostic-summary}
+\end{table}
+
+\section{Random-hierarchy ablation}
+\label{app:hierarchy-ablation-curriculum}
+
+The random-hierarchy ablation preserved the learned hierarchy shape and cluster
+sizes but randomly reassigned CIFAR-100 classes to clusters. For each training
+seed, three random hierarchy seeds were evaluated. This made the random control
+stronger than simply comparing against an arbitrary hand-made hierarchy: the
+amount of label coarsening was held fixed, and only the grouping information was
+destroyed.
+
+The learned hierarchy beat the random mean for all three training seeds. At the
+same time, the random mean was above the direct baseline, which is why the main
+text separates a general coarse-label warm-up effect from the additional benefit
+of meaningful hierarchy structure.

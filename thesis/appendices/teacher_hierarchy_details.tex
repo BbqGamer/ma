@@ -1,0 +1,74 @@
+\chapter{Teacher and Hierarchy Control Details}
+\label{app:teacher-hierarchy-details}
+\label{app:teacher-transfer-probe}
+
+This appendix records the compact details behind the teacher-derived hierarchy
+and reverse-order control summarized in Chapter~\ref{chap:vision-curriculum}.
+
+\section{Transfer-teacher probe}
+
+The teacher probe used CIFAR-100 with a ResNet-18 initialized from ImageNet
+weights and fine-tuned for 30 epochs using SGD, learning rate 0.01, weight decay
+\(5\times 10^{-4}\), and data augmentation. The best test accuracy was in the
+77.65\%--78.14\% range across the two relevant probes, substantially higher
+than the earlier from-scratch ResNet-18 baseline used in the model-size study.
+The validation embeddings from this teacher were used as the distance source for
+a learned class hierarchy.
+
+The teacher hierarchy is not interpreted as a human ontology. It is a
+representation-induced class partition. Some groups that look semantically loose
+to a human can still be useful if they reflect visual statistics in CIFAR-100,
+such as shape, texture, background, object scale, or typical viewpoint.
+
+\section{Reverse-order hierarchy control}
+
+The anti-curriculum condition in the main text is a reverse-order hierarchy
+control. It uses the same teacher-derived hierarchy and the same marginalized
+coarse-label loss as the regular curriculum, but it visits the non-singleton
+hierarchy levels in reverse order before switching to fine labels.
+
+For a typical teacher hierarchy, the order is approximately:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Regime & Stage order before fine-tuning & Meaning \\
+\midrule
+Easy-to-hard & 3--5 clusters $\rightarrow$ 23--24 clusters & coarse to less coarse \\
+Reverse-order & 23--24 clusters $\rightarrow$ 3--5 clusters & less coarse to coarse \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Both regimes then finish with ordinary 100-class fine-label training. Therefore
+the reverse-order condition is not a wrong-label control and not a pure negative
+control. Its early performance can be relatively high because 23--24 clusters on
+CIFAR-100 correspond to small class bundles, which are much closer to the final
+100-way task than a 3--5 cluster level.
+
+\section{Per-seed hierarchy-control results}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{rrrrrr}
+\toprule
+Seed & Baseline & Random mean & Reverse-order & Self hierarchy & Teacher hierarchy \\
+\midrule
+42 & 35.53 & 36.41 & 38.10 & 37.15 & 37.48 \\
+43 & 35.37 & 36.47 & 37.21 & 38.55 & 38.06 \\
+44 & 35.23 & 36.16 & 36.99 & 37.59 & 37.52 \\
+\midrule
+Mean & 35.38 & 36.35 & 37.43 & 37.76 & 37.69 \\
+\bottomrule
+\end{tabular}
+\caption{Per-seed best test accuracy for the hierarchy-control suite. Values are
+percentages. Random mean averages the random hierarchy seeds within each
+training seed.}
+\label{tab:app-teacher-control-seeds-compact}
+\end{table}
+
+The per-seed table supports the main interpretation: random coarsening is a real
+positive control, but structured hierarchies remain stronger on average. The
+teacher hierarchy is competitive with the self-derived hierarchy but does not
+clearly dominate it in peak accuracy.

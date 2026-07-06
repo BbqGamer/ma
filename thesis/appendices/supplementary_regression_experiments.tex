@@ -1,0 +1,88 @@
+\chapter{Supplementary Regression Experiments}
+\label{app:supplementary-regression-experiments}
+
+This appendix keeps the regression-track details needed to audit the main
+claims without reproducing the full run logs. The detailed source artifacts and
+analysis scripts remain in the repository; the compiled thesis keeps only the
+protocol and summary information that supports Chapter~\ref{chap:regression-curriculum}.
+
+\section{Hyperparameter sweep baseline}
+\label{app:sweep-pack-v1}
+
+Before curriculum comparisons, each benchmark function received its own Optuna
+search over MLP, Fourier-feature, and SIREN architectures. This was necessary to
+avoid comparing curriculum runs against under-tuned direct baselines. The sweep
+selected different architecture families for different functions, which justified
+using per-function best configurations in the fixed continuation benchmark.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrl}
+\toprule
+Function & Best validation loss & Parameters & Best architecture \\
+\midrule
+\texttt{ackley} & 0.069 & 1,185 & MLP \\
+\texttt{bukin} & 57.9 & 469 & MLP \\
+\texttt{eggholder} & 1.22e4 & 4,545 & Fourier \\
+\texttt{franke} & 1.77e-4 & 1,265 & MLP \\
+\texttt{levy} & 0.376 & 3,745 & MLP \\
+\texttt{peaks} & 0.010 & 737 & SIREN \\
+\bottomrule
+\end{tabular}
+\caption{Representative best configurations from the baseline sweep. The exact
+numbers are used only to establish that the direct baselines were tuned rather
+than manually chosen defaults.}
+\label{tab:app-regression-sweep-summary}
+\end{table}
+
+\section{v3 ratio-constrained dataset setting}
+\label{app:sweep-pack-v3-setup}
+
+The stricter v3 setting used 20,000 generated samples per function, split into
+10,000 train and 10,000 test samples, with an internal 80/20 train--validation
+split inside the training file. Training labels included controlled Gaussian
+noise, and model searches enforced a parameter-to-sample ratio constraint. This
+setting made the regression experiments less vulnerable to overlarge models
+memorizing small synthetic datasets.
+
+The active training pipelines logged validation loss, final test loss where
+available, gradient and stability diagnostics, configuration files, and dataset
+references to MLflow. These artifacts are the source for the regression figures
+and tables in the main text.
+
+\section{Fixed continuation benchmark}
+\label{app:curr-vs-single-v1}
+
+The fixed benchmark compared direct hard-target training with a fixed
+continuation schedule under two budgets: equal epochs and equal wall-clock time.
+It used eight functions and three random seeds for each method/budget
+combination. The main text reports the function-level deltas and quality/runtime
+trade-off. The essential protocol constraints were:
+
+\begin{itemize}
+    \item same train/test data and hard-validation metric per function,
+    \item same tuned architecture family and optimizer configuration per
+          function,
+    \item only the training strategy changed between direct and curriculum runs,
+    \item runtime was recorded separately from final quality.
+\end{itemize}
+
+This design is why the negative runtime result is meaningful: curriculum was not
+slower because it used a larger model, but because the staged training procedure
+itself added cost.
+
+\section{Meta-weighting benchmark}
+\label{app:meta-weighting-eggholder-u1}
+
+The reduced meta-weighting benchmark used \texttt{eggholder} as the difficult
+representative target and tested one-step unrolled meta-updates over
+continuation losses. The grid covered four seeds, three noise levels, several
+model and meta learning rates, and \(1,2,3,5\) losses. All 288 runs completed.
+
+The main text reports that all multi-loss settings were negative on average
+against the one-loss hard-target baseline. The supplementary point is that the
+method was operationally feasible and produced interpretable schedules, but the
+outer-loop signal was too noisy to make the result robust across seeds and noise
+levels. This is why meta-weighting is treated as future work rather than a
+successful replacement for fixed schedules.
