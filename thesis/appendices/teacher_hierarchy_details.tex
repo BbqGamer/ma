@@ -12,8 +12,10 @@ weights and fine-tuned for 30 epochs using SGD, learning rate 0.01, weight decay
 \(5\times 10^{-4}\), and data augmentation. The best test accuracy was in the
 77.65\%--78.14\% range across the two relevant probes, substantially higher
 than the earlier from-scratch ResNet-18 baseline used in the model-size study.
-The validation embeddings from this teacher were used as the distance source for
-a learned class hierarchy.
+This is a test-accuracy summary. The word ``validation'' below refers to the
+held-out images used for embedding extraction, not to a claim that validation
+accuracy was higher or lower than test accuracy. The teacher's validation
+embeddings were used as the distance source for a learned class hierarchy.
 
 The teacher hierarchy is not interpreted as a human ontology. It is a
 representation-induced class partition. Some groups that look semantically loose

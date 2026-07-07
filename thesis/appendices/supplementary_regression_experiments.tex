@@ -51,14 +51,34 @@ available, gradient and stability diagnostics, configuration files, and dataset
 references to MLflow. These artifacts are the source for the regression figures
 and tables in the main text.
 
+\begin{table}[h]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}p{0.14\textwidth}p{0.23\textwidth}p{0.25\textwidth}p{0.28\textwidth}@{}}
+\toprule
+Version & Purpose & Data setting & Main use in the thesis \\
+\midrule
+v1 sweep pack & Tune baselines before curriculum comparison & Function-specific sample counts, 5--6 smoothing levels, no ratio constraint & Supplies per-function architectures for the fixed continuation benchmark. \\
+v1 curriculum benchmark & Compare direct and fixed continuation training & Same v1 data, two budget regimes, three seeds & Main evidence for mixed final-loss effects and runtime cost. \\
+v2 ratio sweeps & Check capacity control & 20,000 samples, 3 smoothing levels, 2\% label noise, 10--20 train samples per parameter & Tests whether baseline conclusions survive a parameter-to-data constraint. \\
+v3 ratio sweeps & Stress-test the stricter setting & Same as v2 but 3\% label noise & Source of the MLflow ratio-constrained diagnostics and architecture distribution checks. \\
+\bottomrule
+\end{tabular}
+\caption{Regression experiment versions. The table separates baseline tuning,
+fixed curriculum comparison, and later ratio-constrained checks so that v1, v2,
+and v3 are not read as a single interchangeable experiment.}
+\label{tab:app-regression-version-summary}
+\end{table}
+
 \section{Fixed continuation benchmark}
 \label{app:curr-vs-single-v1}
 
 The fixed benchmark compared direct hard-target training with a fixed
 continuation schedule under two budgets: equal epochs and equal wall-clock time.
 It used eight functions and three random seeds for each method/budget
-combination. The main text reports the function-level deltas and quality/runtime
-trade-off. The essential protocol constraints were:
+combination. The main text reports function-level loss differences and the
+quality/runtime trade-off. The essential protocol constraints were:
 
 \begin{itemize}
     \item same train/test data and hard-validation metric per function,

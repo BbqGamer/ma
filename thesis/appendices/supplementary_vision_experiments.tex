@@ -46,8 +46,12 @@ secondary metrics only as diagnostics.
 The follow-up repeated important CIFAR-100 configurations over seeds 42, 43, and
 44 and added adaptive plateau schedules. The adaptive rule advanced from a
 coarse stage when fine-label validation accuracy stopped improving after a
-minimum stage length or when a maximum stage length was reached. This rule was
-stable to run, but it often spent too many epochs in coarse stages.
+minimum stage length or when a maximum stage length was reached. Two hierarchy
+coverage variants were used. The all-level variant could visit every generated
+non-singleton hierarchy level. The first-level variant used only the first
+non-singleton level, meaning the broadest usable coarse partition after removing
+the trivial root cluster, and then switched to fine labels. This rule was stable
+to run, but it often spent too many epochs in coarse stages.
 
 Dataset controls used CIFAR-10, Fashion-MNIST, and Tiny ImageNet. CIFAR-10
 showed smaller gains than CIFAR-100, Fashion-MNIST was mostly neutral or
@@ -63,7 +67,7 @@ enough to establish a mechanism.
 \toprule
 Diagnostic & Main observation & Thesis use \\
 \midrule
-Adaptive schedule & often too much coarse training & explains fixed-schedule advantage \\
+Adaptive schedule & often too much coarse training & explains best-fixed advantage here \\
 Dataset controls & CIFAR-100 strongest & shows structure matters \\
 Trajectory AUC & usually negative & peak gain is not faster training \\
 Sharpness/Hessian & mixed signs & no strong mechanism claim \\
