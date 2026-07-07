@@ -407,13 +407,13 @@ controlled transition: when should the optimizer be pushed away from the easy
 objective and toward the final target?
 
 \subsection{Pareto Continual Learning}
-Bridging this gap, \citet{lai2025pareto} introduced \textbf{Pareto Continual
-	Learning}, which reformulates the stability-plasticity trade-off (retaining old
+Bridging this gap, \citet{lai2025pareto} introduced Pareto Continual
+	Learning, which reformulates the stability-plasticity trade-off (retaining old
 knowledge vs. learning new tasks) as a Multi-Objective Optimization (MOO)
 problem. Instead of finding a single fixed weight, they learn a set of
 Pareto-optimal solutions conditioned on a preference vector. This allows the
 system to dynamically select the optimal trade-off during inference. Similarly,
-\citet{mao2022metaweighting} proposed \textbf{MetaWeighting}, identifying a
+\citet{mao2022metaweighting} proposed MetaWeighting, identifying a
 critical gap between training loss and generalization loss in MTL. By treating
 task weights as hyperparameters optimized via a bi-level optimization loop
 (meta-learning), MetaWeighting explicitly minimizes generalization loss. This
@@ -427,7 +427,7 @@ maximize final validation performance.
 Meta-learning, or ``learning to learn,'' provides the algorithmic engine to
 automate the curriculum schedule. While early meta-learning focused on learning
 initializations (e.g., MAML \citep{finn2017model}) for few-shot adaptation, the
-field has expanded into \textbf{Meta-Continual Learning (MCL)}.
+field has expanded into Meta-Continual Learning (MCL).
 
 \subsection{Taxonomy of Meta-Continual Frameworks}
 A recent survey by \citet{son2024meta} provides a rigorous taxonomy for the
@@ -435,7 +435,7 @@ intersection of these fields. They distinguish between \textit{Continual
 	Meta-Learning} (learning to learn from a sequence of tasks) and
 \textit{Meta-Continual Learning} (using meta-learning to solve the catastrophic
 forgetting problem). Our research aligns with their definition of
-\textbf{Continual Bi-Level Learning}, where the optimization process itself is
+Continual Bi-Level Learning, where the optimization process itself is
 updated online.
 
 \subsection{Meta-Optimization of Learning Dynamics}
@@ -443,13 +443,13 @@ In this framework, the learning process is split into two loops. The inner loop
 updates model parameters $\theta$ on the current curriculum stage via standard
 gradient descent. The outer loop updates meta-parameters $\phi$ (in our case,
 the loss weights) to minimize a validation loss. Algorithms like
-\textbf{La-MAML} \citep{gupta2020lamaml} employ this structure to learn
+La-MAML \citep{gupta2020lamaml} employ this structure to learn
 per-parameter learning rates that align gradients across sequential tasks.
-\citet{wu2024meta} recently improved upon this with \textbf{VR-MCL}, introducing
+\citet{wu2024meta} recently improved upon this with VR-MCL, introducing
 variance reduction techniques to stabilize the online Hessian approximation
 required for these bi-level updates.
 
-Furthermore, \citet{woo2025meta} extended MCL to \textbf{Neural Fields}
+Furthermore, \citet{woo2025meta} extended MCL to Neural Fields
 (MCL-NF). They demonstrated that meta-learning could efficiently reconstruct
 complex 3D scenes and signals by dynamically modulating the network's capacity,
 a process analogous to the resolution-based curriculum proposed in this thesis.
@@ -629,8 +629,9 @@ control used to reduce that risk.}
 \section{Regression track}
 
 The regression experiments use synthetic benchmark functions with non-convex
-structure. For each function, the training data contain the original target and a
-sequence of Gaussian-smoothed targets. The main baseline is direct training on
+structure. The named functions follow the standard benchmark definitions indexed by
+Surjanovic and Bingham (SFU). For each function, the training data contain the original target and a
+sequence of Gaussian-smoothed targets. \citep{surjanovic2013benchmark} The main baseline is direct training on
 the final, least-smoothed target. Curriculum variants train on a sequence or a
 weighted mixture of smoothed objectives before emphasizing the final target.
 
