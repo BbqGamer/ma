@@ -15,6 +15,7 @@
 \usepackage[OT4]{fontenc}
 \usepackage{graphicx}
 \usepackage{amsmath,amssymb}
+\usepackage[section]{placeins}
 \usepackage{tikz}
 \usetikzlibrary{shapes,arrows,positioning,calc}
 
@@ -82,6 +83,9 @@ curriculum track in image classification, introduced to test whether curricula
 are more effective when intermediate tasks preserve semantic structure. Across
 both tracks, the thesis compares fixed schedules, adaptive schedules, and
 hierarchy variants, and places equal emphasis on positive and negative outcomes.
+Meta-optimization is evaluated as one route to adaptive scheduling, not assumed
+to be the final answer: the experiments find it feasible and interpretable, but
+not yet robust enough to replace tuned direct or fixed-schedule baselines.
 
 The motivation for using two tracks is methodological. A single positive result
 would not be enough to understand curriculum learning, because many mechanisms
@@ -168,9 +172,9 @@ principles. Chapter~\ref{chap:regression-curriculum} presents the
 objective-space regression experiments. Chapter~\ref{chap:vision-curriculum}
 presents the output-space hierarchical curriculum experiments. Chapter~\ref{chap:discussion}
 connects the two empirical tracks and discusses limitations. Detailed
-experimental artifacts are grouped thematically in the appendices: literature
-search protocol, supplementary regression experiments, supplementary vision
-experiments, and teacher/hierarchy control details.
+experimental artifacts are grouped thematically in the appendices: supplementary
+regression experiments, supplementary vision experiments, and teacher/hierarchy
+control details.
 
 \chapter{Background and Related Work}
 \label{chap:literature-review}
@@ -604,7 +608,7 @@ success by itself. This rule prevents an easy but misleading conclusion: a model
 can become very good at a smoothed or coarse task while still failing to improve
 on the target task.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{p{0.28\textwidth}p{0.32\textwidth}p{0.30\textwidth}}
@@ -709,7 +713,7 @@ reasons: it may provide meaningful structure, reduce early-task complexity,
 regularize optimization, or simply delay hard-label training. The methodology is
 therefore designed to separate these explanations where possible.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{p{0.22\textwidth}p{0.30\textwidth}p{0.38\textwidth}}
@@ -837,7 +841,7 @@ continuation variants use multiple target columns corresponding to different
 Gaussian smoothing levels. The hardest level is the original or least-smoothed
 target and is the metric used for final comparison.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.96\textwidth]{figures/regression_benchmark_functions.png}
     \caption{Synthetic regression-task surfaces used in the continuation track.
@@ -887,7 +891,7 @@ functions, and three seeds, for 96 completed runs. Table~\ref{tab:main-regressio
 summarizes the result in the main text; the full report is given in
 Appendix~\ref{app:curr-vs-single-v1}.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{lccc}
@@ -914,7 +918,7 @@ direct training. This means that continuation cannot be treated as a default
 replacement for direct hard-target training. Its value is conditional on task
 geometry and must be weighed against extra computation.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.47\textwidth]{figures/curr_vs_single_quality_delta.png}\hfill
     \includegraphics[width=0.47\textwidth]{figures/curr_vs_single_runtime_median.png}
@@ -934,7 +938,7 @@ The most important point is not the exact magnitude, because the benchmark
 functions have different scales, but the sign pattern: the same curriculum
 protocol helps some surfaces and hurts others.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{lrrl}
@@ -970,7 +974,7 @@ important empirical pattern is that almost all positive-quality cases also sit
 in the expensive region. In other words, continuation sometimes finds a better
 solution, but it does not provide a free optimization shortcut.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.86\textwidth]{figures/deep_regression_quality_runtime_tradeoff.png}
     \caption{Quality--runtime trade-off for the fixed continuation benchmark.
@@ -989,7 +993,7 @@ stricter than the final-loss result. Some cases, especially \texttt{levy}, can
 end with a better curriculum loss but still have worse AUC because the direct
 baseline learns the hard target much earlier.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/regression_hardval_auc_delta.png}
     \caption{Regression trajectory-AUC deltas. The metric is area under the
@@ -1010,7 +1014,7 @@ when the smoothed objectives preserve useful global structure, but it can delay
 or misdirect learning when the continuation path does not lead toward a good
 region for the original target.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.74\textwidth]{figures/deep_regression_seed_delta_heatmap.png}
     \caption{Seed-paired hard-validation loss deltas by function and budget
@@ -1029,7 +1033,7 @@ optimizes that target from the beginning. This is the regression analogue of the
 vision-track AUC result: a curriculum can reach a better peak while still being
 slower over much of the trajectory.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/mlflow_curr_vs_single_global_hardval_seed42.png}
     \caption{Representative hard-validation trajectories from MLflow artifacts
@@ -1046,7 +1050,7 @@ understand whether continuation changes the function learned by the model. The
 artifact view supports the cautious conclusion: continuation changes the
 optimization path, but that change is beneficial only for some target surfaces.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.94\textwidth]{figures/mlflow_curr_vs_single_final_surfaces_seed42.png}
     \caption{Representative learned surfaces for direct and curriculum training.
@@ -1063,7 +1067,7 @@ stagnate until the later stages. This supports the methodological decision to
 judge all regression methods on the final hard target rather than on the current
 curriculum stage.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/mlflow_curriculum_stage_progression_seed42.png}
     \caption{Representative curriculum stage progression from MLflow artifacts.
@@ -1080,7 +1084,7 @@ average. The lesson is not that continuation is useless; rather, a hand-designed
 smoothing path is too weak a guide for a highly rugged objective when evaluated
 against a strong single-target model.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.92\textwidth]{figures/mlflow_eggholder_snapshot_evolution_seed42.png}
     \caption{Snapshot evolution for a representative \texttt{eggholder}
@@ -1117,7 +1121,7 @@ However, the direct hard-target baseline remained strongest on average.
 Table~\ref{tab:main-meta-eggholder-summary} integrates the central result from
 Appendix~\ref{app:meta-weighting-eggholder-u1}.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{lrrr}
@@ -1145,7 +1149,7 @@ attractive despite the negative aggregate result. The meta-optimizer can learn a
 non-trivial schedule over the continuation losses; the problem is that this
 schedule is not reliably better than simply optimizing the hard target directly.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.47\textwidth]{figures/meta_weighting_eggholder_u1_improvement_heatmap.png}\hfill
     \includegraphics[width=0.47\textwidth]{figures/meta_weighting_eggholder_u1_win_rate_vs_baseline.png}
@@ -1155,7 +1159,7 @@ schedule is not reliably better than simply optimizing the hard target directly.
     \label{fig:main-meta-weighting-summary}
 \end{figure}
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.86\textwidth]{figures/meta_weighting_eggholder_u1_best_weight_trajectory.png}
     \caption{Representative learned weight trajectory from a strong
@@ -1173,7 +1177,7 @@ inner updates can produce unstable meta-gradients. A more robust implementation
 would likely need longer unrolls, stronger regularization on the weight
 trajectory, or a schedule parameterization that prevents abrupt changes.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.47\textwidth]{figures/meta_weighting_eggholder_u1_final_val_loss_vs_lr.png}\hfill
     \includegraphics[width=0.47\textwidth]{figures/meta_weighting_eggholder_u1_final_val_loss_vs_noise.png}
@@ -1263,7 +1267,7 @@ supervised task instead. The full table is in
 Appendix~\ref{app:cifar100-model-size-curriculum}; Table~\ref{tab:main-cifar100-capacity}
 keeps the core pattern in the main text.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{lrrrr}
@@ -1304,7 +1308,7 @@ from an easier coarse stage because it cannot separate all fine classes well at
 the beginning. A stronger model may find that same coarse stage unnecessary or
 even harmful because it delays direct optimization of the fine-label objective.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/cifar100_model_size_gain_vs_params.png}
     \caption{CIFAR-100 best curriculum gain as a function of trainable
@@ -1319,7 +1323,7 @@ reasons the adaptive plateau rule is difficult: the optimal amount of coarse
 training is not universal. A rule that waits for a plateau can easily overshoot
 when the model only needs a short warm-up.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/cifar100_model_size_curriculum_lengths.png}
     \caption{CIFAR-100 curriculum-length sensitivity. Longer coarse phases help
@@ -1332,7 +1336,7 @@ accuracy improves, trajectory AUC is often negative. This confirms that the
 screening result is not a speedup result: the curriculum spends part of the
 training budget on a task that is deliberately not the final metric.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.84\textwidth]{figures/cifar100_model_size_auc_gain.png}
     \caption{Trajectory-AUC gain for the best curriculum run per CIFAR-100
@@ -1353,7 +1357,7 @@ whether a short coarse warm-up is enough, rather than forcing the scheduler to
 visit every available hierarchy depth. Table~\ref{tab:main-cifar100-policy}
 summarizes the central comparison from Appendix~\ref{app:roughness-followup-curriculum}.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{lrrr}
@@ -1390,7 +1394,7 @@ therefore reduces manual schedule selection only partially: it still encodes a
 strong assumption about how long coarse training should continue before the
 fine-label objective takes over.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/deep_adaptive_stage_allocation.png}
     \caption{Adaptive curriculum stage allocation. The plateau rule can spend
@@ -1405,7 +1409,7 @@ suite, while adaptive variants are useful mainly when they approximate the
 shorter fixed schedules. This is why the thesis treats adaptive scheduling as an
 open problem rather than a solved contribution, not as a failed idea in general.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/roughness_followup_updated_cifar100_best_acc_gains.png}
     \caption{CIFAR-100 follow-up gains for fixed and adaptive schedules. The
@@ -1422,7 +1426,7 @@ shows this milestone pattern: curriculum runs are often below baseline early,
 then recover after the fine-label phase. The improvement is therefore better
 understood as a different route to a good solution, not as uniform acceleration.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/deep_cifar100_milestone_gains.png}
     \caption{Milestone gains of selected CIFAR-100 curriculum runs. Negative
@@ -1449,7 +1453,7 @@ space where coarse groupings can provide useful intermediate supervision.
 Fashion-MNIST has only ten classes and much less need for a coarse-to-fine
 output curriculum, so the same mechanism has little room to help.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.92\textwidth]{figures/roughness_followup_updated_all_datasets_best_acc_gains.png}
     \caption{Dataset-control gains for the vision follow-up. CIFAR-100 remains
@@ -1466,7 +1470,7 @@ architecture, and schedule are better matched to the dataset. This reinforces
 the thesis-level pattern: curriculum benefits are conditional interactions, not
 standalone properties of a dataset.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/tinyimagenet_resnet18_trajectory.png}
     \caption{Tiny ImageNet ResNet-18 pilot trajectory. The positive curriculum
@@ -1485,7 +1489,7 @@ simple story in which curriculum uniformly improves the classifier. The effect
 is strongest and clearest in peak top-1 accuracy; other metrics provide useful
 context but not a separate universal mechanism.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/deep_cifar100_alt_metric_heatmap.png}
     \caption{Alternative CIFAR-100 metrics for selected curriculum runs.
@@ -1503,7 +1507,7 @@ while Figure~\ref{fig:main-roughness-scatter} relates final diagnostic values to
 accuracy gains. These plots support using roughness as a diagnostic, but not as
 a causal explanation of all curriculum gains.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.47\textwidth]{figures/roughness_followup_cifar100_sharpness_trajectory.png}\hfill
     \includegraphics[width=0.47\textwidth]{figures/roughness_followup_cifar100_hessian_trajectory.png}
@@ -1513,7 +1517,7 @@ a causal explanation of all curriculum gains.
     \label{fig:main-roughness-trajectories}
 \end{figure}
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.47\textwidth]{figures/roughness_followup_gain_vs_final_sharpness.png}\hfill
     \includegraphics[width=0.47\textwidth]{figures/roughness_followup_gain_vs_final_hessian.png}
@@ -1531,7 +1535,7 @@ the learned CIFAR-100 hierarchy for \texttt{cnn\_w0.5} with random hierarchies
 that preserve the same tree shape and cluster sizes. This keeps the amount of
 early label coarsening fixed while destroying the learned class grouping.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{lrrrr}
@@ -1561,7 +1565,7 @@ that the advantage is not an early-speed advantage. Both learned and random
 hierarchies lag the fine-label baseline during the coarse stage, and the learned
 hierarchy wins by recovering to a better peak after the fine-label phase begins.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.82\textwidth]{figures/hierarchy_ablation_gain_comparison.png}
     \caption{Seed-level random-hierarchy ablation. The learned hierarchy beats
@@ -1570,7 +1574,7 @@ hierarchy wins by recovering to a better peak after the fine-label phase begins.
     \label{fig:main-hierarchy-ablation-gain}
 \end{figure}
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.86\textwidth]{figures/hierarchy_ablation_learning_curves.png}
     \caption{Learning curves for learned and random hierarchy controls. The
@@ -1586,15 +1590,42 @@ clusters. Figure~\ref{fig:main-cifar100-hierarchy-examples} illustrates the
 kind of grouping used by the curriculum. The relevant claim is not that the
 hierarchy matches CIFAR-100 superclasses exactly; it is that the grouping is
 more aligned with the model's representation than a random partition with the
-same shape.
+same shape. In this sense, automatically generated hierarchies should be read as
+representation-induced similarity structures, not as attempts to reproduce a
+human taxonomy.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.92\textwidth,height=0.70\textheight,keepaspectratio]{figures/hierarchy_examples_cifar100_selected.png}
     \caption{Representative CIFAR-100 learned-hierarchy clusters. The hierarchy
     is imperfect as a human taxonomy but contains enough model-aligned structure
     to outperform matched random groupings.}
     \label{fig:main-cifar100-hierarchy-examples}
+\end{figure}
+
+Figure~\ref{fig:main-taxonomy-visual-mismatch} gives a concrete example of this
+mismatch between human taxonomy and image-space similarity. A bicycle and a train
+are both vehicles, so a human or WordNet-style taxonomy can place them nearby.
+For a low-resolution image classifier, however, bicycles are dominated by thin
+circular wheels and sparse frames, whereas trains appear as large elongated
+objects with strong horizontal mass. Conversely, rockets and skyscrapers are not
+close semantic categories, but CIFAR-style images of both often contain tall
+vertical structures against sky-like backgrounds. The point is not that the
+automatic hierarchy is semantically ``more correct''; it optimizes a different
+notion of closeness, one tied to the visual representation available to the
+classifier.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.86\textwidth]{figures/bicycle-train.png}\\[0.75em]
+    \includegraphics[width=0.86\textwidth]{figures/rocket-skyscraper.png}
+    \caption{Human-taxonomy similarity and image-space similarity need not agree.
+    Bicycle and train are both vehicles but look very different in CIFAR-style
+    images, while rocket and skyscraper share vertical, sky-background visual
+    patterns despite being semantically distant categories. These panels are
+    illustrative examples for interpreting learned hierarchies, not additional
+    quantitative evidence.}
+    \label{fig:main-taxonomy-visual-mismatch}
 \end{figure}
 
 The cross-dataset hierarchy examples in Figure~\ref{fig:main-small-dataset-hierarchies}
@@ -1605,7 +1636,7 @@ intermediate problem. CIFAR-100, by contrast, has enough fine classes that
 coarse grouping can substantially change early supervision while still
 preserving useful structure.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.47\textwidth]{figures/hierarchy_examples_fashion_mnist.png}\hfill
     \includegraphics[width=0.47\textwidth]{figures/hierarchy_examples_cifar10.png}
@@ -1636,7 +1667,7 @@ to coarser before the final fine-label phase. It is not training on wrong labels
 and it is not a pure negative control, because the class bundles are still
 structured.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \begin{tabular}{lrrl}
@@ -1674,7 +1705,7 @@ fine-grained non-singleton level, so its early 100-way accuracy can be higher
 than the ordinary easy-to-hard curriculum even though it is not using singleton
 fine labels yet.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.84\textwidth]{figures/teacher_hierarchy_best_gain_bar_lr001.png}
     \caption{Best test-accuracy gain over baseline for teacher-hierarchy
@@ -1682,7 +1713,7 @@ fine labels yet.
     \label{fig:main-teacher-control-gains}
 \end{figure}
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.90\textwidth]{figures/teacher_hierarchy_learning_curves_lr001.png}
     \caption{Learning curves for baseline, random, reverse-order, self, and
@@ -1698,7 +1729,7 @@ once exact labels become active. The reverse-order condition is higher early
 than the ordinary teacher curriculum because it begins with many small clusters,
 not because it secretly trains on fine labels.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.90\textwidth]{figures/teacher_hierarchy_switch_zoom_lr001.png}
     \caption{Zoom around the switch from coarse labels to fine labels. The
@@ -1714,7 +1745,7 @@ structured curricula recover and can exceed the baseline. This is the clearest
 visual evidence for the peak-versus-trajectory distinction emphasized throughout
 this thesis.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.92\textwidth]{figures/teacher_hierarchy_epoch_snapshots_lr001.png}
     \caption{Mean test accuracy at selected epochs for the teacher-control
@@ -1730,7 +1761,7 @@ structured methods remain above the random mean. This is the clearest evidence
 for the two-component interpretation used in the discussion: a general
 coarse-label warm-up effect plus an additional hierarchy-structure effect.
 
-\begin{figure}[p]
+\begin{figure}[htbp]
     \centering
     \includegraphics[width=0.90\textwidth]{figures/teacher_hierarchy_seed_gains_lr001.png}
     \caption{Per-seed hierarchy-control gains. Gray points are individual
@@ -1759,22 +1790,23 @@ This chapter connects the two empirical tracks and summarizes the strongest
 claims supported by the experiments. Table~\ref{tab:main-findings-overview}
 provides a compact overview.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
-\small
-\begin{tabular}{p{0.23\textwidth}p{0.23\textwidth}p{0.42\textwidth}}
-\hline
-Question & Strongest evidence & Current verdict \\
-\hline
-Capacity sensitivity & Chapter~\ref{chap:vision-curriculum} and Appendix~\ref{app:cifar100-model-size-curriculum} & Supported. Gains are strongest for weaker CNNs and smaller ResNets, and they shrink for larger models. \\
-Fixed vs adaptive schedules & Chapter~\ref{chap:vision-curriculum} and Appendix~\ref{app:roughness-followup-curriculum} & The best fixed schedules tested here outperform the current adaptive plateau rule on CIFAR-100, but adaptive scheduling remains useful as a tuning-reduction idea. \\
-Hierarchy quality and controls & Chapter~\ref{chap:vision-curriculum}, Appendix~\ref{app:hierarchy-ablation-curriculum}, and Appendix~\ref{app:teacher-transfer-probe} & Supported with caveats. Learned and teacher hierarchies beat random coarsening, but random coarsening itself improves over baseline. \\
-Trajectory speed (AUC) & Chapter~\ref{chap:vision-curriculum} and supplementary vision appendices & Mostly negative for curriculum. Peak accuracy can improve while early-trajectory performance drops. \\
-Cross-dataset transfer & Chapter~\ref{chap:vision-curriculum} and Appendix~\ref{app:roughness-followup-curriculum} & Mixed. CIFAR-100 is strongest, CIFAR-10 gains are smaller, Fashion-MNIST is mostly neutral/negative, Tiny ImageNet is setup-sensitive. \\
-Roughness mechanism & Appendix~\ref{app:roughness-followup-curriculum} & Inconclusive. Some models support the flatter-minima interpretation, but the pattern is not consistent. \\
-\hline
+\footnotesize
+\begin{tabular}{p{0.22\textwidth}p{0.22\textwidth}p{0.46\textwidth}}
+\toprule
+Question & Evidence & Current verdict \\
+\midrule
+Capacity sensitivity & Vision model-size study & Supported. Gains are strongest for weaker CNNs and smaller ResNets, and they shrink for larger models. \\
+Fixed vs adaptive schedules & Vision policy follow-up & The best fixed schedules tested here outperform the current adaptive plateau rule on CIFAR-100, but adaptive scheduling remains useful as a tuning-reduction idea. \\
+Hierarchy controls & Random and teacher controls & Supported with caveats. Learned and teacher hierarchies beat random coarsening, but random coarsening itself improves over baseline. \\
+Trajectory AUC & Regression and vision trajectories & Mostly negative for curriculum. Peak quality can improve while early-trajectory performance drops. \\
+Dataset transfer & CIFAR-10, Fashion-MNIST, Tiny ImageNet & Mixed. CIFAR-100 is strongest, CIFAR-10 gains are smaller, Fashion-MNIST is mostly neutral/negative, Tiny ImageNet is setup-sensitive. \\
+Roughness probes & Sharpness/Hessian diagnostics & Inconclusive. Some models support the flatter-minima interpretation, but the pattern is not consistent. \\
+\bottomrule
 \end{tabular}
-\caption{Main empirical findings used in the discussion.}
+\caption{Main empirical findings used in the discussion. Detailed evidence is in
+Chapter~\ref{chap:vision-curriculum} and the supplementary experiment appendices.}
 \label{tab:main-findings-overview}
 \end{table}
 
@@ -2022,6 +2054,18 @@ still depends on dataset structure, hierarchy quality, and schedule length.
 Where these conditions are not met, curriculum often increases training cost
 without improving the overall trajectory.
 
+The numerical anchors make this conclusion concrete. In the fixed regression
+benchmark, continuation won final loss on 5 of 8 functions under the equal-epoch
+budget and 3 of 8 under the equal-time budget, while direct hard-target training
+won runtime on all 8 functions in both regimes. In the CIFAR-100 model-size
+screening, the largest gains were in the small-CNN regime, for example +3.18 pp
+for \texttt{cnn\_w0.5} and +3.62 pp for \texttt{cnn\_w1}. In the hierarchy-control
+suite, random coarsening itself improved the weak-CNN baseline by about +0.97 pp,
+but structured self-derived and teacher-derived hierarchies reached about +2.3 pp.
+Thus, the final claim is neither uniformly positive nor negative: curriculum
+helps when the intermediate objective is aligned with the final task and when the
+schedule does not overstay the easier stage.
+
 The thesis also clarifies what can and cannot be claimed mechanistically.
 Roughness and sharpness diagnostics are informative, but current evidence does
 not justify a general statement that curriculum consistently finds flatter
@@ -2097,12 +2141,25 @@ established with careful controls, not assumed by default.
 
 \cleardoublepage\appendix%
 \newpage
-\input{appendices/literature_search_protocol}
 \input{appendices/supplementary_regression_experiments}
 \input{appendices/supplementary_vision_experiments}
 \input{appendices/teacher_hierarchy_details}
 
 
-\ppcolophon
+\cleardoublepage
+\thispagestyle{empty}
+\vspace*{\fill}
+\footnotesize\SingleSpacing\noindent
+\raisebox{-1.3cm}{\includegraphics[height=1.5cm]{wit/logo-pp}}%
+\hspace{1.5em}%
+\begin{minipage}[t]{11cm}%
+\vglue 0pt\copyright{} 2026 Adam Korba
+
+\medskip\noindent%
+Poznan University of Technology\\Faculty of Computing and Telecommunication\\Institute of Computing Science
+
+\medskip\noindent%
+Typeset using \LaTeX{}.
+\end{minipage}
 
 \end{document}
