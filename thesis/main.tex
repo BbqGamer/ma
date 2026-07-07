@@ -13,6 +13,7 @@
 
 \usepackage[utf8]{inputenc}
 \usepackage[OT4]{fontenc}
+\usepackage[numbers,sort&compress]{natbib}
 \usepackage{graphicx}
 \usepackage{amsmath,amssymb}
 \usepackage[section]{placeins}
@@ -66,13 +67,13 @@ is highly non-convex and contains many poor local minima. In most practical
 pipelines, the objective is fixed from the first to the last epoch. Curriculum
 learning offers a different view: instead of exposing the full difficulty at
 once, training can start from an easier objective and progressively move toward
-the final target \cite{elman1993learning,bengio2009curriculum}.
+the final target \citep{elman1993learning,bengio2009curriculum}.
 
 This thesis studies objective-space curricula, with particular focus on
 Gaussian continuation. Continuation methods smooth the objective early and then
-gradually remove smoothing \cite{allgower1990numerical,mobahi2015theoretical}.
+gradually remove smoothing \citep{allgower1990numerical,mobahi2015theoretical}.
 In neural networks this idea is promising, but schedule design is still mostly
-manual \cite{wang2021survey}. The central problem addressed here is therefore
+manual \citep{wang2021survey}. The central problem addressed here is therefore
 how to design and evaluate curriculum schedules that are both effective and
 scientifically defensible.
 
@@ -190,25 +191,23 @@ gaps remain.
 \label{sec:curriculum-continuation}
 
 The idea that models benefit from learning tasks in order of increasing
-difficulty predates modern deep learning. Elman \cite{elman1993learning} showed
+difficulty predates modern deep learning. \citet{elman1993learning} showed
 that neural networks with limited capacity could learn complex structures if
 they started with simpler tasks. These early constraints are not just shortcuts,
 but important for guiding the learning process.
 
 \subsection{Foundational Curriculum Learning}
-Bengio et al. \cite{bengio2009curriculum} formalized curriculum learning as an
+\citet{bengio2009curriculum} formalized curriculum learning as an
 easy-to-hard training strategy and connected it to continuation methods: early
 objectives or data distributions can be viewed as smoother versions of the final
-problem. Later examples made this idea concrete in different ways. Spitkovsky et
-al. \cite{spitkovsky2010baby} used ``Baby Steps'' and ``Leapfrog'' schedules in
+problem. Later examples made this idea concrete in different ways. \citet{spitkovsky2010baby} used ``Baby Steps'' and ``Leapfrog'' schedules in
 unsupervised dependency parsing, showing that progressively increasing data
-complexity can improve a non-convex learning procedure. Kumar et al.
-\cite{kumar2010selfpaced} introduced self-paced learning, where the model and
+complexity can improve a non-convex learning procedure. \citet{kumar2010selfpaced} introduced self-paced learning, where the model and
 sample-selection variables are optimized together so that easy samples enter the
-objective first. Zaremba and Sutskever \cite{zaremba2014learning} showed in
+objective first. \citet{zaremba2014learning} showed in
 neural program execution that the precise curriculum matters: a conventional
 schedule was not enough, but a task-specific curriculum made difficult sequence
-problems learnable. Graves et al. \cite{graves2017automated} then framed the
+problems learnable. \citet{graves2017automated} then framed the
 problem as automated syllabus selection, using learning-progress signals to
 choose what the network should train on next.
 
@@ -220,9 +219,9 @@ schedule-design problem: the same intermediate task can help, do nothing, or
 hurt depending on when it is introduced and when it is removed. Recent surveys
 therefore distinguish instance-based curricula, which sort or weight examples,
 from objective-based curricula, which change the training objective itself
-\cite{soviany2022curriculum,wang2021survey}.
+\citep{soviany2022curriculum,wang2021survey}.
 
-Weinshall et al. \cite{weinshall2018curriculum} give a sharper theoretical
+\citet{weinshall2018curriculum} give a sharper theoretical
 argument for instance-based curriculum learning. In a linear-regression setting
 with SGD, they define example difficulty using the loss under the optimal
 hypothesis rather than the loss under the current model. This is a theoretical
@@ -255,7 +254,7 @@ networks.
 \subsection{Objective-Space Curriculum and Continuation}
 Objective-space curricula change the definition of the task or loss rather than
 only changing which examples are emphasized. They are closely linked to
-numerical continuation methods \cite{allgower1990numerical}, which are used in
+numerical continuation methods \citep{allgower1990numerical}, which are used in
 global optimization. In these methods, training starts with a smoothed, convex
 version of the objective function, making it easier to find a good solution. As
 training continues, the smoothing is gradually reduced, allowing the model to
@@ -263,7 +262,7 @@ tackle more complex aspects of the problem.
 
 \subsection{Gaussian Continuation}
 One practical way to apply continuation methods in deep learning is through
-Gaussian continuation. Mobahi and Fisher \cite{mobahi2015theoretical} analyze
+Gaussian continuation. \citet{mobahi2015theoretical} analyze
 this idea theoretically by embedding a non-convex objective into a family of
 Gaussian-smoothed objectives and following a stationary path from the smoothed
 problem back to the original one. Their result does not claim that continuation
@@ -281,10 +280,10 @@ high-dimensional neural-network loss. The result is therefore used here as a
 conceptual justification for continuation, not as a practical diagnostic that can
 be evaluated for the neural models in this thesis.
 
-Later work by Ilersich et al. \cite{ilersich2025deep} provided further evidence
+Later work by \citet{ilersich2025deep} provided further evidence
 that Gaussian continuation can transform difficult non-convex landscapes into
 ones that are easier to optimize. Empirical studies, such as curriculum by
-smoothing \cite{sinha2020curriculum}, use the same intuition in learning
+smoothing \citep{sinha2020curriculum}, use the same intuition in learning
 systems: early training suppresses high-frequency or noisy parts of the loss,
 and later training restores the full objective. This literature supports the
 main design choice in the Gaussian-continuation experiments in this thesis, but
@@ -293,8 +292,7 @@ algorithmic choice, not a detail that can be ignored.
 
 \subsection{Curriculum Regularization in Scientific Machine Learning}
 A related example of objective-based curriculum appears in physics-informed
-neural networks. Krishnapriyan et al. \cite{krishnapriyan2021characterizing}
-showed that standard PINNs can fail on convection, reaction, and
+neural networks. \citet{krishnapriyan2021characterizing} showed that standard PINNs can fail on convection, reaction, and
 reaction-diffusion problems even when the neural network architecture is
 expressive enough to represent the solution. Their diagnosis is especially
 relevant here: the PDE residual used as a soft regularizer can make the loss
@@ -318,14 +316,14 @@ Recent robust curriculum methods also operate directly at the loss level.
 SuperLoss appends a generic adaptive term to existing objectives and
 automatically downweights high-loss samples, which improves robustness in noisy
 settings without requiring task-specific training pipelines
-\cite{castells2020superloss}. At the evaluation level, CurBench established a
+\citep{castells2020superloss}. At the evaluation level, CurBench established a
 unified benchmark and toolkit for curriculum learning across vision, language,
 and graph domains, making cross-method comparisons more reproducible
-\cite{zhou2024curbench}.
+\citep{zhou2024curbench}.
 
 Despite these advances, most existing methods rely on fixed schedules for
 adjusting the level of smoothing or regularization. These schedules are often
-chosen manually and do not adapt to the model's progress \cite{wang2021survey}.
+chosen manually and do not adapt to the model's progress \citep{wang2021survey}.
 This limitation motivates the development of automated, data-driven scheduling
 methods, which is a central focus of this thesis.
 
@@ -335,7 +333,7 @@ examples fixed. This makes them different from instance ordering and from
 loss-landscape diagnostics: the learner is first asked to solve a coarser label
 problem and only later the final fine-label problem.
 
-Stretcu et al. \cite{stretcuCoarsetoFineCurriculumLearning2021} introduced a
+\citet{stretcuCoarsetoFineCurriculumLearning2021} introduced a
 coarse-to-fine curriculum in the output space. Instead of reordering training
 examples, they cluster fine labels into progressively finer groups and train the
 model from coarse supervision to the final class labels. This is a key
@@ -358,15 +356,15 @@ need to remain independently solved after the final stage. Continual learning,
 by contrast, is usually a problem setting in which the data distribution,
 classes, or tasks arrive over time and the learner must acquire new competence
 without catastrophically forgetting earlier competence
-\cite{kirkpatrick2017overcoming,lopezpaz2017gradient,parisi2019continual}.
+\citep{kirkpatrick2017overcoming,lopezpaz2017gradient,parisi2019continual}.
 
 The two ideas nevertheless connect naturally. Both involve non-i.i.d. training
 trajectories and both raise questions about transfer between tasks, ordering,
 and stability versus plasticity. In reinforcement learning, for example,
 curriculum learning is often formulated explicitly as the design of a sequence
 of source tasks that should improve learning on a target task
-\cite{narvekar2020curriculum}. Teacher--student curriculum methods similarly
-select tasks according to the learner's progress \cite{matiisen2020teacher}.
+\citep{narvekar2020curriculum}. Teacher--student curriculum methods similarly
+select tasks according to the learner's progress \citep{matiisen2020teacher}.
 This thesis is closer to curriculum learning than to continual learning because
 the final target objective is fixed in advance, but continual-learning language
 is useful for discussing when the model should preserve or abandon information
@@ -382,40 +380,40 @@ have different goals when it comes to how these tasks interact.
 \subsection{Gradient Conflict and Balancing}
 In multi-task learning, the usual goal is to balance progress across all tasks.
 One common problem is negative transfer, where learning one task can interfere
-with another. Methods like GradNorm \cite{chen2018gradnorm} adjust task weights
-to keep gradient magnitudes similar, while PCGrad \cite{yu2020gradient}
-modifies gradients to reduce interference. Sener and Koltun
-\cite{sener2018multi} proposed the Multi-Gradient Descent Algorithm (MGDA),
+with another. Methods like GradNorm \citep{chen2018gradnorm} adjust task weights
+to keep gradient magnitudes similar, while PCGrad \citep{yu2020gradient}
+modifies gradients to reduce interference. \citet{sener2018multi} proposed the
+Multi-Gradient Descent Algorithm (MGDA),
 which seeks a solution where no task can be improved without hurting another.
-Surveys such as \cite{chen2024gradient} discuss these approaches and note that,
+Surveys such as \citet{chen2024gradient} discuss these approaches and note that,
 while they help balance tasks, they do not support the sequential learning
 needed for curricula.
 
 \subsection{Why Balancing Is Not Enough for Curricula}
 Gradient-balancing methods are designed mainly for simultaneous multi-task
 learning: they try to prevent one task from dominating or interfering with the
-others \cite{chen2018gradnorm,yu2020gradient,sener2018multi,chen2024gradient}.
+others \citep{chen2018gradnorm,yu2020gradient,sener2018multi,chen2024gradient}.
 Curriculum learning has a different temporal goal. The learner should focus on
 an easier task early, then deliberately shift toward the final target rather
 than maintain all objectives in equilibrium
-\cite{bengio2009curriculum,narvekar2020curriculum,matiisen2020teacher}.
+\citep{bengio2009curriculum,narvekar2020curriculum,matiisen2020teacher}.
 
 This also separates curriculum learning from continual learning. A continual
 learner is usually evaluated on whether it retains old tasks while learning new
-ones \cite{parisi2019continual}; a curriculum learner may instead need to reduce
+ones \citep{parisi2019continual}; a curriculum learner may instead need to reduce
 or abandon the auxiliary easy task once it has served its purpose. In this
 thesis, the relevant design problem is therefore not only gradient balancing but
 controlled transition: when should the optimizer be pushed away from the easy
 objective and toward the final target?
 
 \subsection{Pareto Continual Learning}
-Bridging this gap, \cite{lai2025pareto} introduced \textbf{Pareto Continual
+Bridging this gap, \citet{lai2025pareto} introduced \textbf{Pareto Continual
 	Learning}, which reformulates the stability-plasticity trade-off (retaining old
 knowledge vs. learning new tasks) as a Multi-Objective Optimization (MOO)
 problem. Instead of finding a single fixed weight, they learn a set of
 Pareto-optimal solutions conditioned on a preference vector. This allows the
 system to dynamically select the optimal trade-off during inference. Similarly,
-\cite{mao2022metaweighting} proposed \textbf{MetaWeighting}, identifying a
+\citet{mao2022metaweighting} proposed \textbf{MetaWeighting}, identifying a
 critical gap between training loss and generalization loss in MTL. By treating
 task weights as hyperparameters optimized via a bi-level optimization loop
 (meta-learning), MetaWeighting explicitly minimizes generalization loss. This
@@ -428,11 +426,11 @@ maximize final validation performance.
 
 Meta-learning, or ``learning to learn,'' provides the algorithmic engine to
 automate the curriculum schedule. While early meta-learning focused on learning
-initializations (e.g., MAML \cite{finn2017model}) for few-shot adaptation, the
+initializations (e.g., MAML \citep{finn2017model}) for few-shot adaptation, the
 field has expanded into \textbf{Meta-Continual Learning (MCL)}.
 
 \subsection{Taxonomy of Meta-Continual Frameworks}
-A recent survey by \cite{son2024meta} provides a rigorous taxonomy for the
+A recent survey by \citet{son2024meta} provides a rigorous taxonomy for the
 intersection of these fields. They distinguish between \textit{Continual
 	Meta-Learning} (learning to learn from a sequence of tasks) and
 \textit{Meta-Continual Learning} (using meta-learning to solve the catastrophic
@@ -445,13 +443,13 @@ In this framework, the learning process is split into two loops. The inner loop
 updates model parameters $\theta$ on the current curriculum stage via standard
 gradient descent. The outer loop updates meta-parameters $\phi$ (in our case,
 the loss weights) to minimize a validation loss. Algorithms like
-\textbf{La-MAML} \cite{gupta2020lamaml} employ this structure to learn
+\textbf{La-MAML} \citep{gupta2020lamaml} employ this structure to learn
 per-parameter learning rates that align gradients across sequential tasks.
-\cite{wu2024meta} recently improved upon this with \textbf{VR-MCL}, introducing
+\citet{wu2024meta} recently improved upon this with \textbf{VR-MCL}, introducing
 variance reduction techniques to stabilize the online Hessian approximation
 required for these bi-level updates.
 
-Furthermore, \cite{woo2025meta} extended MCL to \textbf{Neural Fields}
+Furthermore, \citet{woo2025meta} extended MCL to \textbf{Neural Fields}
 (MCL-NF). They demonstrated that meta-learning could efficiently reconstruct
 complex 3D scenes and signals by dynamically modulating the network's capacity,
 a process analogous to the resolution-based curriculum proposed in this thesis.
@@ -459,17 +457,17 @@ a process analogous to the resolution-based curriculum proposed in this thesis.
 \subsection{The Stability-Plasticity Dilemma in Curriculum}
 A unique challenge arises when applying meta-learning to curriculum generation:
 the stability-plasticity dilemma. In standard continual learning, the goal is
-to prevent the forgetting of old tasks (stability) \cite{parisi2019continual}.
+to prevent the forgetting of old tasks (stability) \citep{parisi2019continual}.
 In our curriculum context, the dilemma is inverted: the model must be
 ``plastic'' enough to abandon the smoothed approximation (the easy task) and
 ``stable'' enough to converge on the hard task.
 
-\cite{banayeeanzade2025theoretical} provides theoretical insights into overparameterized models in such multi-task setups, suggesting that without explicit regularization, the interplay between model capacity and task similarity determines the success of transfer. Pure meta-learning of loss weights can be unstable; without constraints, a meta-learner might exploit the easy smoothed loss to achieve artificially low training error without ever transitioning to the hard target function. This necessitates the monotonic regularization strategies explored in this thesis.
+\citet{banayeeanzade2025theoretical} provide theoretical insights into overparameterized models in such multi-task setups, suggesting that without explicit regularization, the interplay between model capacity and task similarity determines the success of transfer. Pure meta-learning of loss weights can be unstable; without constraints, a meta-learner might exploit the easy smoothed loss to achieve artificially low training error without ever transitioning to the hard target function. This necessitates the monotonic regularization strategies explored in this thesis.
 
 \section{Dynamic Reweighting and Optimization Diagnostics}
 
 \subsection{Learning to Reweight Examples}
-Ren et al. \cite{renLearningReweightExamples2018a} proposed a bilevel procedure
+\citet{renLearningReweightExamples2018a} proposed a bilevel procedure
 that reweights training examples according to their short-term effect on a clean
 validation set. Although their work targets noisy labels rather than curriculum
 scheduling, it is directly relevant methodologically: it shows how a validation
@@ -477,7 +475,7 @@ objective can control inner-loop updates without manually defining static
 weights.
 
 \subsection{Sharpness-Aware Minimization and Flatness Probes}
-Foret et al. \cite{foretSharpnessAwareMinimizationEfficiently2021} linked
+\citet{foretSharpnessAwareMinimizationEfficiently2021} linked
 generalization to neighborhood-aware optimization through the
 Sharpness-Aware Minimization (SAM) objective. This thesis does not optimize SAM
 directly, but uses roughness and sharpness diagnostics inspired by the same
@@ -488,12 +486,12 @@ coincide with flatter regions of the loss landscape.
 
 The literature supports the core design of this thesis: continuation methods
 motivate easy-to-hard objective transitions
-\cite{allgower1990numerical,mobahi2015theoretical,ilersich2025deep},
+\citep{allgower1990numerical,mobahi2015theoretical,ilersich2025deep},
 coarse-to-fine work motivates output-space label curricula
-\cite{stretcuCoarsetoFineCurriculumLearning2021}, multi-objective methods
-provide the machinery to combine losses \cite{chen2024gradient}, and
+\citep{stretcuCoarsetoFineCurriculumLearning2021}, multi-objective methods
+provide the machinery to combine losses \citep{chen2024gradient}, and
 meta-learning offers mechanisms for dynamic weighting
-\cite{son2024meta,mao2022metaweighting}.
+\citep{son2024meta,mao2022metaweighting}.
 
 The reviewed work also shows that curriculum learning is not a single mechanism.
 Instance-based curricula, such as the teacher-ranked examples of Weinshall et
@@ -774,18 +772,18 @@ find flatter minima.
 
 The implementation uses scripted experiment entry points, explicit configuration
 files or command-line arguments, fixed random seeds where possible, and stored
-run metadata. Optuna \cite{akiba2019optuna} is used for several
+run metadata. Optuna \citep{akiba2019optuna} is used for several
 hyperparameter and schedule searches. The regression track uses MLflow
-\cite{zaharia2018accelerating} to record parameters, metrics, artifacts, and
-run structure. The vision track uses Weights \& Biases \cite{biewald2020experiment}
+\citep{zaharia2018accelerating} to record parameters, metrics, artifacts, and
+run structure. The vision track uses Weights \& Biases \citep{biewald2020experiment}
 for the same purpose; W\&B is the source of truth for the later CIFAR-100
-\cite{krizhevsky2009learning}, Fashion-MNIST \cite{xiao2017fashion}, CIFAR-10
-\cite{krizhevsky2009learning}, and Tiny ImageNet \cite{tinyimagenet,deng2009imagenet}
+\citep{krizhevsky2009learning}, Fashion-MNIST \citep{xiao2017fashion}, CIFAR-10
+\citep{krizhevsky2009learning}, and Tiny ImageNet \citep{tinyimagenet,deng2009imagenet}
 analyses. Tables and figures in the appendices are derived from exported
 tracking data rather than from manually copied console logs.
 
 The large vision experiments were executed in a containerized environment. The
-Docker image included the PyTorch \cite{paszke2019pytorch} and CUDA-related
+Docker image included the PyTorch \citep{paszke2019pytorch} and CUDA-related
 dependencies required by the training code, was versioned and pushed to Docker
 Hub, and was then used on Runpod, a cloud service for renting GPU instances, to
 run consecutive experiment batches. This is not an algorithmic contribution, and
@@ -863,11 +861,11 @@ earlier conclusions were artifacts of small data or overlarge models.
 
 Before comparing curricula, the first sweep pack optimized architecture and
 training hyperparameters separately for each function. The search covered MLP,
-SIREN \cite{sitzmann2020implicit}, and Fourier-feature networks
-\cite{tancik2020fourier} and optimized validation MSE. SIREN and Fourier
+SIREN \citep{sitzmann2020implicit}, and Fourier-feature networks
+\citep{tancik2020fourier} and optimized validation MSE. SIREN and Fourier
 features were included because coordinate-based regression tasks are vulnerable
 to spectral bias: standard MLPs tend to learn low-frequency variation before
-high-frequency detail \cite{rahaman2019spectral}. This bias is useful as an
+high-frequency detail \citep{rahaman2019spectral}. This bias is useful as an
 implicit smoothness prior, but it can be harmful for low-dimensional coordinate
 signals in graphics, vision, and surface-fitting tasks where sharp oscillations
 or fine spatial detail matter. SIREN uses sinusoidal activations, while Fourier
@@ -1234,8 +1232,7 @@ This track was designed as a sequence of increasingly strict controls:
 
 \section{Coarse-to-fine training method}
 
-The implementation follows the continuous coarse-to-fine formulation of Stretcu
-et al. \cite{stretcuCoarsetoFineCurriculumLearning2021}: the model keeps a
+The implementation follows the continuous coarse-to-fine formulation of \citet{stretcuCoarsetoFineCurriculumLearning2021}: the model keeps a
 fine-class classifier head, but the training loss is evaluated after
 marginalizing fine-label probabilities into the active coarse clusters. The
 hierarchy is generated from model-derived class similarity, primarily the
@@ -1253,15 +1250,15 @@ show that it can also stay too long in coarse stages.
 \section{CIFAR-100 model-size study}
 
 The first screening study used 80 completed CIFAR-100 runs
-\cite{krizhevsky2009learning}: one baseline and five curriculum lengths for
+\citep{krizhevsky2009learning}: one baseline and five curriculum lengths for
 each model configuration, mostly with seed 42. The training budget was 100
-epochs with Adam \cite{kingma2015adam}, learning rate 0.001, and curriculum
+epochs with Adam \citep{kingma2015adam}, learning rate 0.001, and curriculum
 lengths 5, 10, 20, 30, and 40. The capacity question is practically motivated:
 small networks are attractive for resource-constrained or edge deployment,
 where models such as MobileNets trade accuracy for efficiency
-\cite{howard2017mobilenets}. A curriculum that helps a small student learn a
+\citep{howard2017mobilenets}. A curriculum that helps a small student learn a
 better representation is related in spirit to teacher--student and knowledge
-distillation arguments \cite{hinton2015distilling}, although the method here
+distillation arguments \citep{hinton2015distilling}, although the method here
 does not train on teacher logits. It changes the output granularity of the
 supervised task instead. The full table is in
 Appendix~\ref{app:cifar100-model-size-curriculum}; Table~\ref{tab:main-cifar100-capacity}
@@ -1438,11 +1435,11 @@ understood as a different route to a good solution, not as uniform acceleration.
 \section{Dataset controls}
 
 The same curriculum idea was tested on easier or different datasets. CIFAR-10
-\cite{krizhevsky2009learning} shows small positive gains for weak CNNs,
-Fashion-MNIST \cite{xiao2017fashion} is essentially neutral or negative, and
-Tiny ImageNet \cite{tinyimagenet,deng2009imagenet} is mixed: small Adam-trained
-models were negative, while a stronger ResNet-18 \cite{he2016deep} with
-SGD/cosine \cite{loshchilov2017sgdr} achieved a modest positive gain. The
+\citep{krizhevsky2009learning} shows small positive gains for weak CNNs,
+Fashion-MNIST \citep{xiao2017fashion} is essentially neutral or negative, and
+Tiny ImageNet \citep{tinyimagenet,deng2009imagenet} is mixed: small Adam-trained
+models were negative, while a stronger ResNet-18 \citep{he2016deep} with
+SGD/cosine \citep{loshchilov2017sgdr} achieved a modest positive gain. The
 important conclusion is that weak model capacity alone is not sufficient. The
 dataset must also contain class structure that is useful at coarse granularity.
 
@@ -1793,16 +1790,17 @@ provides a compact overview.
 \begin{table}[htbp]
 \centering
 \footnotesize
-\begin{tabular}{p{0.22\textwidth}p{0.22\textwidth}p{0.46\textwidth}}
+\begin{tabular}{p{0.25\textwidth}p{0.20\textwidth}p{0.45\textwidth}}
 \toprule
 Question & Evidence & Current verdict \\
 \midrule
-Capacity sensitivity & Vision model-size study & Supported. Gains are strongest for weaker CNNs and smaller ResNets, and they shrink for larger models. \\
-Fixed vs adaptive schedules & Vision policy follow-up & The best fixed schedules tested here outperform the current adaptive plateau rule on CIFAR-100, but adaptive scheduling remains useful as a tuning-reduction idea. \\
-Hierarchy controls & Random and teacher controls & Supported with caveats. Learned and teacher hierarchies beat random coarsening, but random coarsening itself improves over baseline. \\
-Trajectory AUC & Regression and vision trajectories & Mostly negative for curriculum. Peak quality can improve while early-trajectory performance drops. \\
-Dataset transfer & CIFAR-10, Fashion-MNIST, Tiny ImageNet & Mixed. CIFAR-100 is strongest, CIFAR-10 gains are smaller, Fashion-MNIST is mostly neutral/negative, Tiny ImageNet is setup-sensitive. \\
-Roughness probes & Sharpness/Hessian diagnostics & Inconclusive. Some models support the flatter-minima interpretation, but the pattern is not consistent. \\
+\hyperref[rq:continuation]{RQ1}: objective-space continuation & Regression benchmark & Conditional. Continuation helps selected functions but does not reliably beat tuned direct training and never wins runtime. \\
+\hyperref[rq:vision]{RQ2}: capacity sensitivity & Vision model-size study & Supported. Gains are strongest for weaker CNNs and smaller ResNets, and they shrink for larger models. \\
+\hyperref[rq:adaptive]{RQ3}: fixed vs adaptive schedules & Vision policy follow-up & The best fixed schedules tested here outperform the current adaptive plateau rule on CIFAR-100, but adaptive scheduling remains useful as a tuning-reduction idea. \\
+\hyperref[rq:vision]{RQ2}: hierarchy controls & Random and teacher controls & Supported with caveats. Learned and teacher hierarchies beat random coarsening, but random coarsening itself improves over baseline. \\
+\hyperref[rq:diagnostics]{RQ4}: trajectory AUC & Regression and vision trajectories & Mostly negative for curriculum. Peak quality can improve while early-trajectory performance drops. \\
+\hyperref[rq:vision]{RQ2}: dataset transfer & CIFAR-10, Fashion-MNIST, Tiny ImageNet & Mixed. CIFAR-100 is strongest, CIFAR-10 gains are smaller, Fashion-MNIST is mostly neutral/negative, Tiny ImageNet is setup-sensitive. \\
+\hyperref[rq:diagnostics]{RQ4}: roughness probes & Sharpness/Hessian diagnostics & Inconclusive. Some models support the flatter-minima interpretation, but the pattern is not consistent. \\
 \bottomrule
 \end{tabular}
 \caption{Main empirical findings used in the discussion. Detailed evidence is in
@@ -1848,12 +1846,13 @@ still useful for the final task. This makes the vision curriculum less dependent
 on an analytic continuation path and more dependent on hierarchy quality,
 schedule length, and model capacity.
 
-The comparison also clarifies why weak baselines are dangerous in curriculum
-research. A curriculum can appear useful simply because the direct baseline was
-not tuned well enough, or because the curriculum run receives effectively more
-optimization. This thesis therefore treats strong baselines as part of the
-method, not as an implementation detail. Once the baseline is improved, some
-apparent gains disappear, especially in the regression track.
+This comparison also highlights why strong baselines are essential in curriculum
+studies. A curriculum can look better simply because the direct baseline was
+under-tuned or because the curriculum run effectively receives more
+optimization. For that reason, this thesis treats baseline strength and budget
+matching as part of the method, not as implementation detail. In several
+regression settings, improving the direct baseline reduced or eliminated
+apparent curriculum gains.
 
 \section{Peak accuracy versus trajectory performance}
 
@@ -2080,16 +2079,18 @@ hierarchies outperform matched random hierarchies, which supports the claim that
 hierarchy quality carries useful information beyond simple early-stage label
 reduction. At the same time, random coarsening also improves over baseline, so
 the final interpretation must separate a general coarse-label warm-up effect
-from the additional benefit of meaningful class structure.
+from the additional benefit of meaningful class structure. For strict
+model-selection claims, checkpoints should be selected on validation data and
+the test set should be used once for final reporting.
 
 \section{Future work}
 
-The next research step is consolidation rather than broad expansion. The first
-priority is validation-selected evaluation for all major runs. The current best
-checkpoint analysis is valuable for understanding optimization, but a final
-method comparison should select epochs using validation data and then report one
-test result. This would turn the strongest diagnostic results into a stricter
-model-selection benchmark.
+The next research step is consolidation rather than broad expansion. A useful
+extension is validation-selected evaluation for all major runs. The current best
+checkpoint analysis is valuable for understanding optimization trajectories; it
+is not ``wrong,'' but it answers a diagnostic question rather than a strict
+model-selection question. A stricter benchmark would select epochs using
+validation data and then report one held-out test result.
 
 The second priority is stronger adaptive scheduling. The plateau rule used here
 is intentionally simple, but the results show that simplicity is not enough. A
@@ -2133,7 +2134,7 @@ established with careful controls, not assumed by default.
 % Literatura
 %--------------------------------------
 
-\bibliographystyle{plain}{\raggedright\sloppy\small\bibliography{bibliografia}}
+\bibliographystyle{plainnat}{\raggedright\sloppy\small\bibliography{bibliografia}}
 
 %--------------------------------------
 % Dodatki
