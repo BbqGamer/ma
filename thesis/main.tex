@@ -193,8 +193,8 @@ gaps remain.
 The idea that models benefit from learning tasks in order of increasing
 difficulty predates modern deep learning. \citet{elman1993learning} showed
 that neural networks with limited capacity could learn complex structures if
-they started with simpler tasks. These early constraints are not just shortcuts,
-but important for guiding the learning process.
+they started with simpler tasks. In this setting, the early simplifications are
+not just shortcuts but are important for guiding the learning process.
 
 \subsection{Foundational curriculum learning}
 \citet{bengio2009curriculum} formalized curriculum learning as an
@@ -255,9 +255,9 @@ networks.
 Objective-space curricula change the definition of the task or loss rather than
 only changing which examples are emphasized. They are closely linked to
 numerical continuation methods \citep{allgower1990numerical}, which are used in
-global optimization. In these methods, training starts with a smoothed, convex
-version of the objective function, making it easier to find a good solution. As
-training continues, the smoothing is gradually reduced, allowing the model to
+global optimization. In these methods, training starts with a highly smoothed or
+otherwise easier surrogate objective, making it easier to find a good solution.
+As training continues, the smoothing is gradually reduced, allowing the model to
 tackle more complex aspects of the problem.
 
 \subsection{Gaussian continuation}
@@ -345,8 +345,8 @@ influence the result.
 
 The abbreviation ``CL'' is overloaded: it can mean \emph{curriculum learning}
 or \emph{continual learning}. To avoid this ambiguity, this thesis writes both
-terms in full in the prose and uses only short table labels such as ``curr.''
-when space is limited.
+terms in full in the prose; abbreviated labels are used only in cramped tables
+where space is limited.
 
 The distinction is important. Curriculum learning is a training strategy for a
 chosen target objective: the learner is deliberately exposed to easier examples,
@@ -631,7 +631,7 @@ control used to reduce that risk.}
 The regression experiments use synthetic benchmark functions with non-convex
 structure. The named functions follow the standard benchmark definitions indexed by
 Surjanovic and Bingham (SFU). For each function, the training data contain the original target and a
-sequence of Gaussian-smoothed targets. \citep{surjanovic2013benchmark} The main baseline is direct training on
+sequence of Gaussian-smoothed targets \citep{surjanovic2013benchmark}. The main baseline is direct training on
 the final, least-smoothed target. Curriculum variants train on a sequence or a
 weighted mixture of smoothed objectives before emphasizing the final target.
 
@@ -1733,7 +1733,7 @@ one percentage point. Second, structure still matters: self-derived,
 teacher-derived, and reverse-order teacher curricula all exceed the random mean.
 The teacher hierarchy does not clearly improve peak accuracy over the
 self-derived hierarchy, which suggests that hierarchy source quality is not the
-only bottleneck. Schedule length, marginalised coarse-label loss, and weak
+only bottleneck. Schedule length, marginalized coarse-label loss, and weak
 student capacity also constrain the final effect.
 
 Figure~\ref{fig:main-teacher-control-gains} shows the same comparison as gains
