@@ -1403,6 +1403,14 @@ baseline in percentage points, reported as mean $\pm$ standard deviation.}
 \label{tab:main-cifar100-policy}
 \end{table}
 
+A baseline-convention note applies to Tables~\ref{tab:main-cifar100-policy},
+\ref{tab:main-hierarchy-ablation}, and
+\ref{tab:main-teacher-hierarchy-controls}. These tables come from separate W\&B
+analysis suites, each using the matched baseline reruns available for that suite
+and seed set. Consequently, the reported CIFAR-100 \texttt{cnn\_w0.5} baseline
+mean differs slightly across suites. Gains should be read within each table
+against its matching baseline, not by subtracting baseline values across tables.
+
 The best fixed schedules tested here remain stronger than this particular
 adaptive plateau rule. This should not be read as a general argument that fixed
 schedules are intrinsically better, just as a well-tuned non-adaptive optimizer
