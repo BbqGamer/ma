@@ -1,5 +1,5 @@
 % Appendix for eggholder meta-weighting benchmark (unroll=1 only).
-\chapter{Meta-Weighting Benchmark on \texttt{eggholder} (Unroll = 1)}
+\chapter{Meta-weighting benchmark on \texttt{eggholder} (unroll = 1)}
 \label{app:meta-weighting-eggholder-u1}
 
 \section{Purpose and scope}
@@ -64,14 +64,14 @@ Losses & Runs & Mean final val loss & Median final val loss & Mean rank \\
 \small
 \begin{tabular}{lrrr}
 \toprule
-Losses & Mean improvement vs baseline & Median improvement vs baseline & Win rate vs baseline \\
+Losses & Mean improvement vs baseline & Median improvement vs baseline & Fraction improved vs baseline \\
 \midrule
 2 & -1259.72 & -1089.23 & 0.458 \\
 3 &  -324.00 &  -549.98 & 0.472 \\
 5 & -1777.98 & -1305.75 & 0.417 \\
 \bottomrule
 \end{tabular}
-\caption{Paired comparison against the baseline \texttt{num\_losses=1}. Positive improvement would mean that adaptive weighting beats the baseline; in this experiment all means remain negative.}
+\caption{Paired comparison against the baseline \texttt{num\_losses=1}. Positive improvement means that adaptive weighting improves over the baseline; in this experiment all means remain negative.}
 \label{tab:meta-eggholder-u1-vs-baseline}
 \end{table}
 
@@ -110,7 +110,7 @@ seed \texttt{42}, with final validation loss \texttt{52323.09}.
 
 This means that adaptive weighting can occasionally produce very strong
 individual runs, but this advantage was not stable enough across seeds and
-conditions to beat the single-loss baseline on average.
+conditions to outperform the single-loss baseline on average.
 
 \section{Aggregate visual diagnostics}
 
@@ -138,8 +138,8 @@ conditions to beat the single-loss baseline on average.
 \begin{figure}[h]
     \centering
     \includegraphics[width=0.72\textwidth]{figures/meta_weighting_eggholder_u1_win_rate_vs_baseline.png}
-    \caption{Win rate of adaptive weighting versus the baseline \texttt{num\_losses=1}. A value above 0.5 would indicate an advantage over the baseline. None of the adaptive settings exceed this threshold.}
-    \label{fig:meta-eggholder-u1-winrate}
+    \caption{Fraction of adaptive-weighting runs that improve over the baseline \texttt{num\_losses=1}. A value above 0.5 would indicate an advantage over the baseline. None of the adaptive settings exceed this threshold.}
+    \label{fig:meta-eggholder-u1-fraction-improved}
 \end{figure}
 
 \begin{figure}[h]
@@ -177,7 +177,7 @@ because the longer unroll variants were substantially less stable in earlier
 attempts.
 
 \paragraph{2) Baseline strength.}
-The single hard-target baseline remains difficult to beat. Although adaptive
+The single hard-target baseline remains difficult to outperform. Although adaptive
 weighting sometimes finds very strong runs, its average behavior is not clearly
 superior in this benchmark.
 

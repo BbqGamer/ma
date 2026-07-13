@@ -47,7 +47,7 @@ COLORS = {
     "teacher": "#54A24B",
     "learned": "#F58518",
 }
-REGIME_LABELS = {"equal_epochs": "epoch-matched", "equal_time": "same time cap"}
+REGIME_LABELS = {"equal_epochs": "epoch-matched", "equal_time": "time-capped"}
 
 
 def save(name: str) -> None:
@@ -227,6 +227,33 @@ def regression_figures() -> None:
             ax.text(j, i, f"{vals[i, j]:.2g}", ha="center", va="center", fontsize=7)
     ax.set_title("Seed-paired regression deltas")
     save("deep_regression_seed_delta_heatmap.png")
+
+
+def meta_weighting_figures() -> None:
+    source = (
+        ROOT
+        / "reports"
+        / "analysis"
+        / "meta-weighting-v1-eggholder__meta_weighting_eggholder_u1_20260504_221357"
+        / "baseline_improvement_by_losses.csv"
+    )
+    if not source.exists():
+        return
+
+    data = pd.read_csv(source).sort_values("num_losses")
+    fig, ax = plt.subplots(figsize=(5.8, 4.1))
+    ax.bar(
+        data["num_losses"].astype(str),
+        data["win_rate_vs_baseline"],
+        color="#4C78A8",
+        alpha=0.9,
+    )
+    ax.axhline(0.5, color="black", linestyle="--", linewidth=0.9)
+    ax.set_ylim(0, 0.65)
+    ax.set_xlabel("Number of continuation losses")
+    ax.set_ylabel("Fraction improved over one-loss baseline")
+    ax.set_title("eggholder: paired improvement frequency")
+    save("meta_weighting_eggholder_u1_win_rate_vs_baseline.png")
 
 
 def adaptive_and_dataset_figures() -> None:
@@ -515,6 +542,7 @@ def teacher_figures() -> None:
 
 def main() -> None:
     regression_figures()
+    meta_weighting_figures()
     adaptive_and_dataset_figures()
     hierarchy_figures()
     teacher_figures()

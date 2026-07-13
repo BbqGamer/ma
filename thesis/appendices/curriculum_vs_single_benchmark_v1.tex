@@ -1,5 +1,5 @@
 % Benchmark appendix with extended narrative and figures.
-\chapter{Curriculum vs Single Benchmark v1}
+\chapter{Curriculum versus single benchmark v1}
 \label{app:curr-vs-single-v1}
 
 \section{Objective and motivation}
@@ -61,8 +61,8 @@ equal\_epochs & 5 & 3 & 8 & 0 \\
 equal\_time & 3 & 5 & 8 & 0 \\
 \bottomrule
 \end{tabular}
-\caption{Win counts by regime.}
-\label{tab:curr-vs-single-win-counts}
+\caption{Lower-loss and lower-runtime counts by regime.}
+\label{tab:curr-vs-single-counts}
 \end{table}
 
 \begin{table}[h]
@@ -70,7 +70,7 @@ equal\_time & 3 & 5 & 8 & 0 \\
 \small
 \begin{tabular}{llll}
 \toprule
-Function & equal\_epochs & equal\_time & Runtime winner \\
+Function & equal\_epochs & equal\_time & Lower runtime \\
 \midrule
 ackley & single & single & single \\
 bukin & curriculum & curriculum & single \\
@@ -82,8 +82,8 @@ levy & curriculum & curriculum & single \\
 peaks & single & single & single \\
 \bottomrule
 \end{tabular}
-\caption{Quality winners by function and regime.}
-\label{tab:curr-vs-single-function-winners}
+\caption{Function-level lower-loss method by regime.}
+\label{tab:curr-vs-single-function-counts}
 \end{table}
 
 \section{Visual diagnostics}
@@ -171,7 +171,7 @@ progressive smoothing can help optimization in some landscapes.
 
 \paragraph{What did not work.}
 Runtime increased in every function/regime cell.
-In this benchmark, curriculum never won on runtime.
+In this benchmark, curriculum never achieved lower runtime.
 
 \paragraph{What this means.}
 Curriculum should not be treated as a universal default. The current evidence

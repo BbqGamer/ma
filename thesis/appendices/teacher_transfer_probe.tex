@@ -1,4 +1,4 @@
-\chapter{ImageNet-to-CIFAR-100 Transfer Teacher and Hierarchy Controls}
+\chapter{ImageNet-to-CIFAR-100 transfer teacher and hierarchy controls}
 \label{app:teacher-transfer-probe}
 
 \section{Purpose}
@@ -331,8 +331,8 @@ is clearly above random.
 \section{Per-seed behavior and the random-control surprise}
 
 Table~\ref{tab:teacher-hierarchy-controls-seeds} gives the seed-level best
-accuracy values. The random mean beats the baseline for all three seeds, and all
-nine individual random hierarchy runs were also above their matching baseline.
+accuracy values. The random mean exceeds the baseline for all three seeds, and
+all nine individual random hierarchy runs were also above their matching baseline.
 This is worth emphasizing because it means the curriculum benefit cannot be
 interpreted only as evidence of semantic hierarchy quality. Some of the gain is
 created by the training protocol itself: the student spends the first stage
@@ -480,8 +480,8 @@ random. The easy-to-hard direction therefore helps, but the grouping information
 itself appears more important than the temporal order in this particular fixed
 20-epoch schedule.
 
-Finally, the teacher hierarchy did not decisively beat the self-derived hierarchy
-in peak accuracy. The corrected teacher reached a much stronger operating point
+Finally, the teacher hierarchy did not decisively outperform the self-derived
+hierarchy in peak accuracy. The corrected teacher reached a much stronger operating point
 than the first bootstrap teacher, but its student curriculum obtained 37.69\%
 best accuracy, essentially tied with the self hierarchy at 37.76\%. The teacher
 hierarchy did improve trajectory/AUC relative to self and random, but the peak
@@ -493,8 +493,8 @@ student capacity all likely constrain the achievable benefit.
 
 The teacher probe and follow-up controls support a more nuanced conclusion than
 "better hierarchy solves curriculum learning." A strong transfer teacher can be
-trained cheaply and produces a plausible hierarchy. That hierarchy clearly beats
-random grouping, and meaningful structure improves over arbitrary coarsening.
+trained cheaply and produces a plausible hierarchy. That hierarchy clearly
+outperforms random grouping, and meaningful structure improves over arbitrary coarsening.
 However, arbitrary coarsening itself is beneficial in this CIFAR-100
 \texttt{cnn\_w0.5} setting, and even the anti-curriculum remains above baseline.
 The evidence therefore separates two effects: a general coarse-label warm-up or

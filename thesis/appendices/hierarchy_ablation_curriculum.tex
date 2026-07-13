@@ -1,4 +1,4 @@
-\chapter{Random-Hierarchy Ablation for CIFAR-100 Curriculum Learning}
+\chapter{Random-hierarchy ablation for CIFAR-100 curriculum learning}
 \label{app:hierarchy-ablation-curriculum}
 
 \section{Purpose}
@@ -69,8 +69,8 @@ averages across seeds. AUC is computed over the test-accuracy trajectory.}
 
 The learned hierarchy clearly outperforms the random hierarchy control. It
 improves best test accuracy by +2.24 percentage points, while the average random
-hierarchy improves it by only +0.53 points. The learned hierarchy beats the
-random mean for all three training seeds. Even the best of the three random
+hierarchy improves it by only +0.53 points. The learned hierarchy outperforms
+the random mean for all three training seeds. Even the best of the three random
 hierarchies per seed reaches only +1.05 points on average, still well below the
 learned hierarchy.
 
@@ -85,7 +85,7 @@ geometry.
     \includegraphics[width=0.82\textwidth]{figures/hierarchy_ablation_gain_comparison.png}
     \caption{Best test-accuracy gain over the matching baseline for learned and
     random hierarchies. Black points show the three training seeds. The learned
-    hierarchy beats both the random mean and the best-of-three random diagnostic.}
+    hierarchy outperforms both the random mean and the best-of-three random diagnostic.}
     \label{fig:hier-ablation-gain-comparison}
 \end{figure}
 

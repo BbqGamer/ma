@@ -1,5 +1,5 @@
 
-\chapter{Additional Deep-Dive Analysis of Experiment Runs}
+\chapter{Additional deep-dive analysis of experiment runs}
 \label{app:deep-dive-experiments}
 
 This appendix intentionally collects more detail than the main thesis needs. It
@@ -30,7 +30,7 @@ reduced hard-validation loss.
 \small
 \begin{tabular}{llrrl}
 \toprule
-Function & Regime & Quality delta & Runtime ratio & Winner \\
+Function & Regime & Quality delta & Runtime ratio & Lower final loss \\
 \midrule
 ackley & equal\_epochs & -0.00762 & 1.96 & single \\
 bukin & equal\_epochs & 0.032 & 1.93 & curriculum \\
@@ -156,8 +156,8 @@ curriculum becomes shorter and eventually disappears.
 \begin{figure}[h]
     \centering
     \includegraphics[width=0.86\textwidth]{figures/deep_cifar100_curriculum_length_heatmap.png}
-    \caption{CIFAR-100 curriculum-length sensitivity. Values are best-test
-    accuracy gains in percentage points relative to the matching baseline.}
+    \caption{CIFAR-100 curriculum-length sensitivity. Values are best test-accuracy
+    gains in percentage points relative to the matching baseline.}
     \label{fig:deep-cifar100-length}
 \end{figure}
 
@@ -249,8 +249,8 @@ values mean lower diagnostic value for curriculum.}
 \section{Hierarchy ablation details}
 
 Figure~\ref{fig:deep-hierarchy-seed-gains} shows the seed-level random-hierarchy
-control. The learned hierarchy beats the random mean for every seed and also
-beats the best random hierarchy tried for each seed. This is stronger than a
+control. The learned hierarchy outperforms the random mean for every seed and
+also exceeds the best random hierarchy tried for each seed. This is stronger than a
 single aggregate number because it rules out the explanation that one lucky seed
 created the learned-hierarchy advantage.
 

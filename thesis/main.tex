@@ -177,7 +177,7 @@ experimental artifacts are grouped thematically in the appendices: supplementary
 regression experiments, supplementary vision experiments, and teacher/hierarchy
 control details.
 
-\chapter{Background and Related Work}
+\chapter{Background and related work}
 \label{chap:literature-review}
 
 This chapter reviews the literature behind the methodological choices in this
@@ -187,7 +187,7 @@ The goal is not to provide an exhaustive survey, but to identify which ideas are
 mature, which assumptions are often hidden, and where the open methodological
 gaps remain.
 
-\section{Curriculum Learning Families}
+\section{Curriculum learning families}
 \label{sec:curriculum-continuation}
 
 The idea that models benefit from learning tasks in order of increasing
@@ -196,7 +196,7 @@ that neural networks with limited capacity could learn complex structures if
 they started with simpler tasks. These early constraints are not just shortcuts,
 but important for guiding the learning process.
 
-\subsection{Foundational Curriculum Learning}
+\subsection{Foundational curriculum learning}
 \citet{bengio2009curriculum} formalized curriculum learning as an
 easy-to-hard training strategy and connected it to continuation methods: early
 objectives or data distributions can be viewed as smoother versions of the final
@@ -251,7 +251,7 @@ teacher-derived difficulty score is only a proxy, so the result is best treated
 as motivation rather than a complete explanation of curriculum effects in deep
 networks.
 
-\subsection{Objective-Space Curriculum and Continuation}
+\subsection{Objective-space curriculum and continuation}
 Objective-space curricula change the definition of the task or loss rather than
 only changing which examples are emphasized. They are closely linked to
 numerical continuation methods \citep{allgower1990numerical}, which are used in
@@ -260,7 +260,7 @@ version of the objective function, making it easier to find a good solution. As
 training continues, the smoothing is gradually reduced, allowing the model to
 tackle more complex aspects of the problem.
 
-\subsection{Gaussian Continuation}
+\subsection{Gaussian continuation}
 One practical way to apply continuation methods in deep learning is through
 Gaussian continuation. \citet{mobahi2015theoretical} analyze
 this idea theoretically by embedding a non-convex objective into a family of
@@ -290,7 +290,7 @@ main design choice in the Gaussian-continuation experiments in this thesis, but
 it also highlights a limitation: the smoothing schedule is itself a crucial
 algorithmic choice, not a detail that can be ignored.
 
-\subsection{Curriculum Regularization in Scientific Machine Learning}
+\subsection{Curriculum regularization in scientific machine learning}
 A related example of objective-based curriculum appears in physics-informed
 neural networks. \citet{krishnapriyan2021characterizing} showed that standard PINNs can fail on convection, reaction, and
 reaction-diffusion problems even when the neural network architecture is
@@ -327,7 +327,7 @@ chosen manually and do not adapt to the model's progress \citep{wang2021survey}.
 This limitation motivates the development of automated, data-driven scheduling
 methods, which is a central focus of this thesis.
 
-\subsection{Output-Space Curriculum}
+\subsection{Output-space curriculum}
 Output-space curricula change the supervision target while keeping the input
 examples fixed. This makes them different from instance ordering and from
 loss-landscape diagnostics: the learner is first asked to solve a coarser label
@@ -341,7 +341,7 @@ reference for the image-classification experiments in this thesis, especially
 for analyzing how hierarchy quality, hierarchy depth, and curriculum length
 influence the result.
 
-\subsection{Curriculum Learning versus Continual Learning}
+\subsection{Curriculum learning versus continual learning}
 
 The abbreviation ``CL'' is overloaded: it can mean \emph{curriculum learning}
 or \emph{continual learning}. To avoid this ambiguity, this thesis writes both
@@ -370,14 +370,14 @@ the final target objective is fixed in advance, but continual-learning language
 is useful for discussing when the model should preserve or abandon information
 from earlier stages.
 
-\section{Multi-Task and Multi-Objective Optimization}
+\section{Multi-task and multi-objective optimization}
 
 To move between objectives of different difficulty, the problem can be set up
 as a multi-task learning scenario. Here, the total loss is a weighted sum of
 several component losses. However, curriculum learning and multi-task learning
 have different goals when it comes to how these tasks interact.
 
-\subsection{Gradient Conflict and Balancing}
+\subsection{Gradient conflict and balancing}
 In multi-task learning, the usual goal is to balance progress across all tasks.
 One common problem is negative transfer, where learning one task can interfere
 with another. Methods like GradNorm \citep{chen2018gradnorm} adjust task weights
@@ -389,7 +389,7 @@ Surveys such as \citet{chen2024gradient} discuss these approaches and note that,
 while they help balance tasks, they do not support the sequential learning
 needed for curricula.
 
-\subsection{Why Balancing Is Not Enough for Curricula}
+\subsection{Why balancing is not enough for curricula}
 Gradient-balancing methods are designed mainly for simultaneous multi-task
 learning: they try to prevent one task from dominating or interfering with the
 others \citep{chen2018gradnorm,yu2020gradient,sener2018multi,chen2024gradient}.
@@ -406,7 +406,7 @@ thesis, the relevant design problem is therefore not only gradient balancing but
 controlled transition: when should the optimizer be pushed away from the easy
 objective and toward the final target?
 
-\subsection{Pareto Continual Learning}
+\subsection{Pareto continual learning}
 Bridging this gap, \citet{lai2025pareto} introduced Pareto Continual
 	Learning, which reformulates the stability-plasticity trade-off (retaining old
 knowledge vs. learning new tasks) as a Multi-Objective Optimization (MOO)
@@ -421,7 +421,7 @@ distinction is vital for this thesis: we do not merely want to balance the
 gradients of the smoothed and sharp losses; we want to schedule them to
 maximize final validation performance.
 
-\section{Meta-Learning and Continual Adaptation}
+\section{Meta-learning and continual adaptation}
 \label{sec:meta-learning-continual}
 
 Meta-learning, or ``learning to learn,'' provides the algorithmic engine to
@@ -429,7 +429,7 @@ automate the curriculum schedule. While early meta-learning focused on learning
 initializations (e.g., MAML \citep{finn2017model}) for few-shot adaptation, the
 field has expanded into Meta-Continual Learning (MCL).
 
-\subsection{Taxonomy of Meta-Continual Frameworks}
+\subsection{Taxonomy of meta-continual frameworks}
 A recent survey by \citet{son2024meta} provides a rigorous taxonomy for the
 intersection of these fields. They distinguish between \textit{Continual
 	Meta-Learning} (learning to learn from a sequence of tasks) and
@@ -438,7 +438,7 @@ forgetting problem). Our research aligns with their definition of
 Continual Bi-Level Learning, where the optimization process itself is
 updated online.
 
-\subsection{Meta-Optimization of Learning Dynamics}
+\subsection{Meta-optimization of learning dynamics}
 In this framework, the learning process is split into two loops. The inner loop
 updates model parameters $\theta$ on the current curriculum stage via standard
 gradient descent. The outer loop updates meta-parameters $\phi$ (in our case,
@@ -454,7 +454,7 @@ Furthermore, \citet{woo2025meta} extended MCL to Neural Fields
 complex 3D scenes and signals by dynamically modulating the network's capacity,
 a process analogous to the resolution-based curriculum proposed in this thesis.
 
-\subsection{The Stability-Plasticity Dilemma in Curriculum}
+\subsection{The stability-plasticity dilemma in curriculum}
 A unique challenge arises when applying meta-learning to curriculum generation:
 the stability-plasticity dilemma. In standard continual learning, the goal is
 to prevent the forgetting of old tasks (stability) \citep{parisi2019continual}.
@@ -464,9 +464,9 @@ In our curriculum context, the dilemma is inverted: the model must be
 
 \citet{banayeeanzade2025theoretical} provide theoretical insights into overparameterized models in such multi-task setups, suggesting that without explicit regularization, the interplay between model capacity and task similarity determines the success of transfer. Pure meta-learning of loss weights can be unstable; without constraints, a meta-learner might exploit the easy smoothed loss to achieve artificially low training error without ever transitioning to the hard target function. This necessitates the monotonic regularization strategies explored in this thesis.
 
-\section{Dynamic Reweighting and Optimization Diagnostics}
+\section{Dynamic reweighting and optimization diagnostics}
 
-\subsection{Learning to Reweight Examples}
+\subsection{Learning to reweight examples}
 \citet{renLearningReweightExamples2018a} proposed a bilevel procedure
 that reweights training examples according to their short-term effect on a clean
 validation set. Although their work targets noisy labels rather than curriculum
@@ -474,7 +474,7 @@ scheduling, it is directly relevant methodologically: it shows how a validation
 objective can control inner-loop updates without manually defining static
 weights.
 
-\subsection{Sharpness-Aware Minimization and Flatness Probes}
+\subsection{Sharpness-aware minimization and flatness probes}
 \citet{foretSharpnessAwareMinimizationEfficiently2021} linked
 generalization to neighborhood-aware optimization through the
 Sharpness-Aware Minimization (SAM) objective. This thesis does not optimize SAM
@@ -616,7 +616,7 @@ Possible false explanation & Control used & Claim made safer \\
 The direct baseline was weak. & Per-function tuning before curriculum comparison. & Curriculum gains are not baseline artifacts. \\
 Any label-count reduction helps. & Random hierarchies with matched cluster sizes. & Hierarchy structure is separated from coarsening. \\
 The grouping helps regardless of order. & Reverse-order hierarchy control. & Temporal order is separated from class grouping. \\
-Adaptive schedules are automatically better. & Best fixed schedules under the same budget. & Adaptivity must beat a strong manual schedule. \\
+Adaptive schedules are automatically better. & Best fixed schedules under the same budget. & Adaptivity must outperform a strong manual schedule. \\
 One positive setting is enough. & Multiple datasets, capacities, seeds, and diagnostics. & Claims are conditional rather than universal. \\
 \bottomrule
 \end{tabular}
@@ -802,7 +802,7 @@ figures and tables. Supporting exports are cited only when they are converted
 into a thesis figure, table, or compact protocol summary.
 
 
-\chapter{Objective-Space Curriculum for Regression Tasks}
+\chapter{Objective-space curriculum for regression tasks}
 \label{chap:regression-curriculum}
 
 This chapter presents the original empirical track of the thesis: curriculum
@@ -887,13 +887,13 @@ all functions.
 The main fixed-schedule comparison used a factorial design with two methods: a
 \emph{direct hard-target baseline} and a fixed continuation curriculum. In the
 experiment logs this direct baseline is named \texttt{single}, because it trains
-on a single target column: the hardest, least-smoothed version of the function.
+on a single-target column: the hardest, least-smoothed version of the function.
 The design used two budget regimes. The first was an epoch-matched comparison.
 The second is named \texttt{equal\_time} in the logs, but more precisely it is a
-same-time-cap comparison: both methods used the same wall-clock timeout cap and
+time-capped comparison: both methods used the same wall-clock timeout cap and
 epoch scale, while the realized runtimes were recorded separately and were not
 forced to be equal. The matrix covered eight functions and three seeds, for 96
-top-level completed runs. Table~\ref{tab:main-regression-wins} summarizes the
+top-level completed runs. Table~\ref{tab:main-regression-counts} summarizes the
 result in the main text; the full report is given in
 Appendix~\ref{app:curr-vs-single-v1}.
 
@@ -902,20 +902,20 @@ Appendix~\ref{app:curr-vs-single-v1}.
 \small
 \begin{tabular}{lccc}
 \toprule
-Budget regime & Final-loss winners & Runtime winners & Trajectory-AUC winners \\
+Budget regime & Lower final loss & Lower runtime & Lower trajectory AUC \\
 \midrule
 Epoch-matched & curriculum 5 / direct 3 & direct 8 / curriculum 0 & curriculum 3 / direct 5 \\
-Same time cap & curriculum 3 / direct 5 & direct 8 / curriculum 0 & curriculum 3 / direct 5 \\
+Time-capped & curriculum 3 / direct 5 & direct 8 / curriculum 0 & curriculum 3 / direct 5 \\
 \bottomrule
 \end{tabular}
 \caption{Main fixed-continuation benchmark summary. ``Direct'' is the hard-target
-baseline named \texttt{single} in the logs. Each winner count is over eight
-functions, with three seeds per method and regime. The same-time-cap row is the
+baseline named \texttt{single} in the logs. Each count is over eight functions,
+with three seeds per method and regime. The time-capped row is the
 \texttt{equal\_time} log regime; it matches the timeout cap, not the realized
-runtime. Final-loss winners use median hard-validation loss per function.
-Trajectory-AUC winners use median area under the hard-validation-loss curve,
+runtime. Lower-final-loss counts use median hard-validation loss per function.
+Lower-trajectory-AUC counts use median area under the hard-validation-loss curve,
 where lower AUC indicates faster convergence.}
-\label{tab:main-regression-wins}
+\label{tab:main-regression-counts}
 \end{table}
 
 The result is mixed. From here on, \emph{quality} in the fixed-continuation
@@ -926,8 +926,8 @@ hard-validation loss. Because the metric is a loss, positive values mean that
 the curriculum achieved lower final hard-validation loss. Curriculum helped
 quality on selected functions such as
 \texttt{bukin}, \texttt{franke}, and \texttt{levy}, but it did not help on
-\texttt{ackley}, \texttt{eggholder}, or \texttt{peaks}. It also never won on
-runtime. Figure~\ref{fig:main-regression-headline-bars} shows this visually:
+\texttt{ackley}, \texttt{eggholder}, or \texttt{peaks}. It also never achieved
+lower runtime. Figure~\ref{fig:main-regression-headline-bars} shows this visually:
 quality effects change sign across functions, while runtime consistently favors
 direct training. This means that continuation cannot be treated as a default
 replacement for direct hard-target training. Its value is conditional on task
@@ -945,7 +945,7 @@ geometry and must be weighed against extra computation.
 \end{figure}
 
 Table~\ref{tab:main-regression-function-deltas} shows the function-level pattern
-behind the win counts. The loss delta is
+behind the aggregate counts. The loss delta is
 \(\Delta_{\mathrm{loss}}=L_{\mathrm{direct}}-L_{\mathrm{curriculum}}\), computed
 from median hard-validation loss. Positive deltas favor the curriculum because
 the curriculum loss is lower; negative deltas favor direct hard-target training.
@@ -958,7 +958,7 @@ protocol helps some surfaces and hurts others.
 \small
 \begin{tabular}{lrrl}
 \toprule
-Function & \(\Delta_{\mathrm{loss}}\) epoch-matched & \(\Delta_{\mathrm{loss}}\) same time cap & Outcome \\
+Function & \(\Delta_{\mathrm{loss}}\) epoch-matched & \(\Delta_{\mathrm{loss}}\) time-capped & Outcome \\
 \midrule
 \texttt{ackley} & -0.00762 & -0.00286 & direct better \\
 \texttt{bukin} & +0.032 & +0.176 & curriculum better \\
@@ -971,7 +971,7 @@ Function & \(\Delta_{\mathrm{loss}}\) epoch-matched & \(\Delta_{\mathrm{loss}}\)
 \bottomrule
 \end{tabular}
 \caption{Function-level final-loss deltas for the fixed continuation benchmark.
-Each cell is based on three seeds per method. The same-time-cap column is the
+Each cell is based on three seeds per method. The time-capped column is the
 \texttt{equal\_time} log regime and should not be read as equal realized
 runtime. \(\Delta_{\mathrm{loss}}=L_{\mathrm{direct}}-L_{\mathrm{curriculum}}\), so
 positive values favor the curriculum. Values should be compared by sign within a
@@ -982,8 +982,8 @@ different natural scales.}
 
 \section{Runtime and trajectory diagnostics}
 
-The function-level deltas explain which method won, but they do not show the
-cost of obtaining those wins. Figure~\ref{fig:main-regression-quality-runtime}
+The function-level deltas explain which method had lower final loss, but they do
+not show the runtime cost of those differences. Figure~\ref{fig:main-regression-quality-runtime}
 places quality gain and runtime cost in the same view. A point above zero on the
 vertical axis means that curriculum improved hard-validation loss; a point to
 the right of one on the horizontal axis means that curriculum was slower. The
@@ -1143,7 +1143,7 @@ Appendix~\ref{app:meta-weighting-eggholder-u1}.
 \small
 \begin{tabular}{lrrrr}
 \toprule
-Losses & Runs & Mean improvement & Median improvement & Win rate \\
+Losses & Runs & Mean improvement & Median improvement & Fraction improved \\
 \midrule
 2 & 72 & -1259.72 & -1089.23 & 0.458 \\
 3 & 72 &  -324.00 &  -549.98 & 0.472 \\
@@ -1152,8 +1152,9 @@ Losses & Runs & Mean improvement & Median improvement & Win rate \\
 \end{tabular}
 \caption{Adaptive meta-weighting on \texttt{eggholder}. Improvements are final
 validation-loss differences relative to the matched one-loss hard-target
-baseline; positive values would mean that adaptive weighting wins. Each row uses
-72 runs. All mean improvements are negative.}
+baseline; positive values mean that adaptive weighting improves over the
+baseline. Fraction improved is the share of runs with lower validation loss than
+the matched baseline. Each row uses 72 runs. All mean improvements are negative.}
 \label{tab:main-meta-eggholder-summary}
 \end{table}
 
@@ -1172,8 +1173,8 @@ schedule is not reliably better than simply optimizing the hard target directly.
     \includegraphics[width=0.47\textwidth]{figures/meta_weighting_eggholder_u1_improvement_heatmap.png}\hfill
     \includegraphics[width=0.47\textwidth]{figures/meta_weighting_eggholder_u1_win_rate_vs_baseline.png}
     \caption{Meta-weighting diagnostics on \texttt{eggholder}. The heatmap and
-    win-rate plot show that the method has promising pockets but does not
-    consistently beat the one-loss hard-target baseline.}
+    fraction-improved plot show that the method has promising pockets but does
+    not consistently outperform the one-loss hard-target baseline.}
     \label{fig:main-meta-weighting-summary}
 \end{figure}
 
@@ -1220,7 +1221,7 @@ more structured curriculum may be needed, where intermediate tasks preserve
 semantic information rather than merely removing high-frequency detail.
 
 
-\chapter{Output-Space Hierarchical Curriculum for Vision}
+\chapter{Output-space hierarchical curriculum for vision}
 \label{chap:vision-curriculum}
 
 This chapter presents the second empirical track of the thesis. It moves from
@@ -1400,7 +1401,7 @@ baseline in percentage points, reported as mean $\pm$ standard deviation.}
 The best fixed schedules tested here remain stronger than this particular
 adaptive plateau rule. This should not be read as a general argument that fixed
 schedules are intrinsically better, just as a well-tuned non-adaptive optimizer
-can beat a generic adaptive one in a specific benchmark. The adaptive method is
+can outperform a generic adaptive one in a specific benchmark. The adaptive method is
 still useful as a schedule-selection heuristic, but it often allocates too many
 epochs to coarse levels, especially for larger CNNs whose best fixed schedule is
 very short. The first-level-only adaptive variant is consistently better than
@@ -1571,13 +1572,13 @@ Best random hierarchy & 36.34 & +1.05\,$\pm$\,0.80 & -- & -- \\
 \caption{CIFAR-100 \texttt{cnn\_w0.5} hierarchy ablation over three training
 seeds. Accuracy gains are percentage points and are reported as mean $\pm$
 standard deviation. Random hierarchy mean averages three matched random
-hierarchies within each training seed. The learned hierarchy beats matched
+hierarchies within each training seed. The learned hierarchy outperforms matched
 random hierarchies, but both curriculum variants pay a trajectory-AUC cost.}
 \label{tab:main-hierarchy-ablation}
 \end{table}
 
 The learned hierarchy outperforms the random mean for all three training seeds
-and also beats the best-of-three random diagnostic. This supports the claim that
+and also exceeds the best-of-three random diagnostic. This supports the claim that
 hierarchy quality matters: the curriculum gain is not explained only by reducing
 the number of labels early in training.
 
@@ -1586,13 +1587,14 @@ the same result. The learned hierarchy is above its matching random controls in
 each training seed. Figure~\ref{fig:main-hierarchy-ablation-curves} then shows
 that the advantage is not an early-speed advantage. Both learned and random
 hierarchies lag the fine-label baseline during the coarse stage, and the learned
-hierarchy wins by recovering to a better peak after the fine-label phase begins.
+hierarchy obtains its advantage by recovering to a better peak after the
+fine-label phase begins.
 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.82\textwidth]{figures/hierarchy_ablation_gain_comparison.png}
-    \caption{Seed-level random-hierarchy ablation. The learned hierarchy beats
-    matched random hierarchies, showing that the class grouping matters beyond
+    \caption{Seed-level random-hierarchy ablation. The learned hierarchy
+    outperforms matched random hierarchies, showing that the class grouping matters beyond
     the amount of label coarsening.}
     \label{fig:main-hierarchy-ablation-gain}
 \end{figure}
@@ -1713,7 +1715,7 @@ averages the three random hierarchy seeds within each training seed.}
 The result separates two effects. First, coarse-label warm-up is useful even
 when the grouping is random: random hierarchies improve peak accuracy by almost
 one percentage point. Second, structure still matters: self-derived,
-teacher-derived, and reverse-order teacher curricula all beat the random mean.
+teacher-derived, and reverse-order teacher curricula all exceed the random mean.
 The teacher hierarchy does not clearly improve peak accuracy over the
 self-derived hierarchy, which suggests that hierarchy source quality is not the
 only bottleneck. Schedule length, marginalised coarse-label loss, and weak
@@ -1820,10 +1822,10 @@ provides a compact overview.
 \toprule
 Question & Evidence & Current verdict \\
 \midrule
-\hyperref[rq:continuation]{RQ1}: objective-space continuation & Regression benchmark & Conditional. Continuation helps selected functions but does not reliably beat tuned direct training and never wins runtime. \\
+\hyperref[rq:continuation]{RQ1}: objective-space continuation & Regression benchmark & Conditional. Continuation helps selected functions but does not reliably outperform tuned direct training and never achieves lower runtime. \\
 \hyperref[rq:vision]{RQ2}: capacity sensitivity & Vision model-size study & Supported. Gains are strongest for weaker CNNs and smaller ResNets, and they shrink for larger models. \\
 \hyperref[rq:adaptive]{RQ3}: fixed vs adaptive schedules & Vision policy follow-up & The best fixed schedules tested here outperform the current adaptive plateau rule on CIFAR-100, but adaptive scheduling remains useful as a tuning-reduction idea. \\
-\hyperref[rq:vision]{RQ2}: hierarchy controls & Random and teacher controls & Supported with caveats. Learned and teacher hierarchies beat random coarsening, but random coarsening itself improves over baseline. \\
+\hyperref[rq:vision]{RQ2}: hierarchy controls & Random and teacher controls & Supported with caveats. Learned and teacher hierarchies outperform random coarsening, but random coarsening itself improves over baseline. \\
 \hyperref[rq:diagnostics]{RQ4}: trajectory AUC & Regression and vision trajectories & Mostly negative for curriculum. Peak quality can improve while early-trajectory performance drops. \\
 \hyperref[rq:vision]{RQ2}: dataset transfer & CIFAR-10, Fashion-MNIST, Tiny ImageNet & Mixed. CIFAR-100 is strongest, CIFAR-10 gains are smaller, Fashion-MNIST is mostly neutral/negative, Tiny ImageNet is setup-sensitive. \\
 \hyperref[rq:diagnostics]{RQ4}: roughness probes & Sharpness/Hessian diagnostics & Inconclusive. Some models support the flatter-minima interpretation, but the pattern is not consistent. \\
@@ -1934,8 +1936,8 @@ bundling itself can remain useful even in the wrong order.
 
 The transfer teacher was much stronger than the weak CNN student, and its
 hierarchy was qualitatively more plausible than the earlier weak self-derived
-hierarchies. Nevertheless, the teacher-derived curriculum did not clearly beat
-the self-derived hierarchy in peak accuracy. This is a useful negative result.
+hierarchies. Nevertheless, the teacher-derived curriculum did not clearly
+outperform the self-derived hierarchy in peak accuracy. This is a useful negative result.
 It suggests that hierarchy quality is not the only limiting factor.
 
 Several bottlenecks remain. First, the schedule is fixed: the teacher hierarchy
@@ -1980,8 +1982,8 @@ strong under a narrow comparison and weaken once these controls are added.
 
 \paragraph{\hyperref[rq:continuation]{RQ1}: objective-space continuation.}
 Gaussian-inspired continuation helps on selected regression functions, but it is
-not reliable after strong baseline tuning. The direct hard-target baseline wins
-on several functions and always wins on runtime. The answer is therefore
+not reliable after strong baseline tuning. The direct hard-target baseline has
+lower loss on several functions and consistently lower runtime. The answer is therefore
 conditional rather than affirmative.
 
 \paragraph{\hyperref[rq:vision]{RQ2}: output-space hierarchy.}
@@ -2073,16 +2075,16 @@ curricula provide measurable benefits.
 The results support a nuanced conclusion. Curriculum effects are reproducible in
 selected settings, but they are not universal. In the regression track,
 objective-space continuation improves selected functions but does not reliably
-beat tuned single-target training. In the vision track, hierarchical curricula
+outperform tuned single-target training. In the vision track, hierarchical curricula
 are more promising, especially for lower-capacity CIFAR-100 models, but the gain
 still depends on dataset structure, hierarchy quality, and schedule length.
 Where these conditions are not met, curriculum often increases training cost
 without improving the overall trajectory.
 
 The numerical anchors make this conclusion concrete. In the fixed regression
-benchmark, continuation won final loss on 5 of 8 functions under the equal-epoch
-budget and 3 of 8 under the equal-time budget, while direct hard-target training
-won runtime on all 8 functions in both regimes. In the CIFAR-100 model-size
+benchmark, continuation achieved lower final loss on 5 of 8 functions under the
+epoch-matched budget and 3 of 8 under the time-capped budget, while direct
+hard-target training had lower runtime on all 8 functions in both regimes. In the CIFAR-100 model-size
 screening, the largest gains were in the small-CNN regime, for example +3.18 pp
 for \texttt{cnn\_w0.5} and +3.62 pp for \texttt{cnn\_w1}. In the hierarchy-control
 suite, random coarsening itself improved the weak-CNN baseline by about +0.97 pp,
@@ -2128,7 +2130,7 @@ schedule parameterizations that learn only a few monotone transition points.
 
 The third priority is hierarchy optimization. The teacher probe shows that a
 stronger representation can produce a plausible hierarchy, but the resulting
-student curriculum does not clearly beat the self-derived hierarchy. Future work
+student curriculum does not clearly outperform the self-derived hierarchy. Future work
 should therefore optimize the hierarchy and schedule together. For example, one
 could compare embedding hierarchies from multiple teachers, use validation loss
 to select hierarchy depth, or learn soft class groupings instead of hard
