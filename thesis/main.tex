@@ -629,11 +629,16 @@ control used to reduce that risk.}
 \section{Regression track}
 
 The regression experiments use synthetic benchmark functions with non-convex
-structure. The named functions follow the standard benchmark definitions indexed by
-Surjanovic and Bingham (SFU). For each function, the training data contain the original target and a
-sequence of Gaussian-smoothed targets \citep{surjanovic2013benchmark}. The main baseline is direct training on
-the final, least-smoothed target. Curriculum variants train on a sequence or a
-weighted mixture of smoothed objectives before emphasizing the final target.
+structure. Ackley, Bukin N. 6, Eggholder, and L\'evy follow the SFU Virtual
+Library definitions indexed by Surjanovic and Bingham
+\citep{surjanovic2013benchmark}. The additional surfaces use the Franke
+interpolation benchmark \citep{franke1979critical}, the MATLAB \texttt{peaks}
+surface \citep{mathworksPeaks}, and two two-dimensional analogues inspired by
+Friedman's synthetic regression functions \citep{friedman1991mars}. For each
+function, the training data contain the original target and a sequence of
+Gaussian-smoothed targets. The main baseline is direct training on the final,
+least-smoothed target. Curriculum variants train on a sequence or a weighted
+mixture of smoothed objectives before emphasizing the final target.
 
 Formally, for a target function \(f\), the continuation levels approximate
 \(f_{\sigma_j} = G_{\sigma_j} * f\), where \(G_{\sigma_j}\) is a Gaussian kernel
