@@ -44,9 +44,10 @@ secondary metrics only as diagnostics.
 \label{app:roughness-followup-curriculum}
 
 The follow-up repeated important CIFAR-100 configurations over seeds 42, 43, and
-44 and added adaptive plateau schedules. The adaptive rule advanced from a
-coarse stage when fine-label validation accuracy stopped improving after a
-minimum stage length or when a maximum stage length was reached. Two hierarchy
+44 and added adaptive plateau schedules under a 200-epoch budget. The adaptive
+rule advanced from a coarse stage when fine-label validation accuracy stopped
+improving after a minimum stage length or when a maximum stage length was
+reached. Two hierarchy
 coverage variants were used. The all-level variant could visit every generated
 non-singleton hierarchy level. The first-level variant used only the first
 non-singleton level, meaning the broadest usable coarse partition after removing

@@ -1372,7 +1372,9 @@ training budget on a task that is deliberately not the final metric.
 \section{Fixed schedules, adaptive schedules, and hierarchy depth}
 
 The follow-up repeated important CIFAR-100 cases over seeds 42, 43, and 44 and
-added adaptive plateau schedules. The adaptive variants differ in hierarchy
+added adaptive plateau schedules. Unlike the earlier 100-epoch model-size
+screening, this follow-up used a 200-epoch budget for the fixed/adaptive policy
+comparison and roughness diagnostics. The adaptive variants differ in hierarchy
 coverage. ``Adaptive all levels'' may traverse every generated non-singleton
 coarse level before fine-label training. ``Adaptive first level'' uses only the
 first generated non-singleton level---the broadest usable partition after
@@ -1412,7 +1414,7 @@ using all generated levels where both were tested, showing that hierarchy depth
 is a first-order design choice rather than a harmless implementation detail.
 
 Figure~\ref{fig:main-adaptive-stage-allocation} explains the failure mode. The
-adaptive policy often spends a large fraction of the 100-epoch budget in coarse
+adaptive policy often spends a large fraction of the 200-epoch budget in coarse
 stages. This can be useful for the weakest models, but it is too conservative
 for configurations whose best fixed curriculum is short. The adaptive rule
 therefore reduces manual schedule selection only partially: it still encodes a
@@ -1422,9 +1424,9 @@ fine-label objective takes over.
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/deep_adaptive_stage_allocation.png}
-    \caption{Adaptive curriculum stage allocation. The plateau rule can spend
-    many epochs in coarse stages, which explains why it often underperforms the
-    best short fixed schedules.}
+    \caption{Adaptive curriculum stage allocation within the 200-epoch
+    follow-up budget. The plateau rule can spend many epochs in coarse stages,
+    which explains why it often underperforms the best short fixed schedules.}
     \label{fig:main-adaptive-stage-allocation}
 \end{figure}
 
