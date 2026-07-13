@@ -197,12 +197,11 @@ def regression_figures() -> None:
     ax.legend(loc="lower right")
     save("regression_hardval_auc_delta.png")
 
-    paired = pd.read_csv(REPORT / "regression_seed_paired_deltas.csv")
-    heat = paired.pivot_table(
+    heat = delta.pivot_table(
         index="function",
         columns="regime",
-        values="delta_single_minus_curriculum",
-        aggfunc="median",
+        values="delta_quality_single_minus_curriculum",
+        aggfunc="first",
     ).loc[functions, ["equal_epochs", "equal_time"]]
     vals = heat.to_numpy()
     nonzero = np.abs(vals[np.isfinite(vals) & (vals != 0)])
@@ -215,7 +214,7 @@ def regression_figures() -> None:
         norm=SymLogNorm(linthresh=linthresh, vmin=-vmax, vmax=vmax),
         aspect="auto",
     )
-    fig.colorbar(im, ax=ax, label="Median paired loss delta (direct − curriculum)")
+    fig.colorbar(im, ax=ax, label="Loss delta: direct − curriculum")
     ax.set_xticks(range(len(heat.columns)))
     ax.set_xticklabels(
         [REGIME_LABELS.get(c, c.replace("_", " ")) for c in heat.columns], rotation=20, ha="right"
@@ -225,7 +224,7 @@ def regression_figures() -> None:
     for i in range(vals.shape[0]):
         for j in range(vals.shape[1]):
             ax.text(j, i, f"{vals[i, j]:.2g}", ha="center", va="center", fontsize=7)
-    ax.set_title("Seed-paired regression deltas")
+    ax.set_title("Function-level final-loss deltas")
     save("deep_regression_seed_delta_heatmap.png")
 
 

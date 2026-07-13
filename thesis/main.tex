@@ -1021,9 +1021,10 @@ baseline learns the hard target much earlier.
     \label{fig:main-regression-auc-delta}
 \end{figure}
 
-The seed-paired view in Figure~\ref{fig:main-regression-seed-heatmap} shows why
-this result should not be reduced to a single average. The sign of the effect is
-structured by the target function. Smooth or moderately rugged surfaces such as
+The heatmap in Figure~\ref{fig:main-regression-seed-heatmap} shows the same
+function-level delta statistic as Table~\ref{tab:main-regression-function-deltas}
+in a compact visual form. The sign of the effect is structured by the target
+function. Smooth or moderately rugged surfaces such as
 \texttt{franke} and \texttt{levy} are more favorable to continuation, while
 \texttt{ackley}, \texttt{eggholder}, and \texttt{peaks} remain difficult for the
 fixed schedule. This supports a task-geometry interpretation: smoothing helps
@@ -1034,9 +1035,11 @@ region for the original target.
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.74\textwidth]{figures/deep_regression_seed_delta_heatmap.png}
-    \caption{Seed-paired hard-validation loss deltas by function and budget
-    regime. Positive values favor curriculum. The sign pattern is function
-    dependent rather than uniformly positive.}
+    \caption{Function-level hard-validation loss deltas by function and budget
+    regime, using the same direct-minus-curriculum statistic as
+    Table~\ref{tab:main-regression-function-deltas}. Positive values favor
+    curriculum. The sign pattern is function dependent rather than uniformly
+    positive.}
     \label{fig:main-regression-seed-heatmap}
 \end{figure}
 
