@@ -48,7 +48,12 @@ control. Its early performance can be relatively high because 23--24 clusters on
 CIFAR-100 correspond to small class bundles, which are much closer to the final
 100-way task than a 3--5 cluster level.
 
+% Keep this compact detail section out of the table of contents so the ToC
+% does not spill onto an otherwise almost empty page.
+\begingroup
+\renewcommand{\addcontentsline}[3]{}
 \section{Per-seed hierarchy-control results}
+\endgroup
 
 \begin{table}[h]
 \centering
