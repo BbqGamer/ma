@@ -1,0 +1,90 @@
+\chapter{Run Provenance and Filtering Notes}
+\label{app:run-provenance}
+
+This appendix records which local experiment exports support the main tables and
+figures. It is included to make the reported numbers auditable without expanding
+the main chapters into run logs. The thesis uses the filtered analysis files
+listed below, not every historical smoke test or exploratory run present in the
+tracking databases.
+
+\begin{table}[htbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\urlstyle{tt}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.16\textwidth}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X@{}}
+\toprule
+Evidence block & Source files or tracking runs & Filtering and use in the thesis \\
+\midrule
+Fixed regression continuation & MLflow experiment
+\texttt{benchmark-curriculum-vs-single-v1}; curated report
+\url{reports/benchmarks/curr_vs_single_20260315_175826/}; derived CSVs in
+\url{reports/thesis_deep_dive/}. & Main regression tables and
+Figures~\ref{fig:main-regression-headline-bars}--\ref{fig:main-regression-seed-heatmap}.
+The reported benchmark uses the curated top-level comparison: 8 functions
+$\times$ 2 budget regimes $\times$ 2 methods $\times$ 3 seeds = 96 runs. Extra
+MLflow entries from nested curriculum stages and earlier duplicate attempts are
+not counted as independent benchmark cells. \\
+\addlinespace
+Regression v3 ratio sweeps & MLflow experiments named
+\texttt{sweep-*-v3-ratio}; export
+\url{reports/thesis_deep_dive/mlflow_v3_sweeps_export.csv}. & Used only as
+stricter background and diagnostic evidence for the regression track. These
+sweeps do not replace the controlled fixed-continuation comparison. \\
+\addlinespace
+Meta-weighting on \texttt{eggholder} & MLflow experiment
+\texttt{meta-weighting-v1-eggholder}; analysis folder
+\url{reports/analysis/meta-weighting-v1-eggholder__meta_weighting_eggholder_u1_20260504_221357/}.
+& Main meta-weighting table uses the completed one-step unroll benchmark: 288
+runs, split into 72 runs for each loss-count setting. The one-loss setting is
+the matched hard-target baseline. \\
+\addlinespace
+CIFAR-100 model-size screening & W\&B project
+\emph{curriculum-learning-ma / coarse-to-fine-curriculum}; export
+\url{coarse-to-fine-curriculum/wandb_export_cifar100_model_size_updated/};
+analysis \url{coarse-to-fine-curriculum/wandb_analysis_cifar100_model_size_updated/}.
+& Table~\ref{tab:main-cifar100-capacity} and
+Figures~\ref{fig:main-cifar100-gain-vs-params}--\ref{fig:main-cifar100-auc-gain}.
+This is a screening study: most rows are single-seed, while repeated same-label
+\texttt{cnn\_w0.5} runs from restarts are averaged in the exported analysis. \\
+\addlinespace
+Vision fixed/adaptive and dataset follow-up & W\&B analysis folders
+\url{coarse-to-fine-curriculum/wandb_analysis_adaptive_followup/} and
+\url{coarse-to-fine-curriculum/wandb_analysis_roughness_followup_updated/}. &
+Used for the multi-seed policy and dataset-control results. The main CIFAR-100
+comparisons use seeds 42, 43, and 44 where available. Tiny ImageNet ResNet-18 is
+a single-seed pilot and is described as setup-sensitive rather than conclusive.
+\\
+\addlinespace
+Random-hierarchy ablation & W\&B export
+\url{coarse-to-fine-curriculum/wandb_export_hierarchy_ablation/}; analysis
+\url{coarse-to-fine-curriculum/wandb_analysis_hierarchy_ablation/}. &
+Table~\ref{tab:main-hierarchy-ablation} and
+Figures~\ref{fig:main-hierarchy-ablation-gain}--\ref{fig:main-hierarchy-ablation-curves}.
+The ablation uses three training seeds and three matched random hierarchy seeds
+per training seed. \\
+\addlinespace
+Teacher and reverse-order controls & W\&B analysis
+\url{coarse-to-fine-curriculum/wandb_analysis_teacher_lr001_20260704b/}. &
+Table~\ref{tab:main-teacher-hierarchy-controls} and
+Figures~\ref{fig:main-teacher-control-gains}--\ref{fig:main-teacher-control-seeds}.
+The final main-text teacher rows use the corrected lr=0.01 teacher rerun. Self
+and random controls come from the matched control suite; random means average
+three random hierarchies per seed. \\
+\addlinespace
+Polished thesis figures & Script \url{scripts/polish_thesis_figures.py}. &
+Regenerates selected figures from the CSV exports above. It does not query
+external services or create new experiments; it only improves readability and
+label consistency of figures included in the thesis. \\
+\bottomrule
+\end{tabularx}
+\caption{Provenance of the main empirical evidence. Paths are repository-local.}
+\label{tab:run-provenance}
+\end{table}
+
+Two reporting conventions follow from this provenance. First, screening studies
+are marked as such and are interpreted mainly as design-space maps. Second,
+figures or tables based on best test accuracy are treated as optimization
+trajectory diagnostics. They show whether a method reached a better checkpoint in
+an existing run; they do not constitute a strict validation-selected deployment
+protocol.

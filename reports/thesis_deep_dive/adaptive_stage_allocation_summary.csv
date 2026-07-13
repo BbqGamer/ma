@@ -1,0 +1,15 @@
+dataset,model_label,policy_label,coarse_epochs,fine_tune_epochs,n
+cifar10,cifar_resnet8,adaptive_all,6.0,94.0,3
+cifar10,cnn_w0.5,adaptive_all,6.333333333333333,93.66666666666667,3
+cifar10,cnn_w1,adaptive_all,9.333333333333334,90.66666666666667,3
+cifar100,cifar_resnet8,adaptive_all,56.0,144.0,3
+cifar100,cifar_resnet8,adaptive_max1,11.666666666666666,188.33333333333334,3
+cifar100,cnn_w0.5,adaptive_all,29.333333333333332,170.66666666666666,3
+cifar100,cnn_w0.5,adaptive_max1,14.666666666666666,185.33333333333334,3
+cifar100,cnn_w1,adaptive_all,22.333333333333332,177.66666666666666,3
+cifar100,cnn_w1,adaptive_max1,11.333333333333334,188.66666666666666,3
+cifar100,cnn_w2,adaptive_all,20.0,180.0,3
+cifar100,cnn_w4,adaptive_all,23.0,177.0,3
+fashion-mnist,cnn_w0.5,adaptive_all,7.333333333333333,92.66666666666667,3
+fashion-mnist,cnn_w1,adaptive_all,8.0,92.0,3
+fashion-mnist,cnn_w4,adaptive_all,5.333333333333333,94.66666666666667,3

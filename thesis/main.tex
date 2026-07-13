@@ -795,8 +795,11 @@ or repeated runs.
 
 Detailed run reports are kept in the appendices so that the thesis preserves the
 connection between the claims and the executed experiments without turning the
-main chapters into run logs. Supporting exports are cited only when they are
-converted into a thesis figure, table, or compact protocol summary.
+main chapters into run logs. Appendix~\ref{app:run-provenance}, especially
+Table~\ref{tab:run-provenance}, lists the local MLflow experiments, W\&B
+exports, analysis folders, and filtering rules behind the main empirical
+figures and tables. Supporting exports are cited only when they are converted
+into a thesis figure, table, or compact protocol summary.
 
 
 \chapter{Objective-Space Curriculum for Regression Tasks}
@@ -885,9 +888,13 @@ The main fixed-schedule comparison used a factorial design with two methods: a
 \emph{direct hard-target baseline} and a fixed continuation curriculum. In the
 experiment logs this direct baseline is named \texttt{single}, because it trains
 on a single target column: the hardest, least-smoothed version of the function.
-The design used two budget regimes (equal epochs and equal time), eight
-functions, and three seeds, for 96 completed runs. Table~\ref{tab:main-regression-wins}
-summarizes the result in the main text; the full report is given in
+The design used two budget regimes. The first was an epoch-matched comparison.
+The second is named \texttt{equal\_time} in the logs, but more precisely it is a
+same-time-cap comparison: both methods used the same wall-clock timeout cap and
+epoch scale, while the realized runtimes were recorded separately and were not
+forced to be equal. The matrix covered eight functions and three seeds, for 96
+top-level completed runs. Table~\ref{tab:main-regression-wins} summarizes the
+result in the main text; the full report is given in
 Appendix~\ref{app:curr-vs-single-v1}.
 
 \begin{table}[htbp]
@@ -897,14 +904,17 @@ Appendix~\ref{app:curr-vs-single-v1}.
 \toprule
 Budget regime & Final-loss winners & Runtime winners & Trajectory-AUC winners \\
 \midrule
-Equal epochs & curriculum 5 / direct 3 & direct 8 / curriculum 0 & curriculum 3 / direct 5 \\
-Equal time & curriculum 3 / direct 5 & direct 8 / curriculum 0 & curriculum 3 / direct 5 \\
+Epoch-matched & curriculum 5 / direct 3 & direct 8 / curriculum 0 & curriculum 3 / direct 5 \\
+Same time cap & curriculum 3 / direct 5 & direct 8 / curriculum 0 & curriculum 3 / direct 5 \\
 \bottomrule
 \end{tabular}
 \caption{Main fixed-continuation benchmark summary. ``Direct'' is the hard-target
-baseline named \texttt{single} in the logs. Final-loss winners use median
-hard-validation loss per function. Trajectory-AUC winners use median area under
-the hard-validation-loss curve, where lower AUC indicates faster convergence.}
+baseline named \texttt{single} in the logs. Each winner count is over eight
+functions, with three seeds per method and regime. The same-time-cap row is the
+\texttt{equal\_time} log regime; it matches the timeout cap, not the realized
+runtime. Final-loss winners use median hard-validation loss per function.
+Trajectory-AUC winners use median area under the hard-validation-loss curve,
+where lower AUC indicates faster convergence.}
 \label{tab:main-regression-wins}
 \end{table}
 
@@ -948,7 +958,7 @@ protocol helps some surfaces and hurts others.
 \small
 \begin{tabular}{lrrl}
 \toprule
-Function & \(\Delta_{\mathrm{loss}}\) equal epochs & \(\Delta_{\mathrm{loss}}\) equal time & Outcome \\
+Function & \(\Delta_{\mathrm{loss}}\) epoch-matched & \(\Delta_{\mathrm{loss}}\) same time cap & Outcome \\
 \midrule
 \texttt{ackley} & -0.00762 & -0.00286 & direct better \\
 \texttt{bukin} & +0.032 & +0.176 & curriculum better \\
@@ -961,7 +971,9 @@ Function & \(\Delta_{\mathrm{loss}}\) equal epochs & \(\Delta_{\mathrm{loss}}\) 
 \bottomrule
 \end{tabular}
 \caption{Function-level final-loss deltas for the fixed continuation benchmark.
-\(\Delta_{\mathrm{loss}}=L_{\mathrm{direct}}-L_{\mathrm{curriculum}}\), so
+Each cell is based on three seeds per method. The same-time-cap column is the
+\texttt{equal\_time} log regime and should not be read as equal realized
+runtime. \(\Delta_{\mathrm{loss}}=L_{\mathrm{direct}}-L_{\mathrm{curriculum}}\), so
 positive values favor the curriculum. Values should be compared by sign within a
 function, not by magnitude across functions, because the target functions have
 different natural scales.}
@@ -1129,18 +1141,19 @@ Appendix~\ref{app:meta-weighting-eggholder-u1}.
 \begin{table}[htbp]
 \centering
 \small
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Losses & Mean improvement vs. one-loss baseline & Median improvement & Win rate \\
+Losses & Runs & Mean improvement & Median improvement & Win rate \\
 \midrule
-2 & -1259.72 & -1089.23 & 0.458 \\
-3 &  -324.00 &  -549.98 & 0.472 \\
-5 & -1777.98 & -1305.75 & 0.417 \\
+2 & 72 & -1259.72 & -1089.23 & 0.458 \\
+3 & 72 &  -324.00 &  -549.98 & 0.472 \\
+5 & 72 & -1777.98 & -1305.75 & 0.417 \\
 \bottomrule
 \end{tabular}
-\caption{Adaptive meta-weighting on \texttt{eggholder}. Positive improvement
-would mean that adaptive weighting beats the direct hard-target baseline; all
-mean improvements are negative.}
+\caption{Adaptive meta-weighting on \texttt{eggholder}. Improvements are final
+validation-loss differences relative to the matched one-loss hard-target
+baseline; positive values would mean that adaptive weighting wins. Each row uses
+72 runs. All mean improvements are negative.}
 \label{tab:main-meta-eggholder-summary}
 \end{table}
 
@@ -1273,23 +1286,26 @@ keeps the core pattern in the main text.
 
 \begin{table}[htbp]
 \centering
-\small
-\begin{tabular}{lrrrr}
+\scriptsize
+\begin{tabular}{lrlrrrr}
 \toprule
-Model & Parameters & Baseline & Best curriculum & Gain \\
+Model & Parameters & Best length & Runs & Baseline & Best curriculum & Gain \\
 \midrule
-\texttt{cnn\_w0.5} & 65,636 & 34.78 & 37.96 & +3.18 \\
-\texttt{cifar\_resnet8} & 83,892 & 52.68 & 54.49 & +1.81 \\
-\texttt{cnn\_w1} & 158,820 & 38.49 & 42.11 & +3.62 \\
-\texttt{cnn\_w2} & 428,132 & 42.56 & 44.72 & +2.16 \\
-\texttt{cifar\_resnet56} & 861,620 & 63.14 & 62.33 & -0.81 \\
-\texttt{cnn\_w4} & 1,298,532 & 44.63 & 44.47 & -0.16 \\
-\texttt{resnet18} & 11,220,132 & 68.76 & 69.37 & +0.61 \\
+\texttt{cnn\_w0.5} & 65,636 & 20 & 5 & 34.78 & 37.96 & +3.18 \\
+\texttt{cifar\_resnet8} & 83,892 & 20 & 1 & 52.68 & 54.49 & +1.81 \\
+\texttt{cnn\_w1} & 158,820 & 10 & 1 & 38.49 & 42.11 & +3.62 \\
+\texttt{cnn\_w2} & 428,132 & 5 & 1 & 42.56 & 44.72 & +2.16 \\
+\texttt{cifar\_resnet56} & 861,620 & 20 & 1 & 63.14 & 62.33 & -0.81 \\
+\texttt{cnn\_w4} & 1,298,532 & 5 & 1 & 44.63 & 44.47 & -0.16 \\
+\texttt{resnet18} & 11,220,132 & 20 & 1 & 68.76 & 69.37 & +0.61 \\
 \bottomrule
 \end{tabular}
-\caption{Selected CIFAR-100 model-size results, sorted by trainable parameter
-count. Accuracies are percentages and gains are percentage points relative to the
-matching baseline.}
+\caption{Selected CIFAR-100 model-size screening results, sorted by trainable
+parameter count. Best length is the selected coarse-stage length in epochs.
+``Runs'' is the number of completed W\&B runs contributing to the selected
+curriculum row; the repeated \texttt{cnn\_w0.5} runs are restart repeats, not
+independent random seeds. Accuracies are percentages and gains are percentage
+points relative to the matching baseline.}
 \label{tab:main-cifar100-capacity}
 \end{table}
 
@@ -1363,20 +1379,21 @@ summarizes the central comparison from Appendix~\ref{app:roughness-followup-curr
 
 \begin{table}[htbp]
 \centering
-\small
-\begin{tabular}{lrrr}
+\scriptsize
+\begin{tabular}{llll}
 \toprule
 Model & Fixed best & Adaptive all levels & Adaptive first level \\
 \midrule
-\texttt{cnn\_w0.5} & \textbf{37.58 (+2.54)} & 37.19 (+1.75) & 37.22 (+2.24) \\
-\texttt{cnn\_w1} & \textbf{40.60 (+1.98)} & 39.35 (+0.79) & 40.23 (+1.59) \\
-\texttt{cnn\_w2} & \textbf{44.15 (+1.72)} & 39.80 (-2.70) & -- \\
-\texttt{cnn\_w4} & \textbf{44.85 (+0.34)} & 39.71 (-4.55) & -- \\
-\texttt{cifar\_resnet8} & \textbf{56.60 (+1.33)} & 55.77 (+0.09) & 55.64 (+0.72) \\
+\texttt{cnn\_w0.5} & \textbf{37.58 (+2.54\,$\pm$\,0.40)} & 37.19 (+1.75\,$\pm$\,0.85) & 37.22 (+2.24\,$\pm$\,0.93) \\
+\texttt{cnn\_w1} & \textbf{40.60 (+1.98\,$\pm$\,0.28)} & 39.35 (+0.79\,$\pm$\,0.37) & 40.23 (+1.59\,$\pm$\,0.81) \\
+\texttt{cnn\_w2} & \textbf{44.15 (+1.72\,$\pm$\,0.56)} & 39.80 (-2.70\,$\pm$\,1.20) & -- \\
+\texttt{cnn\_w4} & \textbf{44.85 (+0.34\,$\pm$\,0.21)} & 39.71 (-4.55\,$\pm$\,0.78) & -- \\
+\texttt{cifar\_resnet8} & \textbf{56.60 (+1.33\,$\pm$\,1.01)} & 55.77 (+0.09\,$\pm$\,0.95) & 55.64 (+0.72\,$\pm$\,0.56) \\
 \bottomrule
 \end{tabular}
-\caption{CIFAR-100 policy comparison. Entries are mean best test accuracy over
-available seeds, with gain over the matching baseline in parentheses.}
+\caption{CIFAR-100 policy comparison over seeds 42, 43, and 44. Entries are
+mean best test accuracy in percent. Parentheses give gain over the matching
+baseline in percentage points, reported as mean $\pm$ standard deviation.}
 \label{tab:main-cifar100-policy}
 \end{table}
 
@@ -1546,14 +1563,16 @@ early label coarsening fixed while destroying the learned class grouping.
 \toprule
 Condition & Best accuracy & Accuracy gain & AUC & AUC gain \\
 \midrule
-Learned hierarchy & 37.53 & +2.24 & 32.75 & -3.83 \\
-Random hierarchy mean & 35.81 & +0.53 & 31.75 & -5.39 \\
-Best random hierarchy & 36.34 & +1.05 & -- & -- \\
+Learned hierarchy & 37.53 & +2.24\,$\pm$\,0.50 & 32.75 & -3.83 \\
+Random hierarchy mean & 35.81 & +0.53\,$\pm$\,0.83 & 31.75 & -5.39 \\
+Best random hierarchy & 36.34 & +1.05\,$\pm$\,0.80 & -- & -- \\
 \bottomrule
 \end{tabular}
-\caption{CIFAR-100 \texttt{cnn\_w0.5} hierarchy ablation. The learned hierarchy
-beats matched random hierarchies, but both curriculum variants pay a trajectory
-AUC cost.}
+\caption{CIFAR-100 \texttt{cnn\_w0.5} hierarchy ablation over three training
+seeds. Accuracy gains are percentage points and are reported as mean $\pm$
+standard deviation. Random hierarchy mean averages three matched random
+hierarchies within each training seed. The learned hierarchy beats matched
+random hierarchies, but both curriculum variants pay a trajectory-AUC cost.}
 \label{tab:main-hierarchy-ablation}
 \end{table}
 
@@ -1665,29 +1684,29 @@ were used to build a teacher-derived class hierarchy for the weak
 This experiment also sharpened the interpretation of the controls. The random
 hierarchy keeps the tree shape and cluster sizes but permutes the class
 assignments, so it tests whether arbitrary label bundling is useful. The
-anti-curriculum is better described as a reverse-order hierarchy control: it
-uses the same teacher hierarchy, but visits the non-singleton levels from finer
-to coarser before the final fine-label phase. It is not training on wrong labels
-and it is not a pure negative control, because the class bundles are still
-structured.
+reverse-order teacher condition uses the same teacher hierarchy, but visits the
+non-singleton levels from finer to coarser before the final fine-label phase. It
+is not training on wrong labels and it is not a pure negative control, because
+the class bundles are still structured.
 
 \begin{table}[htbp]
 \centering
-\small
-\begin{tabular}{lrrl}
+\scriptsize
+\begin{tabular}{llll}
 \toprule
 Method & Best accuracy & Gain & Interpretation \\
 \midrule
-Baseline & 35.38 & -- & fine-label reference \\
-Random hierarchy mean & 36.35 & +0.97 & arbitrary coarsening helps \\
-Teacher anti-curriculum & 37.43 & +2.06 & reverse order, structured groups \\
-Self/regular hierarchy & 37.76 & +2.39 & learned from weak student \\
-Teacher hierarchy & 37.69 & +2.31 & learned from transfer teacher \\
+Baseline & 35.38\,$\pm$\,0.15 & -- & fine-label reference \\
+Random hierarchy mean & 36.35\,$\pm$\,0.16 & +0.97\,$\pm$\,0.11 & arbitrary coarsening helps \\
+Reverse-order teacher & 37.43\,$\pm$\,0.59 & +2.06\,$\pm$\,0.45 & reverse order, structured groups \\
+Self/regular hierarchy & 37.76\,$\pm$\,0.72 & +2.39\,$\pm$\,0.78 & learned from weak student \\
+Teacher hierarchy & 37.69\,$\pm$\,0.32 & +2.31\,$\pm$\,0.37 & learned from transfer teacher \\
 \bottomrule
 \end{tabular}
 \caption{Teacher-hierarchy control summary for CIFAR-100 \texttt{cnn\_w0.5}.
-Values are mean best test accuracies over seeds 42, 43, and 44. Gains are
-percentage points relative to the matching baseline.}
+Values are mean $\pm$ standard deviation over seeds 42, 43, and 44. Gains are
+percentage points relative to the matching baseline. Random hierarchy mean first
+averages the three random hierarchy seeds within each training seed.}
 \label{tab:main-teacher-hierarchy-controls}
 \end{table}
 
@@ -1704,10 +1723,10 @@ Figure~\ref{fig:main-teacher-control-gains} shows the same comparison as gains
 over baseline. The ordering is useful: random coarsening is positive, structured
 reverse-order training is stronger, and the two easy-to-hard structured
 hierarchies are strongest on average. Figure~\ref{fig:main-teacher-control-curves}
-shows why the anti-curriculum should be interpreted carefully. It starts with a
-fine-grained non-singleton level, so its early 100-way accuracy can be higher
-than the ordinary easy-to-hard curriculum even though it is not using singleton
-fine labels yet.
+shows why the reverse-order teacher condition should be interpreted carefully.
+It starts with a fine-grained non-singleton level, so its early 100-way accuracy
+can be higher than the ordinary easy-to-hard curriculum even though it is not
+using singleton fine labels yet.
 
 \begin{figure}[htbp]
     \centering
@@ -2149,6 +2168,7 @@ established with careful controls, not assumed by default.
 
 \cleardoublepage\appendix%
 \newpage
+\input{appendices/run_provenance}
 \input{appendices/supplementary_regression_experiments}
 \input{appendices/supplementary_vision_experiments}
 \input{appendices/teacher_hierarchy_details}

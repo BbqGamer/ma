@@ -1,0 +1,7 @@
+function,fourier,mlp,siren
+ackley_n20000_k3_ss5_seed42_train,20,0,0
+bukin_n20000_k3_ss8_seed42_train,20,0,0
+eggholder_n20000_k3_ss7_seed42_train,1,19,0
+franke_n20000_k3_ss4_seed42_train,0,0,20
+levy_n20000_k3_ss6_seed42_train,16,4,0
+peaks_n20000_k3_ss5_seed42_train,3,0,17

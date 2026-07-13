@@ -75,10 +75,13 @@ and v3 are not read as a single interchangeable experiment.}
 \label{app:curr-vs-single-v1}
 
 The fixed benchmark compared direct hard-target training with a fixed
-continuation schedule under two budgets: equal epochs and equal wall-clock time.
-It used eight functions and three random seeds for each method/budget
-combination. The main text reports function-level loss differences and the
-quality/runtime trade-off. The essential protocol constraints were:
+continuation schedule under two budgets: an epoch-matched regime and a
+same-time-cap regime. The latter is named \texttt{equal\_time} in the logs, but
+it means that both methods used the same timeout cap; realized runtimes were
+measured and could differ substantially. The benchmark used eight functions and
+three random seeds for each method/budget combination. The main text reports
+function-level loss differences and the quality/runtime trade-off. The essential
+protocol constraints were:
 
 \begin{itemize}
     \item same train/test data and hard-validation metric per function,
