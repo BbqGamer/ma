@@ -237,7 +237,7 @@ because some are intrinsically noisy or ambiguous. This distinction is useful
 for this thesis because it clarifies why curriculum learning and hard-example
 mining are not the same strategy.
 
-The practical contribution of Weinshall et al. is therefore to replace the
+The practical contribution of Weinshall et al.\ is therefore to replace the
 unobservable oracle ordering with a proxy. They estimate example difficulty with
 a separate pretrained teacher model and use that ranking to drive an
 easy-to-hard schedule. Their CNN experiments show the strongest gains in early
@@ -856,7 +856,7 @@ three smoothing levels, and an explicit parameter-to-training-samples
 constraint. These details are kept in Appendix~\ref{app:sweep-pack-v3-setup},
 and Table~\ref{tab:app-regression-version-summary} summarizes how the v1, v2,
 and v3 regression experiments differ. The stricter setting checks whether
-earlier conclusions were artifacts of small data or overlarge models.
+earlier conclusions were artifacts of small data or oversized models.
 
 \section{Baseline tuning protocol}
 
@@ -908,7 +908,13 @@ the hard-validation-loss curve, where lower AUC indicates faster convergence.}
 \label{tab:main-regression-wins}
 \end{table}
 
-The result is mixed. Curriculum helped quality on selected functions such as
+The result is mixed. From here on, \emph{quality} in the fixed-continuation
+comparison is reported as a quality delta,
+\(\Delta_{\mathrm{quality}}=L_{\mathrm{single}}-L_{\mathrm{curriculum}}\): the
+direct \texttt{single} hard-validation loss minus the curriculum
+hard-validation loss. Because the metric is a loss, positive values mean that
+the curriculum achieved lower final hard-validation loss. Curriculum helped
+quality on selected functions such as
 \texttt{bukin}, \texttt{franke}, and \texttt{levy}, but it did not help on
 \texttt{ackley}, \texttt{eggholder}, or \texttt{peaks}. It also never won on
 runtime. Figure~\ref{fig:main-regression-headline-bars} shows this visually:
