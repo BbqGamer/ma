@@ -1,7 +1,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% LateX class for Bachelor's & Master's Thesis %%
 %% Copyleft by Dawid Weiss & Marta Szachniuk    %%
-%% Faculty of Computing and Telecommunication   %%
+%% Faculty of Computing and Telecommunications  %%
 %% Poznan University of Technology, 2020        %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -122,7 +122,7 @@ WYDZIA{\L} INFORMATYKI I TELEKOMUNIKACJI\\
 Instytut Informatyki
 \else
   \includegraphics[width=\textwidth]{wit/sygnet-pp-eng.eps} \\
-FACULTY OF COMPUTING AND TELECOMMUNICATION\\
+FACULTY OF COMPUTING AND TELECOMMUNICATIONS\\
 Institute of Computing Science
 \fi\end{center}}
 
@@ -175,7 +175,7 @@ Supervisor\\\@ppsupervisor
 Instytut Informatyki, Wydzia{\l} Informatyki i Telekomunikacji\\%
 Politechnika Pozna\'nska%
 \else%
-Poznan University of Technology\\Faculty of Computing and Telecommunication\\Institute of Computing Science
+Poznan University of Technology\\Faculty of Computing and Telecommunications\\Institute of Computing Science
 \fi
 
 \medskip\noindent%
