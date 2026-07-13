@@ -53,17 +53,18 @@ points relative to the matching baseline.
 \small
 \begin{tabular}{lrrrr}
 \hline
-Condition & Best acc. & Best gain & Final acc. & AUC gain \\
+Condition & Best acc. & Best gain & Final acc. & Trajectory-AUC gain \\
 \hline
 Baseline & 35.29 & -- & 32.01 & -- \\
-Learned hierarchy & 37.53 & +2.24 & 32.75 & -3.83 \\
-Random hierarchy mean & 35.81 & +0.53 & 31.75 & -5.39 \\
+Learned hierarchy & 37.53 & +2.24 & 32.75 & -3.85 \\
+Random hierarchy mean & 35.81 & +0.53 & 31.75 & -5.40 \\
 Best random hierarchy & 36.34 & +1.05 & -- & -- \\
 \hline
 \end{tabular}
 \caption{CIFAR-100 \texttt{cnn\_w0.5} hierarchy ablation. The random mean first
 averages the three random hierarchies within each training seed and then
-averages across seeds. AUC is computed over the test-accuracy trajectory.}
+averages across seeds. Final accuracy is final-epoch test accuracy; trajectory
+AUC is computed separately over the test-accuracy trajectory.}
 \label{tab:hier-ablation-aggregate}
 \end{table}
 
@@ -136,7 +137,7 @@ as nine independent training seeds.
 
 The trajectory confirms the interpretation from the previous appendices. The
 curriculum is not a faster way to train this model: the learned-hierarchy AUC is
-3.83 percentage points below baseline, and the random-hierarchy AUC is 5.39
+3.85 percentage points below baseline, and the random-hierarchy AUC is 5.40
 points below baseline. The benefit is instead a higher peak after the fine-label
 phase begins. The learned hierarchy provides a better warm-up than random
 coarsening, while the random hierarchy mostly adds delay.

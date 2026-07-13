@@ -1565,18 +1565,20 @@ early label coarsening fixed while destroying the learned class grouping.
 \small
 \begin{tabular}{lrrrr}
 \toprule
-Condition & Best accuracy & Accuracy gain & AUC & AUC gain \\
+Condition & Best accuracy & Accuracy gain & Final accuracy & Trajectory-AUC gain \\
 \midrule
-Learned hierarchy & 37.53 & +2.24\,$\pm$\,0.50 & 32.75 & -3.83 \\
-Random hierarchy mean & 35.81 & +0.53\,$\pm$\,0.83 & 31.75 & -5.39 \\
+Learned hierarchy & 37.53 & +2.24\,$\pm$\,0.50 & 32.75 & -3.85 \\
+Random hierarchy mean & 35.81 & +0.53\,$\pm$\,0.83 & 31.75 & -5.40 \\
 Best random hierarchy & 36.34 & +1.05\,$\pm$\,0.80 & -- & -- \\
 \bottomrule
 \end{tabular}
 \caption{CIFAR-100 \texttt{cnn\_w0.5} hierarchy ablation over three training
 seeds. Accuracy gains are percentage points and are reported as mean $\pm$
 standard deviation. Random hierarchy mean averages three matched random
-hierarchies within each training seed. The learned hierarchy outperforms matched
-random hierarchies, but both curriculum variants pay a trajectory-AUC cost.}
+hierarchies within each training seed. Final accuracy is the final-epoch test
+accuracy, while trajectory-AUC gain is computed separately against the matching
+baseline trajectory. The learned hierarchy outperforms matched random
+hierarchies, but both curriculum variants pay a trajectory-AUC cost.}
 \label{tab:main-hierarchy-ablation}
 \end{table}
 
